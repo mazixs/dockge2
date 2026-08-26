@@ -1,8 +1,9 @@
 import { AgentSocketHandler } from "../agent-socket-handler";
 import { DockgeServer } from "../dockge-server";
-import { callbackError, callbackResult, checkLogin, DockgeSocket, ValidationError } from "../util-server";
+import { callbackError, callbackResult, checkLogin, DockgeSocket, doubleCheckPassword, ValidationError } from "../util-server";
 import { Stack } from "../stack";
 import { ContainerInstanceStatus } from "../../common/compose-status";
+import type { StackFileConfig } from "../../common/types/stack";
 import { AgentSocket } from "../../common/agent-socket";
 
 export class DockerSocketHandler extends AgentSocketHandler {
@@ -251,6 +252,237 @@ export class DockerSocketHandler extends AgentSocketHandler {
             }
         });
 
+        // Which compose, env and secret files a stack uses
+        agentSocket.on("getStackFiles", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                const inventory = await stack.loadFileConfig();
+
+                callbackResult({
+                    ok: true,
+                    inventory,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("setStackFiles", async (stackName : unknown, config : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                const stored = await stack.setFileConfig(parseStackFileConfig(config));
+
+                callbackResult({
+                    ok: true,
+                    config: stored,
+                    msg: "Saved",
+                    msgi18n: true,
+                }, callback);
+
+                server.sendStackList();
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("saveEnvFile", async (stackName : unknown, fileName : unknown, content : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(fileName) !== "string") {
+                    throw new ValidationError("File name must be a string");
+                }
+                if (typeof(content) !== "string") {
+                    throw new ValidationError("Content must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                await stack.writeEnvFile(fileName, content);
+
+                callbackResult({
+                    ok: true,
+                    msg: "Saved",
+                    msgi18n: true,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Secret metadata is safe to list, the content never travels with it
+        agentSocket.on("listSecrets", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+
+                callbackResult({
+                    ok: true,
+                    secretFiles: await stack.listSecretFiles(),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Revealing, writing and deleting a secret is a separate authorised action
+        agentSocket.on("revealSecret", async (stackName : unknown, fileName : unknown, currentPassword : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(fileName) !== "string") {
+                    throw new ValidationError("File name must be a string");
+                }
+
+                await doubleCheckPassword(socket, currentPassword);
+
+                const stack = await Stack.getStack(server, stackName);
+
+                callbackResult({
+                    ok: true,
+                    content: await stack.readSecretFile(fileName),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("saveSecret", async (stackName : unknown, fileName : unknown, content : unknown, currentPassword : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(fileName) !== "string") {
+                    throw new ValidationError("File name must be a string");
+                }
+                if (typeof(content) !== "string") {
+                    throw new ValidationError("Content must be a string");
+                }
+
+                await doubleCheckPassword(socket, currentPassword);
+
+                const stack = await Stack.getStack(server, stackName);
+                await stack.writeSecretFile(fileName, content);
+
+                callbackResult({
+                    ok: true,
+                    msg: "Saved",
+                    msgi18n: true,
+                    secretFiles: await stack.listSecretFiles(),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("deleteSecret", async (stackName : unknown, fileName : unknown, currentPassword : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(fileName) !== "string") {
+                    throw new ValidationError("File name must be a string");
+                }
+
+                await doubleCheckPassword(socket, currentPassword);
+
+                const stack = await Stack.getStack(server, stackName);
+                await stack.deleteSecretFile(fileName);
+
+                callbackResult({
+                    ok: true,
+                    msg: "Deleted",
+                    msgi18n: true,
+                    secretFiles: await stack.listSecretFiles(),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Referencing a secret from the compose file, only on an explicit user action
+        agentSocket.on("bindSecret", async (stackName : unknown, secretName : unknown, fileName : unknown, services : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(secretName) !== "string") {
+                    throw new ValidationError("Secret name must be a string");
+                }
+                if (typeof(fileName) !== "string") {
+                    throw new ValidationError("File name must be a string");
+                }
+                if (!Array.isArray(services) || services.some((item) => typeof(item) !== "string")) {
+                    throw new ValidationError("Services must be a string array");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                await stack.bindSecret(secretName, fileName, services as string[]);
+
+                callbackResult({
+                    ok: true,
+                    msg: "Saved",
+                    msgi18n: true,
+                    secretFiles: await stack.listSecretFiles(),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("unbindSecret", async (stackName : unknown, secretName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(secretName) !== "string") {
+                    throw new ValidationError("Secret name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                await stack.unbindSecret(secretName);
+
+                callbackResult({
+                    ok: true,
+                    msg: "Saved",
+                    msgi18n: true,
+                    secretFiles: await stack.listSecretFiles(),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         // Docker stats
         agentSocket.on("dockerStats", async (callback) => {
             try {
@@ -364,5 +596,67 @@ export class DockerSocketHandler extends AgentSocketHandler {
         return stack;
     }
 
+}
+
+/**
+ * Read a file selection coming from the browser.
+ * Only shapes and types are checked here, the file names themselves are validated
+ * against the stack directory by StackConfig.validate().
+ * @param config Raw value from the socket
+ * @returns Typed selection
+ * @throws {ValidationError} If the shape is wrong
+ */
+function parseStackFileConfig(config : unknown) : StackFileConfig {
+    if (!config || typeof config !== "object") {
+        throw new ValidationError("File config must be an object");
+    }
+
+    const raw = config as Record<string, unknown>;
+
+    if (typeof raw.composeFileName !== "string") {
+        throw new ValidationError("composeFileName must be a string");
+    }
+
+    if (!Array.isArray(raw.envFileNames) || raw.envFileNames.some((item) => typeof item !== "string")) {
+        throw new ValidationError("envFileNames must be a string array");
+    }
+
+    if (raw.activeEnvFileName !== undefined && typeof raw.activeEnvFileName !== "string") {
+        throw new ValidationError("activeEnvFileName must be a string");
+    }
+
+    const bindings = [];
+
+    if (raw.secretBindings !== undefined) {
+        if (!Array.isArray(raw.secretBindings)) {
+            throw new ValidationError("secretBindings must be an array");
+        }
+
+        for (const item of raw.secretBindings) {
+            const binding = item as Record<string, unknown>;
+
+            if (typeof binding?.name !== "string" || typeof binding?.fileName !== "string") {
+                throw new ValidationError("A secret binding needs a name and a file name");
+            }
+
+            const services = binding.services;
+            if (services !== undefined && (!Array.isArray(services) || services.some((service) => typeof service !== "string"))) {
+                throw new ValidationError("Secret binding services must be a string array");
+            }
+
+            bindings.push({
+                name: binding.name,
+                fileName: binding.fileName,
+                services: (services as string[] | undefined) ?? [],
+            });
+        }
+    }
+
+    return {
+        composeFileName: raw.composeFileName,
+        envFileNames: raw.envFileNames as string[],
+        activeEnvFileName: (raw.activeEnvFileName as string | undefined) ?? "",
+        secretBindings: bindings,
+    };
 }
 
