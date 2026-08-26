@@ -202,9 +202,32 @@
                         {{ yamlError }}
                     </div>
 
+                    <!-- Files of the stack directory -->
+                    <div v-if="!isAdd && stack.isManagedByDockge && fileInventory">
+                        <h4 class="mb-3">{{ $t("stackFiles") }}</h4>
+                        <StackFilesEditor
+                            :inventory="fileInventory"
+                            :disabled="processing"
+                            @save="saveFileSelection"
+                        />
+                    </div>
+
+                    <!-- Compose secrets stored as files -->
+                    <div v-if="!isAdd && stack.isManagedByDockge && fileInventory">
+                        <h4 class="mb-3">{{ $t("secrets") }}</h4>
+                        <SecretEditor
+                            :stackName="stack.name"
+                            :endpoint="endpoint"
+                            :secretFiles="fileInventory.secretFiles"
+                            :services="serviceNames"
+                            :disabled="processing"
+                            @updated="onSecretsUpdated"
+                        />
+                    </div>
+
                     <!-- ENV editor -->
                     <div v-if="isEditMode">
-                        <h4 class="mb-3">.env</h4>
+                        <h4 class="mb-3">{{ activeEnvFileName }}</h4>
                         <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
                             <code-mirror
                                 ref="editor"
@@ -280,6 +303,8 @@ import {
 } from "../../../common/util-common";
 import { BModal } from "bootstrap-vue-next";
 import NetworkInput from "../components/NetworkInput.vue";
+import StackFilesEditor from "../components/StackFilesEditor.vue";
+import SecretEditor from "../components/SecretEditor.vue";
 import dotenv from "dotenv";
 import { ref } from "vue";
 
@@ -303,6 +328,8 @@ export default {
         NetworkInput,
         FontAwesomeIcon,
         CodeMirror,
+        StackFilesEditor,
+        SecretEditor,
         BModal,
     },
     beforeRouteUpdate(to, from, next) {
@@ -353,6 +380,7 @@ export default {
             },
             serviceStatusList: {},
             serviceIssues: [],
+            fileInventory: null,
             dockerStats: {},
             isEditMode: false,
             submitted: false,
@@ -413,6 +441,22 @@ export default {
         active() {
             // A partially degraded stack is still up, so stop and restart stay available
             return this.status === RUNNING || this.status === ATTENTION;
+        },
+
+        /**
+         * Env file that the editor shows, taken from the stored selection
+         * @returns {string} File name
+         */
+        activeEnvFileName() {
+            return this.fileInventory?.config?.activeEnvFileName || ".env";
+        },
+
+        /**
+         * Services declared in the compose file, used for secret bindings
+         * @returns {Array<string>} Service names
+         */
+        serviceNames() {
+            return Object.keys(this.jsonConfig?.services ?? {});
         },
 
         /**
@@ -558,6 +602,53 @@ export default {
             }, 5000);
         },
 
+        /**
+         * Load which compose, env and secret files this stack uses
+         * @returns {void}
+         */
+        requestStackFiles() {
+            if (this.isAdd) {
+                return;
+            }
+
+            this.$root.emitAgent(this.endpoint, "getStackFiles", this.stack.name, (res) => {
+                if (res.ok) {
+                    this.fileInventory = res.inventory;
+                }
+            });
+        },
+
+        /**
+         * Store a new file selection and reload the stack, because the shown texts may change
+         * @param {object} config Selection from the editor
+         * @returns {void}
+         */
+        saveFileSelection(config) {
+            this.processing = true;
+
+            this.$root.emitAgent(this.endpoint, "setStackFiles", this.stack.name, config, (res) => {
+                this.processing = false;
+                this.$root.toastRes(res);
+
+                if (res.ok) {
+                    this.requestStackFiles();
+                    this.loadStack();
+                }
+            });
+        },
+
+        /**
+         * Refresh the secret list after an authorised secret action
+         * @param {Array<object>} secretFiles New metadata
+         * @returns {void}
+         */
+        onSecretsUpdated(secretFiles) {
+            if (this.fileInventory) {
+                this.fileInventory.secretFiles = secretFiles;
+            }
+            this.requestStackFiles();
+        },
+
         requestServiceStatus() {
             // Do not request if it is add mode
             if (this.isAdd) {
@@ -624,6 +715,7 @@ export default {
                     this.yamlCodeChange();
                     this.processing = false;
                     this.bindTerminal();
+                    this.requestStackFiles();
                 } else {
                     this.$root.toastRes(res);
                 }
