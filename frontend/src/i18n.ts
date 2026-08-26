@@ -1,8 +1,7 @@
-// @ts-ignore Performance issue when using "vue-i18n", so we use "vue-i18n/dist/vue-i18n.esm-browser.prod.js", but typescript doesn't like that.
-import { createI18n } from "vue-i18n/dist/vue-i18n.esm-browser.prod.js";
+import { createI18n } from "vue-i18n";
 import en from "./lang/en.json";
 
-const languageList = {
+const languageList: Record<string, string> = {
     "bg-BG": "Български",
     "es": "Español",
     "de": "Deutsch",
@@ -37,13 +36,17 @@ const languageList = {
     "mai": "मैथिली",
 };
 
-let messages = {
-    en,
+const messages: Record<string, Record<string, string>> = {
+    en: en as Record<string, string>,
 };
 
 for (let lang in languageList) {
+    const languageName = languageList[lang];
+    if (!languageName) {
+        continue;
+    }
     messages[lang] = {
-        languageName: languageList[lang]
+        languageName,
     };
 }
 

@@ -192,11 +192,9 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new Error(`${terminalName} Terminal not found.`);
                 }
             } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
                 log.debug("terminalResize",
-                        // Added to prevent the lint error when adding the type
-                        // and ts type checker saying type is unknown.
-                        // @ts-ignore
-                        `Error on ${terminalName}: ${e.message}`
+                        `Error on ${terminalName}: ${message}`
                 );
             }
         });

@@ -1,9 +1,8 @@
 import { Socket } from "socket.io";
 import { Terminal } from "./terminal";
-import { randomBytes } from "crypto";
 import { log } from "./log";
 import { ERROR_TYPE_VALIDATION } from "../common/util-common";
-import { R } from "redbean-node";
+import { User } from "./models/user";
 import { verifyPassword } from "./password-hash";
 import fs from "fs";
 import { AgentManager } from "./agent-manager";
@@ -23,20 +22,22 @@ export interface DockgeSocket extends Socket {
 
 // For command line arguments, so they are nullable
 export interface Arguments {
-    sslKey? : string;
-    sslCert? : string;
-    sslKeyPassphrase? : string;
-    port? : number;
-    hostname? : string;
-    dataDir? : string;
-    stacksDir? : string;
-    enableConsole? : boolean;
+    sslKey? : string | undefined;
+    sslCert? : string | undefined;
+    sslKeyPassphrase? : string | undefined;
+    port? : number | undefined;
+    hostname? : string | undefined;
+    dataDir? : string | undefined;
+    stacksDir? : string | undefined;
+    enableConsole? : boolean | undefined;
 }
 
 // Some config values are required
 export interface Config extends Arguments {
     dataDir : string;
     stacksDir : string;
+    port : number;
+    enableConsole : boolean;
 }
 
 export function checkLogin(socket : DockgeSocket) {
@@ -57,16 +58,16 @@ export function callbackError(error : unknown, callback : unknown) {
         return;
     }
 
-    if (error instanceof Error) {
-        callback({
-            ok: false,
-            msg: error.message,
-            msgi18n: true,
-        });
-    } else if (error instanceof ValidationError) {
+    if (error instanceof ValidationError) {
         callback({
             ok: false,
             type: ERROR_TYPE_VALIDATION,
+            msg: error.message,
+            msgi18n: true,
+        });
+    } else if (error instanceof Error) {
+        callback({
+            ok: false,
             msg: error.message,
             msgi18n: true,
         });
@@ -88,9 +89,7 @@ export async function doubleCheckPassword(socket : DockgeSocket, currentPassword
         throw new Error("Wrong data type?");
     }
 
-    let user = await R.findOne("user", " id = ? AND active = 1 ", [
-        socket.userID,
-    ]);
+    const user = await User.findById(socket.userID);
 
     if (!user || !verifyPassword(currentPassword, user.password)) {
         throw new Error("Incorrect current password");

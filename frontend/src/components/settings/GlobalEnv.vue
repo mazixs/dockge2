@@ -32,7 +32,7 @@
 <script>
 import CodeMirror from "vue-codemirror6";
 import { python } from "@codemirror/lang-python"; // good enough for .env key=value highlighting
-import { dracula as editorTheme } from "thememirror";
+import { oneDark as editorTheme } from "@codemirror/theme-one-dark";
 import { lineNumbers, EditorView } from "@codemirror/view";
 import { ref } from "vue";
 

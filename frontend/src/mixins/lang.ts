@@ -1,7 +1,7 @@
-import { currentLocale } from "../i18n";
+import { currentLocale, i18n } from "../i18n";
 import { setPageLocale } from "../util-frontend";
 import { defineComponent } from "vue";
-const langModules = import.meta.glob("../lang/*.json");
+const langModules = import.meta.glob<Record<string, string>>("../lang/*.json");
 
 export default defineComponent({
     data() {
@@ -29,9 +29,13 @@ export default defineComponent({
          * @returns {Promise<void>}
          */
         async changeLang(lang : string) {
-            const message = (await langModules["../lang/" + lang + ".json"]()).default;
-            this.$i18n.setLocaleMessage(lang, message);
-            this.$i18n.locale = lang;
+            const loadMessage = langModules["../lang/" + lang + ".json"];
+            if (!loadMessage) {
+                throw new Error("Unknown language: " + lang);
+            }
+            const message = (await loadMessage()).default ?? {};
+            i18n.global.setLocaleMessage(lang, message);
+            i18n.global.locale.value = lang;
             localStorage.locale = lang;
             setPageLocale();
         }

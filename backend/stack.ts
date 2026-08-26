@@ -12,20 +12,19 @@ import {
     CREATED_STACK,
     EXITED, getCombinedTerminalName,
     getComposeTerminalName, getContainerExecTerminalName,
-    PROGRESS_TERMINAL_ROWS,
     RUNNING, TERMINAL_ROWS,
     UNKNOWN
 } from "../common/util-common";
 import { InteractiveTerminal, Terminal } from "./terminal";
-import childProcessAsync from "promisify-child-process";
+import { spawn } from "./child-process";
 import { Settings } from "./settings";
 
 export class Stack {
 
     name: string;
     protected _status: number = UNKNOWN;
-    protected _composeYAML?: string;
-    protected _composeENV?: string;
+    protected _composeYAML : string | undefined;
+    protected _composeENV : string | undefined;
     protected _configFilePath?: string;
     protected _composeFileName: string = "compose.yaml";
     protected server: DockgeServer;
@@ -93,7 +92,7 @@ export class Stack {
      * Get the status of the stack from `docker compose ps --format json`
      */
     async ps() : Promise<object> {
-        let res = await childProcessAsync.spawn("docker", this.getComposeOptions("ps", "--format", "json"), {
+        let res = await spawn("docker", this.getComposeOptions("ps", "--format", "json"), {
             cwd: this.path,
             encoding: "utf-8",
         });
@@ -120,12 +119,13 @@ export class Stack {
         // Check YAML format
         yaml.parse(this.composeYAML);
 
-        let lines = this.composeENV.split("\n");
+        const lines = this.composeENV.split("\n");
+        const firstLine = lines[0] ?? "";
 
         // Check if the .env is able to pass docker-compose
         // Prevent "setenv: The parameter is incorrect"
         // It only happens when there is one line and it doesn't contain "="
-        if (lines.length === 1 && !lines[0].includes("=") && lines[0].length > 0) {
+        if (lines.length === 1 && !firstLine.includes("=") && firstLine.length > 0) {
             throw new ValidationError("Invalid .env format");
         }
     }
@@ -299,7 +299,7 @@ export class Stack {
         }
 
         // Get status from docker compose ls
-        let res = await childProcessAsync.spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
+        let res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
             encoding: "utf-8",
         });
 
@@ -336,7 +336,7 @@ export class Stack {
     static async getStatusList() : Promise<Map<string, number>> {
         let statusList = new Map<string, number>();
 
-        let res = await childProcessAsync.spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
+        let res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
             encoding: "utf-8",
         });
 
@@ -511,7 +511,7 @@ export class Stack {
         let statusList = new Map<string, Array<object>>();
 
         try {
-            let res = await childProcessAsync.spawn("docker", this.getComposeOptions("ps", "--format", "json"), {
+            let res = await spawn("docker", this.getComposeOptions("ps", "--format", "json"), {
                 cwd: this.path,
                 encoding: "utf-8",
             });

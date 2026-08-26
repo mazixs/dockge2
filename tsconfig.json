@@ -3,11 +3,29 @@
         "module": "ESNext",
         "target": "ESNext",
         "strict": true,
+        "noEmit": true,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "forceConsistentCasingInFileNames": true,
         "moduleResolution": "bundler",
-        "skipLibCheck": true
+        "skipLibCheck": false,
+        "types": [
+            "node",
+            "vite/client"
+        ]
     },
     "include": [
         "backend/**/*",
-        "common/**/*"
+        "common/**/*",
+        "frontend/**/*.d.ts",
+        "frontend/src/**/*.ts",
+        "test/**/*.ts"
+    ],
+    "exclude": [
+        "frontend/**/*.vue",
+        "frontend/components.d.ts",
+        "frontend-dist",
+        "coverage",
+        "node_modules"
     ]
 }

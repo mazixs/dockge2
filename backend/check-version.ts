@@ -42,7 +42,7 @@ class CheckVersion {
                     this.latestVersion = data.slow;
                 }
 
-            } catch (_) {
+            } catch {
                 log.info("update-checker", "Failed to check for new versions");
             }
 

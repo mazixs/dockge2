@@ -10,27 +10,31 @@ on:
     paths-ignore:
       - '*.md'
 
+permissions:
+  contents: read
+
 jobs:
   ci:
+    name: Node.js ${{ matrix.node-version }} on ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, ARM, ARM64]
-        node: [22] # Can be changed
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["22.23.2", "24.19.0"]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Code
-        run: |  # Mainly for Windows
-          git config --global core.autocrlf false
-          git config --global core.eol lf
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
-          node-version: ${{matrix.node}}
+          node-version: ${{ matrix.node-version }}
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --no-audit --no-fund
 
       - name: Lint
         run: npm run lint
@@ -38,7 +42,8 @@ jobs:
       - name: Check Typescript
         run: npm run check-ts
 
+      - name: Test with coverage
+        run: npm run test
+
       - name: Build
         run: npm run build:frontend
-      # more things can be add later like tests etc..
-

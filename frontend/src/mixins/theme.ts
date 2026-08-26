@@ -8,6 +8,9 @@ export default defineComponent({
             statusPageTheme: "light",
             forceStatusPageTheme: false,
             path: "",
+            styleElapsedTime: localStorage.styleElapsedTime || "",
+            userHeartbeatBar: localStorage.userHeartbeatBar || "",
+            heartbeatBarTheme: localStorage.heartbeatBarTheme || "",
         };
     },
 
@@ -70,11 +73,10 @@ export default defineComponent({
          */
         updateThemeColorMeta() {
             if (this.theme === "dark") {
-                document.querySelector("#theme-color").setAttribute("content", "#161B22");
+                document.querySelector("#theme-color")?.setAttribute("content", "#161B22");
             } else {
-                document.querySelector("#theme-color").setAttribute("content", "#5cdd8b");
+                document.querySelector("#theme-color")?.setAttribute("content", "#5cdd8b");
             }
         }
     }
 });
-

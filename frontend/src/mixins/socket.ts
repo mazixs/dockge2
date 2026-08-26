@@ -1,7 +1,7 @@
 import { io } from "socket.io-client";
 import { Socket } from "socket.io-client";
 import { defineComponent } from "vue";
-import jwtDecode from "jwt-decode";
+import { jwtDecode } from "jwt-decode";
 import { Terminal } from "@xterm/xterm";
 import { AgentSocket } from "../../../common/agent-socket";
 
@@ -9,11 +9,45 @@ let socket : Socket;
 
 let terminalMap : Map<string, Terminal> = new Map();
 
+interface StackInfo {
+    [key: string]: unknown;
+}
+
+type StackList = Record<string, StackInfo>;
+
+interface AgentInfo {
+    endpoint: string;
+    name: string;
+    [key: string]: unknown;
+}
+
+interface AgentInstance {
+    stackList: StackList;
+}
+
+interface SocketInfo {
+    version?: string;
+    [key: string]: unknown;
+}
+
+interface SocketResponse {
+    ok?: boolean;
+    tokenRequired?: boolean;
+    token?: string;
+    endpoint?: string;
+    msg?: string;
+    [key: string]: unknown;
+}
+
+interface LoginCallback {
+    (response: SocketResponse): void;
+}
+
 export default defineComponent({
     data() {
         return {
             socketIO: {
-                token: null,
+                token: null as string | null,
                 firstConnect: true,
                 connected: false,
                 connectCount: 0,
@@ -22,29 +56,23 @@ export default defineComponent({
                 showReverseProxyGuide: true,
                 connecting: false,
             },
-            info: {
-
-            },
+            info: {} as SocketInfo,
             remember: (localStorage.remember !== "0"),
             loggedIn: false,
             allowLoginDialog: false,
-            username: null,
+            username: null as string | null,
             composeTemplate: "",
 
-            stackList: {},
+            stackList: {} as StackList,
 
             // All stack list from all agents
-            allAgentStackList: {} as Record<string, object>,
+            allAgentStackList: {} as Record<string, AgentInstance>,
 
             // online / offline / connecting
-            agentStatusList: {
-
-            },
+            agentStatusList: {} as Record<string, string>,
 
             // Agent List
-            agentList: {
-
-            },
+            agentList: {} as Record<string, AgentInfo>,
         };
     },
     computed: {
@@ -57,13 +85,22 @@ export default defineComponent({
             let list : Record<string, object> = {};
 
             for (let stackName in this.stackList) {
-                list[stackName + "_"] = this.stackList[stackName];
+                const stack = this.stackList[stackName];
+                if (stack) {
+                    list[stackName + "_"] = stack;
+                }
             }
 
             for (let endpoint in this.allAgentStackList) {
                 let instance = this.allAgentStackList[endpoint];
+                if (!instance) {
+                    continue;
+                }
                 for (let stackName in instance.stackList) {
-                    list[stackName + "_" + endpoint] = instance.stackList[stackName];
+                    const stack = instance.stackList[stackName];
+                    if (stack) {
+                        list[stackName + "_" + endpoint] = stack;
+                    }
                 }
             }
             return list;
@@ -84,7 +121,6 @@ export default defineComponent({
          * @returns {string}
          */
         frontendVersion() {
-            // eslint-disable-next-line no-undef
             return FRONTEND_VERSION;
         },
 
@@ -93,7 +129,7 @@ export default defineComponent({
          * @returns {boolean}
          */
         isFrontendBackendVersionMatched() {
-            if (!this.info.version) {
+            if (typeof this.info.version !== "string") {
                 return true;
             }
             return this.info.version === this.frontendVersion;
@@ -131,7 +167,7 @@ export default defineComponent({
     methods: {
 
         endpointDisplayFunction(endpoint : string) {
-            for (const [ k, v ] of Object.entries(this.$data.agentList)) {
+            for (const v of Object.values(this.$data.agentList)) {
                 if (endpoint) {
                     if (endpoint === v["endpoint"] && v["name"] !== "") {
                         return v["name"];
@@ -172,7 +208,9 @@ export default defineComponent({
             // Handling events from agents
             let agentSocket = new AgentSocket();
             socket.on("agent", (eventName : unknown, ...args : unknown[]) => {
-                agentSocket.call(eventName, ...args);
+                if (typeof eventName === "string") {
+                    agentSocket.call(eventName, ...args);
+                }
             });
 
             socket.on("connect", () => {
@@ -212,7 +250,7 @@ export default defineComponent({
                 this.socketIO.connected = false;
             });
 
-            socket.on("connect_error", (err) => {
+            socket.on("connect_error", (err: Error) => {
                 console.error(`Failed to connect to the backend. Socket.io connect_error: ${err.message}`);
                 this.socketIO.connectionErrorMsg = `${this.$t("Cannot connect to the socket server.")} [${err}] ${this.$t("reconnecting...")}`;
                 this.socketIO.showReverseProxyGuide = true;
@@ -223,7 +261,7 @@ export default defineComponent({
 
             // Custom Events
 
-            socket.on("info", (info) => {
+            socket.on("info", (info: SocketInfo) => {
                 this.info = info;
             });
 
@@ -240,7 +278,12 @@ export default defineComponent({
                 this.$router.push("/setup");
             });
 
-            agentSocket.on("terminalWrite", (terminalName, data) => {
+            agentSocket.on("terminalWrite", (...args: unknown[]) => {
+                const terminalName = args[0];
+                const data = args[1];
+                if (typeof terminalName !== "string" || (typeof data !== "string" && !(data instanceof Uint8Array))) {
+                    return;
+                }
                 const terminal = terminalMap.get(terminalName);
                 if (!terminal) {
                     //console.error("Terminal not found: " + terminalName);
@@ -249,23 +292,28 @@ export default defineComponent({
                 terminal.write(data);
             });
 
-            agentSocket.on("stackList", (res) => {
-                if (res.ok) {
+            agentSocket.on("stackList", (...args: unknown[]) => {
+                const res = args[0] as SocketResponse | undefined;
+                if (res?.ok && res.stackList && typeof res.stackList === "object") {
+                    const stackList = res.stackList as StackList;
                     if (!res.endpoint) {
-                        this.stackList = res.stackList;
+                        this.stackList = stackList;
                     } else {
                         if (!this.allAgentStackList[res.endpoint]) {
                             this.allAgentStackList[res.endpoint] = {
                                 stackList: {},
                             };
                         }
-                        this.allAgentStackList[res.endpoint].stackList = res.stackList;
+                        const instance = this.allAgentStackList[res.endpoint];
+                        if (instance) {
+                            instance.stackList = stackList;
+                        }
                     }
                 }
             });
 
-            socket.on("stackStatusList", (res) => {
-                if (res.ok) {
+            socket.on("stackStatusList", (res: { ok?: boolean; stackStatusList?: Record<string, unknown> }) => {
+                if (res.ok && res.stackStatusList) {
                     for (let stackName in res.stackStatusList) {
                         const stackObj = this.stackList[stackName];
                         if (stackObj) {
@@ -275,15 +323,16 @@ export default defineComponent({
                 }
             });
 
-            socket.on("agentStatus", (res) => {
+            socket.on("agentStatus", (res: { endpoint: string; status: string; msg?: string }) => {
                 this.agentStatusList[res.endpoint] = res.status;
 
                 if (res.msg) {
-                    this.toastError(res.msg);
+                    const root = this.$root as unknown as { toastError: (message: string) => void };
+                    root.toastError(res.msg);
                 }
             });
 
-            socket.on("agentList", (res) => {
+            socket.on("agentList", (res: { ok?: boolean; agentList: Record<string, AgentInfo> }) => {
                 if (res.ok) {
                     this.agentList = res.agentList;
                 }
@@ -318,7 +367,7 @@ export default defineComponent({
             const jwtToken = this.storage().token;
 
             if (jwtToken && jwtToken !== "autoLogin") {
-                return jwtDecode(jwtToken);
+                return jwtDecode<{ username?: string }>(jwtToken);
             }
             return undefined;
         },
@@ -331,21 +380,24 @@ export default defineComponent({
          * @param {loginCB} callback Callback to call with result
          * @returns {void}
          */
-        login(username : string, password : string, token : string, callback) {
+        login(username : string, password : string, token : string, callback: LoginCallback) {
             this.getSocket().emit("login", {
                 username,
                 password,
                 token,
-            }, (res) => {
+            }, (res: SocketResponse) => {
                 if (res.tokenRequired) {
                     callback(res);
                 }
 
                 if (res.ok) {
+                    if (typeof res.token !== "string") {
+                        return;
+                    }
                     this.storage().token = res.token;
                     this.socketIO.token = res.token;
                     this.loggedIn = true;
-                    this.username = this.getJWTPayload()?.username;
+                    this.username = this.getJWTPayload()?.username ?? null;
 
                     this.afterLogin();
 
@@ -363,14 +415,14 @@ export default defineComponent({
          * @returns {void}
          */
         loginByToken(token : string) {
-            socket.emit("loginByToken", token, (res) => {
+            socket.emit("loginByToken", token, (res: SocketResponse) => {
                 this.allowLoginDialog = true;
 
                 if (! res.ok) {
                     this.logout();
                 } else {
                     this.loggedIn = true;
-                    this.username = this.getJWTPayload()?.username;
+                    this.username = this.getJWTPayload()?.username ?? null;
                     this.afterLogin();
                 }
             });
@@ -402,12 +454,16 @@ export default defineComponent({
 
         bindTerminal(endpoint : string, terminalName : string, terminal : Terminal) {
             // Load terminal, get terminal screen
-            this.emitAgent(endpoint, "terminalJoin", terminalName, (res) => {
+            this.emitAgent(endpoint, "terminalJoin", terminalName, (res: SocketResponse) => {
                 if (res.ok) {
-                    terminal.write(res.buffer);
+                    const buffer = res.buffer;
+                    if (typeof buffer === "string" || buffer instanceof Uint8Array) {
+                        terminal.write(buffer);
+                    }
                     terminalMap.set(terminalName, terminal);
                 } else {
-                    this.toastRes(res);
+                    const root = this.$root as unknown as { toastRes: (response: SocketResponse) => void };
+                    root.toastRes(res);
                 }
             });
         },

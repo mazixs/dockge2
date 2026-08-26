@@ -1,4 +1,4 @@
-import { R } from "redbean-node";
+import { Database } from "./database";
 import { log } from "./log";
 import { LooseObject } from "../common/util-common";
 
@@ -21,7 +21,7 @@ export class Settings {
 
     };
 
-    static cacheCleaner? : NodeJS.Timeout;
+    static cacheCleaner : NodeJS.Timeout | undefined;
 
     /**
      * Retrieve value of setting based on key
@@ -34,10 +34,10 @@ export class Settings {
         if (!Settings.cacheCleaner) {
             Settings.cacheCleaner = setInterval(() => {
                 log.debug("settings", "Cache Cleaner is just started.");
-                for (key in Settings.cacheList) {
-                    if (Date.now() - Settings.cacheList[key].timestamp > 60 * 1000) {
-                        log.debug("settings", "Cache Cleaner deleted: " + key);
-                        delete Settings.cacheList[key];
+                for (const cacheKey in Settings.cacheList) {
+                    if (Date.now() - Settings.cacheList[cacheKey].timestamp > 60 * 1000) {
+                        log.debug("settings", "Cache Cleaner deleted: " + cacheKey);
+                        delete Settings.cacheList[cacheKey];
                     }
                 }
 
@@ -51,9 +51,11 @@ export class Settings {
             return v;
         }
 
-        const value = await R.getCell("SELECT `value` FROM setting WHERE `key` = ? ", [
-            key,
-        ]);
+        const row = await Database.getKnex()("setting")
+            .select("value")
+            .where("key", key)
+            .first();
+        const value = row?.value;
 
         try {
             const v = JSON.parse(value);
@@ -65,7 +67,7 @@ export class Settings {
             };
 
             return v;
-        } catch (e) {
+        } catch {
             return value;
         }
     }
@@ -78,17 +80,21 @@ export class Settings {
      * @returns {Promise<void>}
      */
     static async set(key : string, value : object | string | number | boolean, type : string | null = null) {
+        const db = Database.getKnex();
+        const setting = await db("setting").where("key", key).first();
+        const data = {
+            type,
+            value: JSON.stringify(value),
+        };
 
-        let bean = await R.findOne("setting", " `key` = ? ", [
-            key,
-        ]);
-        if (!bean) {
-            bean = R.dispense("setting");
-            bean.key = key;
+        if (setting) {
+            await db("setting").where("id", setting.id).update(data);
+        } else {
+            await db("setting").insert({
+                key,
+                ...data,
+            });
         }
-        bean.type = type;
-        bean.value = JSON.stringify(value);
-        await R.store(bean);
 
         Settings.deleteCache([ key ]);
     }
@@ -99,16 +105,16 @@ export class Settings {
      * @returns Settings
      */
     static async getSettings(type : string) {
-        const list = await R.getAll("SELECT `key`, `value` FROM setting WHERE `type` = ? ", [
-            type,
-        ]);
+        const list = await Database.getKnex()("setting")
+            .select("key", "value")
+            .where("type", type);
 
         const result : LooseObject = {};
 
         for (const row of list) {
             try {
                 result[row.key] = JSON.parse(row.value);
-            } catch (e) {
+            } catch {
                 result[row.key] = row.value;
             }
         }
@@ -123,24 +129,22 @@ export class Settings {
      * @returns {Promise<void>}
      */
     static async setSettings(type : string, data : LooseObject) {
+        const db = Database.getKnex();
         const keyList = Object.keys(data);
-
-        const promiseList = [];
+        const promiseList : Promise<unknown>[] = [];
 
         for (const key of keyList) {
-            let bean = await R.findOne("setting", " `key` = ? ", [
-                key
-            ]);
+            const setting = await db("setting").where("key", key).first();
+            const value = JSON.stringify(data[key]);
 
-            if (bean == null) {
-                bean = R.dispense("setting");
-                bean.type = type;
-                bean.key = key;
-            }
-
-            if (bean.type === type) {
-                bean.value = JSON.stringify(data[key]);
-                promiseList.push(R.store(bean));
+            if (setting == null) {
+                promiseList.push(db("setting").insert({
+                    key,
+                    type,
+                    value,
+                }));
+            } else if (setting.type === type) {
+                promiseList.push(db("setting").where("id", setting.id).update({ value }));
             }
         }
 
@@ -171,4 +175,3 @@ export class Settings {
         }
     }
 }
-

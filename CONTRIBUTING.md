@@ -41,7 +41,7 @@ I personally do not like something that requires so many configurations before y
 - Settings should be configurable in the frontend. Environment variables are discouraged, unless it is related to startup such as `DOCKGE_STACKS_DIR`
 - Easy to use
 - The web UI styling should be consistent and nice
-- No native build dependency
+- Minimize native build dependencies; SQLite uses `better-sqlite3`
 
 ## Coding Styles
 
@@ -58,7 +58,7 @@ I personally do not like something that requires so many configurations before y
 
 ## Tools
 
-- [`Node.js`](https://nodejs.org/) >= 22.14.0
+- [`Node.js`](https://nodejs.org/) 22.23.2 LTS or 24.19.0 LTS (24.19.0 is recommended)
 - [`git`](https://git-scm.com/)
 - IDE that supports [`ESLint`](https://eslint.org/) and EditorConfig (I am using [`IntelliJ IDEA`](https://www.jetbrains.com/idea/))
 - A SQLite GUI tool (f.ex. [`SQLite Expert Personal`](https://www.sqliteexpert.com/download.html) or [`DBeaver Community`](https://dbeaver.io/download/))
@@ -93,7 +93,7 @@ You can use Vue.js devtools Chrome extension for debugging.
 ### Build the frontend
 
 ```bash
-npm run build
+npm run build:frontend
 ```
 
 ## Database Migration
@@ -107,7 +107,7 @@ Both frontend and backend share the same package.json. However, the frontend dep
 - Frontend dependencies = "devDependencies"
     - Examples: vue, chart.js
 - Backend dependencies = "dependencies"
-    - Examples: socket.io, sqlite3
+    - Examples: socket.io, better-sqlite3
 - Development dependencies = "devDependencies"
     - Examples: eslint, sass
 

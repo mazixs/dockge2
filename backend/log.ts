@@ -86,8 +86,10 @@ class Logger {
                 // split first "_" only
                 const values = pair.split(/_(.*)/s);
 
-                if (values.length >= 2) {
-                    this.hideLog[values[0]].push(values[1]);
+                const moduleName = values[0];
+                const message = values[1];
+                if (moduleName && message) {
+                    this.hideLog[moduleName]?.push(message);
                 }
             }
 
@@ -107,7 +109,7 @@ class Logger {
             return;
         }
 
-        if (this.hideLog[level] && this.hideLog[level].includes(module.toLowerCase())) {
+        if (this.hideLog[level]?.includes(module.toLowerCase())) {
             return;
         }
 

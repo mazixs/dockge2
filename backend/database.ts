@@ -1,15 +1,9 @@
 import { log } from "./log";
-import { R } from "redbean-node";
-import { DockgeServer } from "./dockge-server";
+import type { DockgeServer } from "./dockge-server";
 import fs from "fs";
 import path from "path";
 import knex from "knex";
-
-// @ts-ignore
-import Dialect from "knex/lib/dialects/sqlite3/index.js";
-
-import sqlite from "@louislam/sqlite3";
-import { sleep } from "../common/util-common";
+import type { Knex } from "knex";
 
 interface DBConfig {
     type?: "sqlite" | "mysql";
@@ -27,18 +21,13 @@ export class Database {
      */
     static sqlitePath : string;
 
-    static noReject = true;
-
     static dbConfig: DBConfig = {};
 
     static knexMigrationsPath = "./backend/migrations";
 
     private static server : DockgeServer;
 
-    /**
-     * Use for decode the auth object
-     */
-    jwtSecret? : string;
+    private static knexInstance: Knex | undefined;
 
     static async init(server : DockgeServer) {
         this.server = server;
@@ -52,6 +41,18 @@ export class Database {
     }
 
     /**
+     * Return the active Knex connection.
+     * @throws {Error} If the database is not connected.
+     */
+    static getKnex() : Knex {
+        if (!Database.knexInstance) {
+            throw new Error("Database is not connected");
+        }
+
+        return Database.knexInstance;
+    }
+
+    /**
      * Read the database config
      * @throws {Error} If the config is invalid
      * @typedef {string|undefined} envString
@@ -61,7 +62,7 @@ export class Database {
         const dbConfigString = fs.readFileSync(path.join(this.server.config.dataDir, "db-config.json")).toString("utf-8");
         const dbConfig = JSON.parse(dbConfigString);
 
-        if (typeof dbConfig !== "object") {
+        if (typeof dbConfig !== "object" || dbConfig === null) {
             throw new Error("Invalid db-config.json, it must be an object");
         }
 
@@ -81,13 +82,11 @@ export class Database {
     }
 
     /**
-     * Connect to the database
-     * @param {boolean} autoloadModels Should models be automatically loaded?
-     * @param {boolean} noLog Should logs not be output?
+     * Connect to the database.
+     * @param {boolean} _autoloadModels Kept for compatibility with the old database API.
      * @returns {Promise<void>}
      */
-    static async connect(autoloadModels = true) {
-        const acquireConnectionTimeout = 120 * 1000;
+    static async connect(_autoloadModels = true) {
         let dbConfig : DBConfig;
         try {
             dbConfig = this.readDBConfig();
@@ -100,88 +99,72 @@ export class Database {
             dbConfig = {
                 type: "sqlite",
             };
+            Database.dbConfig = dbConfig;
             this.writeDBConfig(dbConfig);
         }
 
-        let config = {};
-
         log.info("db", `Database Type: ${dbConfig.type}`);
 
-        if (dbConfig.type === "sqlite") {
-            this.sqlitePath = path.join(this.server.config.dataDir, "dockge.db");
-            Dialect.prototype._driver = () => sqlite;
-
-            config = {
-                client: Dialect,
-                connection: {
-                    filename: Database.sqlitePath,
-                    acquireConnectionTimeout: acquireConnectionTimeout,
-                },
-                useNullAsDefault: true,
-                pool: {
-                    min: 1,
-                    max: 1,
-                    idleTimeoutMillis: 120 * 1000,
-                    propagateCreateError: false,
-                    acquireTimeoutMillis: acquireConnectionTimeout,
-                }
-            };
-        } else {
+        if (dbConfig.type !== "sqlite") {
             throw new Error("Unknown Database type: " + dbConfig.type);
         }
 
-        const knexInstance = knex(config);
-
-        // @ts-ignore
-        R.setup(knexInstance);
+        this.sqlitePath = path.join(this.server.config.dataDir, "dockge.db");
+        Database.knexInstance = knex({
+            client: "better-sqlite3",
+            connection: {
+                filename: Database.sqlitePath,
+            },
+            useNullAsDefault: true,
+            pool: {
+                min: 1,
+                max: 1,
+            },
+        });
 
         if (process.env.SQL_LOG === "1") {
-            R.debug(true);
+            Database.knexInstance.on("query", (query) => {
+                log.debug("db", query.sql);
+            });
         }
 
-        // Auto map the model to a bean object
-        R.freeze(true);
-
-        if (autoloadModels) {
-            R.autoloadModels("./backend/models", "ts");
-        }
-
-        if (dbConfig.type === "sqlite") {
-            await this.initSQLite();
-        }
+        await this.initSQLite();
     }
 
     /**
-     @returns {Promise<void>}
+     * Configure SQLite for safe concurrent access and predictable performance.
+     * @returns {Promise<void>}
      */
     static async initSQLite() {
-        await R.exec("PRAGMA foreign_keys = ON");
-        // Change to WAL
-        await R.exec("PRAGMA journal_mode = WAL");
-        await R.exec("PRAGMA cache_size = -12000");
-        await R.exec("PRAGMA auto_vacuum = INCREMENTAL");
+        const db = Database.getKnex();
+
+        await db.raw("PRAGMA foreign_keys = ON");
+        await db.raw("PRAGMA journal_mode = WAL");
+        await db.raw("PRAGMA cache_size = -12000");
+        await db.raw("PRAGMA auto_vacuum = INCREMENTAL");
 
         // This ensures that an operating system crash or power failure will not corrupt the database.
         // FULL synchronous is very safe, but it is also slower.
         // Read more: https://sqlite.org/pragma.html#pragma_synchronous
-        await R.exec("PRAGMA synchronous = NORMAL");
+        await db.raw("PRAGMA synchronous = NORMAL");
 
         log.debug("db", "SQLite config:");
-        log.debug("db", await R.getAll("PRAGMA journal_mode"));
-        log.debug("db", await R.getAll("PRAGMA cache_size"));
-        log.debug("db", "SQLite Version: " + await R.getCell("SELECT sqlite_version()"));
+        log.debug("db", await db.raw("PRAGMA journal_mode"));
+        log.debug("db", await db.raw("PRAGMA cache_size"));
+        const versionResult = await db.raw("SELECT sqlite_version()");
+        log.debug("db", "SQLite Version: " + versionResult[0]?.["sqlite_version()"]);
     }
 
     /**
      * Patch the database
-     * @returns {void}
+     * @returns {Promise<void>}
      */
     static async patch() {
         // Using knex migrations
         // https://knexjs.org/guide/migrations.html
         // https://gist.github.com/NigelEarle/70db130cc040cc2868555b29a0278261
         try {
-            await R.knex.migrate.latest({
+            await Database.getKnex().migrate.latest({
                 directory: Database.knexMigrationsPath,
             });
         } catch (e) {
@@ -199,36 +182,25 @@ export class Database {
     }
 
     /**
-     * Special handle, because tarn.js throw a promise reject that cannot be caught
+     * Close the database connection.
      * @returns {Promise<void>}
      */
     static async close() {
-        const listener = () => {
-            Database.noReject = false;
-        };
-        process.addListener("unhandledRejection", listener);
+        const db = Database.knexInstance;
+        if (!db) {
+            return;
+        }
 
         log.info("db", "Closing the database");
 
         // Flush WAL to main database
         if (Database.dbConfig.type === "sqlite") {
-            await R.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+            await db.raw("PRAGMA wal_checkpoint(TRUNCATE)");
         }
 
-        while (true) {
-            Database.noReject = true;
-            await R.close();
-            await sleep(2000);
-
-            if (Database.noReject) {
-                break;
-            } else {
-                log.info("db", "Waiting to close the database");
-            }
-        }
+        await db.destroy();
+        Database.knexInstance = undefined;
         log.info("db", "Database closed");
-
-        process.removeListener("unhandledRejection", listener);
     }
 
     /**
@@ -251,8 +223,7 @@ export class Database {
      */
     static async shrink() {
         if (Database.dbConfig.type === "sqlite") {
-            await R.exec("VACUUM");
+            await Database.getKnex().raw("VACUUM");
         }
     }
-
 }

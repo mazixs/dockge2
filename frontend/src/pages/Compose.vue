@@ -249,7 +249,7 @@
 import CodeMirror from "vue-codemirror6";
 import { yaml } from "@codemirror/lang-yaml";
 import { python } from "@codemirror/lang-python";
-import { dracula as editorTheme } from "thememirror";
+import { oneDark as editorTheme } from "@codemirror/theme-one-dark";
 import { lineNumbers, EditorView } from "@codemirror/view";
 import { parseDocument, Document } from "yaml";
 
@@ -366,7 +366,7 @@ export default {
                         pathname = "";
                     }
                     display = obj.host + pathname + obj.search;
-                } catch (e) {
+                } catch {
                     display = url;
                 }
 
