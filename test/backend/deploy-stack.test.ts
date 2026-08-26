@@ -1,7 +1,11 @@
 import { strict as assert } from "node:assert";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildDeployCommands, formatCommand, parseDeployArgs } from "../../extra/deploy-stack";
+import { spawn } from "../../backend/child-process";
+import { fileExists } from "../../backend/util-server";
+import { buildDeployCommands, formatCommand, parseDeployArgs, runDeploy } from "../../extra/deploy-stack";
 
 const baseOptions = {
     stack: "my-stack",
@@ -108,4 +112,71 @@ test("arguments are parsed and validated together", () => {
     assert.throws(() => parseDeployArgs([]), /Missing --stack/);
     assert.throws(() => parseDeployArgs([ "--stack=my-stack", "--wipe" ]), /Unknown argument/);
     assert.throws(() => parseDeployArgs([ "--stack=../escape" ]), /Invalid stack name/);
+});
+
+test("a dry run prints the commands and touches nothing", async () => {
+    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-deploy-dry-"));
+    const stackDir = path.join(stacksDir, "dry-stack");
+    await mkdir(stackDir);
+    await writeFile(path.join(stackDir, "compose.yaml"), "services:\n  app:\n    image: alpine\n");
+
+    const lines : string[] = [];
+    const originalLog = console.log;
+    console.log = (...args : unknown[]) => {
+        lines.push(args.join(" "));
+    };
+
+    try {
+        await runDeploy({
+            ...baseOptions,
+            stack: "dry-stack",
+            stacksDir,
+            dryRun: true,
+        });
+    } finally {
+        console.log = originalLog;
+        await rm(stacksDir, { recursive: true,
+            force: true });
+    }
+
+    const printed = lines.join("\n");
+    assert.match(printed, /Dry run for dry-stack/);
+    assert.match(printed, /git -C .*dry-stack status --porcelain/);
+    assert.match(printed, /docker compose -f compose\.yaml config --quiet/);
+    assert.match(printed, /docker compose -f compose\.yaml up -d --pull always --wait --wait-timeout 60/);
+
+    // Nothing was executed, so no git repository appeared
+    assert.equal(await fileExists(path.join(stacksDir, "dry-stack", ".git")), false);
+});
+
+test("a stack directory with local changes stops the deployment", async () => {
+    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-deploy-dirty-"));
+    const stackDir = path.join(stacksDir, "dirty-stack");
+    await mkdir(stackDir);
+    await writeFile(path.join(stackDir, "compose.yaml"), "services:\n  app:\n    image: alpine\n");
+
+    // A real git repository with an uncommitted file
+    await spawn("git", [ "-C", stackDir, "init", "-q" ], {
+        encoding: "utf-8",
+        timeoutMs: 60_000,
+    });
+
+    const originalLog = console.log;
+    console.log = () => undefined;
+
+    try {
+        await assert.rejects(runDeploy({
+            ...baseOptions,
+            stack: "dirty-stack",
+            stacksDir,
+            dryRun: false,
+        }), /local changes/);
+
+        // The deployment stopped before Docker was involved, the file is untouched
+        assert.equal(await readFile(path.join(stackDir, "compose.yaml"), "utf8"), "services:\n  app:\n    image: alpine\n");
+    } finally {
+        console.log = originalLog;
+        await rm(stacksDir, { recursive: true,
+            force: true });
+    }
 });

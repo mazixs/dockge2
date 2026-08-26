@@ -10,6 +10,7 @@ const stacksDir = process.env.DOCKGE_E2E_STACKS_DIR ?? "/tmp/dockge-e2e/stacks";
 
 export default defineConfig({
     testDir: "./test/e2e",
+    globalTeardown: "./test/e2e/global-teardown.ts",
     timeout: 60_000,
     expect: {
         timeout: 15_000,
@@ -38,7 +39,7 @@ export default defineConfig({
             // The seed runs first, so the backend starts with an admin and disabled auth
             command: "cross-env NODE_ENV=development tsx ./test/e2e/seed.ts && cross-env NODE_ENV=development tsx ./backend/index.ts",
             url: "http://localhost:5001",
-            reuseExistingServer: false,
+            reuseExistingServer: !process.env.CI,
             timeout: 120_000,
             env: {
                 DOCKGE_DATA_DIR: dataDir,
@@ -49,7 +50,7 @@ export default defineConfig({
         {
             command: "cross-env NODE_ENV=development vite --config ./frontend/vite.config.ts",
             url: "http://localhost:5000",
-            reuseExistingServer: false,
+            reuseExistingServer: !process.env.CI,
             timeout: 120_000,
         },
     ],

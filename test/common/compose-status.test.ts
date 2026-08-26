@@ -200,11 +200,10 @@ test("stopped, created and unreadable stacks keep their own status", () => {
     // No output at all means Docker could not tell us anything
     assert.equal(resolveComposePsStatus([]).status, UNKNOWN);
     assert.equal(resolveStackStatus([], [ "app" ]).status, UNKNOWN);
-    assert.deepEqual(resolveStackStatus([], [ "app" ]).issues, [
-        { service: "app",
-            name: "",
-            reason: "missingInstance" },
-    ]);
+
+    // A stack without any container is not "every service is missing", it is not started,
+    // so listing each declared service as a problem would be noise
+    assert.deepEqual(resolveStackStatus([], [ "app" ]).issues, []);
 
     // An unreadable state without any running service is not reported as stopped
     const unreadable = resolveComposePsStatus([
@@ -297,4 +296,80 @@ test("compose file marking makes a clean worker exit acceptable", () => {
     const marked = resolveComposePsStatus(entries, [ "app", "init" ], new Set([ "init" ]));
     assert.equal(marked.status, RUNNING);
     assert.deepEqual(marked.issues, []);
+});
+
+test("services that are created but never started are visible", () => {
+    // One service is up, another was created and never started: that is not a healthy stack
+    const partiallyCreated = resolveComposePsStatus([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "running",
+            Status: "Up 2 minutes" },
+        { Service: "db",
+            Name: "demo-db-1",
+            State: "created",
+            Status: "Created" },
+    ]);
+    assert.equal(partiallyCreated.status, ATTENTION);
+    assert.equal(partiallyCreated.issues.some((issue) => issue.reason === "notStarted"), true);
+
+    // A stack where nothing was started yet is simply created, without per-service noise
+    const nothingStarted = resolveComposePsStatus([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "created",
+            Status: "Created" },
+        { Service: "db",
+            Name: "demo-db-1",
+            State: "created",
+            Status: "Created" },
+    ]);
+    assert.equal(nothingStarted.status, CREATED_STACK);
+    assert.deepEqual(nothingStarted.issues, []);
+});
+
+test("a stack of one-shot jobs is running while a job runs", () => {
+    const oneShotRunning = resolveComposePsStatus([
+        { Service: "job",
+            Name: "demo-job-1",
+            State: "running",
+            Status: "Up 10 seconds" },
+    ], [ "job" ], new Set([ "job" ]));
+
+    // The job is alive, so calling the stack exited would be wrong
+    assert.equal(oneShotRunning.status, RUNNING);
+    assert.deepEqual(oneShotRunning.issues, []);
+
+    // Once it finished cleanly the stack is exited again
+    const oneShotDone = resolveComposePsStatus([
+        { Service: "job",
+            Name: "demo-job-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 1 minute ago" },
+    ], [ "job" ], new Set([ "job" ]));
+    assert.equal(oneShotDone.status, EXITED);
+});
+
+test("a declared service is only reported as missing while the stack is up", () => {
+    // Nothing runs: the stack is stopped, not "db is missing"
+    const stopped = resolveComposePsStatus([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 1 hour ago" },
+    ], [ "app", "db" ]);
+    assert.equal(stopped.status, EXITED);
+    assert.equal(stopped.issues.some((issue) => issue.reason === "missingInstance"), false);
+
+    // The stack is up, so a service without any container is a real problem
+    const running = resolveComposePsStatus([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "running",
+            Status: "Up 1 minute" },
+    ], [ "app", "db" ]);
+    assert.equal(running.status, ATTENTION);
+    assert.equal(running.issues.some((issue) => issue.reason === "missingInstance"), true);
 });

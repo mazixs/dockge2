@@ -3,7 +3,7 @@
         <h5>{{ $t("Internal Networks") }}</h5>
         <ul class="list-group">
             <li v-for="(networkRow, index) in networkList" :key="index" class="list-group-item">
-                <input v-model="networkRow.key" type="text" class="no-bg domain-input" :placeholder="$t(`Network name...`)" @change="applyToYAML" />
+                <input v-model="networkRow.key" type="text" class="no-bg domain-input" :placeholder="$t(`Network name...`)" @change="applyToYAML(false)" />
                 <font-awesome-icon icon="times" class="action remove ms-2 me-3 text-danger" @click="remove(index)" />
             </li>
         </ul>
@@ -53,6 +53,8 @@ export default {
             externalNetworkList: [],
             /** True while the editor is filled from the compose file */
             loading: true,
+            /** True when the last change of the model came from this component */
+            selfApplied: false,
         };
     },
     computed: {
@@ -75,10 +77,13 @@ export default {
     watch: {
         "jsonConfig.networks": {
             handler() {
-                if (this.editorFocus) {
-                    console.debug("jsonConfig.networks changed");
+                // Reload unless this component caused the change itself, otherwise a stale
+                // list would overwrite networks that came from the server or the text editor
+                if (!this.selfApplied) {
                     this.loadNetworkList();
                 }
+
+                this.selfApplied = false;
             },
             deep: true,
         },
@@ -167,10 +172,15 @@ export default {
         },
 
         remove(index) {
+            const removed = this.networkList[index];
             this.networkList.splice(index, 1);
 
-            // Deleting the last network by hand is the explicit action that removes the key
-            this.applyToYAML(this.networkList.length === 0 && Object.keys(this.externalList).length === 0);
+            // Only removing a network that really existed counts as the explicit action that
+            // takes the `networks` key out of the file
+            const removedRealNetwork = (removed?.key ?? "").trim() !== "";
+            const nothingLeft = this.networkList.length === 0 && Object.keys(this.externalList).length === 0;
+
+            this.applyToYAML(removedRealNetwork && nothingLeft);
         },
 
         /**
@@ -196,6 +206,7 @@ export default {
                 networks[networkName] = this.externalList[networkName];
             }
 
+            this.selfApplied = true;
             this.$parent.$parent.applyNetworksEdit(networks, { explicitRemoval });
         }
 

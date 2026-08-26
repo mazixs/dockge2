@@ -203,5 +203,7 @@
     "paste": "Paste",
     "clipboardDenied": "The browser did not allow reading the clipboard. Use Ctrl+V, Ctrl+Shift+V or Cmd+V instead.",
     "clipboardEmpty": "The clipboard is empty.",
-    "multilinePasteTruncated": "Only the first line was pasted: this console edits one command at a time."
+    "multilinePasteTruncated": "Only the first line was pasted: this console edits one command at a time.",
+    "reloadNeededAfterFileChange": "The file selection was saved. Save or discard your edits, then reload the stack to see the newly selected files.",
+    "notStarted": "created but not started"
 }

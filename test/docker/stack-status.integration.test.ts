@@ -7,6 +7,14 @@ import { Stack } from "../../backend/stack";
 import { ATTENTION, RUNNING } from "../../common/util-common";
 
 const enabled = process.env.DOCKGE_DOCKER_INTEGRATION === "1";
+
+test("the docker integration suite is actually enabled in CI", () => {
+    // Without this a dropped environment variable would silently turn the whole
+    // Docker job green while running nothing
+    if (process.env.CI) {
+        assert.equal(enabled, true, "DOCKGE_DOCKER_INTEGRATION=1 must be set for this suite in CI");
+    }
+});
 const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 const markedFixture = path.join(fixtureDir, "clean-exit-stack.compose.yaml");
 const unmarkedFixture = path.join(fixtureDir, "unmarked-exit-stack.compose.yaml");

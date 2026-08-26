@@ -79,8 +79,11 @@ const ATTENTION_REASONS = new Set([
     "dead",
     "removing",
     "unknownState",
-    "unknownExitCode",
     "missingInstance",
+    "notStarted",
+    // A failed or unreadable exit is reported as an issue, but a stack whose services are
+    // all gone stays EXITED: that is what the requirements ask for, and EXITED is not a
+    // calmer state than ATTENTION, it is the red one.
 ]);
 
 /**
@@ -305,15 +308,20 @@ export function resolveInstanceIssue(instance : ContainerInstanceStatus) : strin
             // A clean one-shot exit is the expected end of a worker or init container
             return instance.isOneShot ? null : "serviceStopped";
 
+        case "created":
+            // Created but never started. Alone it means the stack is only created,
+            // next to a running service it is a service that failed to come up.
+            return "notStarted";
+
         default:
-            // created: not started yet, handled by the stack level rules
             return null;
     }
 }
 
 /**
  * Aggregate instances into a stack status with the reasons behind it.
- * A stack is RUNNING only when every long-lived service is up and nothing is degraded.
+ * RUNNING means at least one service of the stack is up and nothing about the stack
+ * is degraded: every issue found on any instance turns the stack into ATTENTION.
  * @param instances Normalised instances of the stack
  * @param expectedServices Services declared in the compose file, used to detect missing instances
  * @returns Stack status and the list of issues explaining it
@@ -324,11 +332,17 @@ export function resolveStackStatus(
 ) : StackStatusResult {
     const issues : StackStatusIssue[] = [];
 
-    for (const service of expectedServices) {
-        if (!instances.some((instance) => instance.service === service)) {
-            issues.push({ service,
-                name: "",
-                reason: "missingInstance" });
+    // A stack that was never started has no containers at all, so a missing instance is
+    // only worth reporting when the rest of the stack is up
+    const stackIsUp = instances.some((instance) => instance.state === "running");
+
+    if (stackIsUp) {
+        for (const service of expectedServices) {
+            if (!instances.some((instance) => instance.service === service)) {
+                issues.push({ service,
+                    name: "",
+                    reason: "missingInstance" });
+            }
         }
     }
 
@@ -339,6 +353,7 @@ export function resolveStackStatus(
     }
 
     let hasRunningLongLived = false;
+    let hasRunningOneShot = false;
     let allCreated = true;
 
     for (const instance of instances) {
@@ -346,8 +361,12 @@ export function resolveStackStatus(
             allCreated = false;
         }
 
-        if (instance.state === "running" && !instance.isOneShot && instance.health !== "unhealthy") {
-            hasRunningLongLived = true;
+        if (instance.state === "running" && instance.health !== "unhealthy") {
+            if (instance.isOneShot) {
+                hasRunningOneShot = true;
+            } else {
+                hasRunningLongLived = true;
+            }
         }
 
         if (instance.issue) {
@@ -366,11 +385,18 @@ export function resolveStackStatus(
     }
 
     if (allCreated) {
+        // Nothing was started yet, that is the created state and not a problem on its own
         return { status: CREATED_STACK,
-            issues };
+            issues: issues.filter((issue) => issue.reason !== "notStarted") };
     }
 
     if (hasRunningLongLived) {
+        return { status: issues.length > 0 ? ATTENTION : RUNNING,
+            issues };
+    }
+
+    // A stack whose only services are one-shot jobs is running while a job runs
+    if (hasRunningOneShot) {
         return { status: issues.length > 0 ? ATTENTION : RUNNING,
             issues };
     }

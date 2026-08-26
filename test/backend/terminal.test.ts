@@ -129,6 +129,13 @@ test("leaving a container terminal without other clients kills the session", asy
     assert.equal(terminal.clientCount, 1);
     assert.equal(exitCode, undefined);
 
+    // The registry entry proves it: end() removes it right away, so this catches a
+    // missing clientCount guard even though the process exit itself is asynchronous
+    assert.equal(Terminal.getTerminal(name), terminal, "the session must still be registered");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(Terminal.getTerminal(name), terminal, "the session must not be ended while a client is attached");
+    assert.equal(exitCode, undefined);
+
     // The last client leaving ends it
     const second = await leave(makeSocket("client-other"));
     assert.equal(second.ok, true);
@@ -222,4 +229,40 @@ test("a session that ends is removed from the registry at once, so a reconnect i
     assert.equal(Terminal.getTerminal(name), second);
 
     second.kill();
+});
+
+test("leaving a shared stack terminal does not end it", async () => {
+    const server = { stacksDir: os.tmpdir() } as unknown as DockgeServer;
+    const name = "combined-test-shared";
+    const socket = makeSocket("client-shared");
+
+    const terminal = new InteractiveTerminal(server, name, process.execPath, [
+        "-e",
+        "setTimeout(() => {}, 60000);",
+    ], os.tmpdir());
+
+    let exitCode : number | undefined;
+    terminal.onExit((code) => {
+        exitCode = code;
+    });
+
+    terminal.join(socket);
+    terminal.start();
+    assert.ok(await waitFor(() => terminal.ptyProcess !== undefined));
+
+    const handler = new AgentSocket();
+    new TerminalSocketHandler().create(socket, server, handler);
+    const res = await new Promise<Record<string, unknown>>((resolve) => {
+        handler.call("terminalLeave", name, (value : Record<string, unknown>) => resolve(value));
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(terminal.clientCount, 0);
+
+    // Only container shells are ended by a leaving client: a deploy or logs terminal is shared
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(exitCode, undefined, "a shared terminal must survive a leaving client");
+    assert.equal(Terminal.getTerminal(name), terminal);
+
+    terminal.kill();
 });

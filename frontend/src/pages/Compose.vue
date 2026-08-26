@@ -389,6 +389,10 @@ export default {
             serviceIssues: [],
             fileInventory: null,
             composeAnalysis: null,
+            /** Text the current model and analysis were built from */
+            analysedSource: "",
+            /** Whether the compose file had a top level networks key when it was loaded */
+            sourceHadNetworks: false,
             /** True while the model is filled from the server or the text editor */
             applyingExternal: false,
             /** Set when the user removed the last network by hand */
@@ -461,7 +465,14 @@ export default {
          * @returns {boolean} True when a structured edit keeps the meaning of the file
          */
         structuredEditsEnabled() {
-            return this.composeAnalysis ? canEditStructurally(this.composeAnalysis) : false;
+            if (!this.composeAnalysis || !canEditStructurally(this.composeAnalysis)) {
+                return false;
+            }
+
+            // The model belongs to the text it was parsed from. If the text moved on
+            // (a broken intermediate state, for example) a structured write would
+            // silently drop everything the model does not know about.
+            return this.analysedSource === this.stack.composeYAML;
         },
 
         /**
@@ -667,10 +678,20 @@ export default {
                 this.processing = false;
                 this.$root.toastRes(res);
 
-                if (res.ok) {
-                    this.requestStackFiles();
-                    this.loadStack();
+                if (!res.ok) {
+                    return;
                 }
+
+                this.requestStackFiles();
+
+                // Reloading replaces the texts with what is on disk, which would silently
+                // discard edits the user has not saved yet
+                if (this.isEditMode) {
+                    this.$root.toastError(this.$t("reloadNeededAfterFileChange"));
+                    return;
+                }
+
+                this.loadStack();
             });
         },
 
@@ -750,6 +771,9 @@ export default {
                 if (res.ok) {
                     this.stack = res.stack;
                     this.yamlCodeChange();
+
+                    // What the file on disk had is the reference for the networks rule
+                    this.sourceHadNetworks = this.composeAnalysis?.hasNetworksKey ?? false;
                     this.processing = false;
                     this.bindTerminal();
                     this.requestStackFiles();
@@ -905,6 +929,7 @@ export default {
 
                 this.yamlDoc = doc;
                 this.composeAnalysis = analyseComposeSource(this.stack.composeYAML);
+                this.analysedSource = this.stack.composeYAML;
 
                 // Filling the model from the source is not a user edit
                 this.applyingExternal = true;
@@ -949,7 +974,7 @@ export default {
             let next;
             try {
                 next = applyStructuredEdit(source, this.jsonConfig, {
-                    sourceHadNetworks: this.composeAnalysis?.hasNetworksKey ?? false,
+                    sourceHadNetworks: this.sourceHadNetworks,
                     explicitNetworkRemoval,
                 });
             } catch (e) {
@@ -964,6 +989,7 @@ export default {
             this.applyingExternal = true;
             this.stack.composeYAML = next;
             this.composeAnalysis = analyseComposeSource(next);
+            this.analysedSource = next;
             this.yamlDoc = this.composeAnalysis.doc;
             this.$nextTick(() => {
                 this.applyingExternal = false;

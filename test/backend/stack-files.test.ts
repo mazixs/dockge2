@@ -166,8 +166,18 @@ test("secret files are stored with restricted permissions and never leak into th
                 assert.equal(secretStat.mode & 0o777, 0o600);
             }
 
+            // Rotating an existing secret must tighten the mode as well, not only creation
+            await writeFile(path.join(stackDir, ".secret.loose"), "old-value", { mode: 0o644 });
+            await stack.writeSecretFile(".secret.loose", "new-value");
+
+            if (process.platform !== "win32") {
+                const rotated = await stat(path.join(stackDir, ".secret.loose"));
+                assert.equal(rotated.mode & 0o777, 0o600, "a rotated secret must not stay world readable");
+            }
+            assert.equal(await readFile(path.join(stackDir, ".secret.loose"), "utf8"), "new-value");
+
             const meta = await stack.listSecretFiles();
-            assert.deepEqual(meta.map((item) => item.fileName), [ ".secret.db" ]);
+            assert.deepEqual(meta.map((item) => item.fileName), [ ".secret.db", ".secret.loose" ]);
             assert.equal(meta[0]?.size, "db-password".length);
             assert.equal(meta[0]?.secretName, "");
 

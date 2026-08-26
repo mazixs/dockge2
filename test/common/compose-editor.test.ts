@@ -34,6 +34,7 @@ test("constructs that a rebuild would destroy switch the file to text mode", () 
         [ "override tag", "services:\n  app:\n    command: !override [\"sh\"]\n", "!override" ],
         [ "anchor", "x-common: &common\n  restart: always\nservices:\n  app:\n    image: nginx\n", "anchor" ],
         [ "alias", "x-common: &common\n  restart: always\nservices:\n  app:\n    image: nginx\n    <<: *common\n", "alias" ],
+        [ "inline merge key", "services:\n  app:\n    <<: {restart: always}\n    image: nginx\n", "merge key" ],
     ];
 
     for (const [ label, source, expected ] of cases) {
@@ -107,4 +108,48 @@ services:
     const reparsed = parseDocument(output).toJS();
     assert.equal(reparsed.services.app.restart, "on-failure");
     assert.equal(reparsed.services.app.environment.ENABLED, "yes");
+});
+
+test("legacy octal is restored without touching neighbouring lines", () => {
+    const source = `services:
+  app:
+    image: nginx
+    environment:
+      ENABLED: yes
+      DISABLED: no
+    tmpfs:
+      mode: 01777
+    other:
+      mode: 007
+`;
+
+    const analysis = analyseComposeSource(source);
+    const config = analysis.config;
+    (config["services"] as Record<string, Record<string, unknown>>)["app"]!["container_name"] = "app-1";
+
+    const output = applyStructuredEdit(source, config, { sourceHadNetworks: analysis.hasNetworksKey });
+
+    // The octal values keep their exact text, including the short one
+    assert.match(output, /mode: 01777/);
+    assert.match(output, /mode: 007/);
+
+    // And the untouched lines are not rewritten, no quotes appear around yes and no
+    assert.match(output, /ENABLED: yes/);
+    assert.match(output, /DISABLED: no/);
+    assert.equal(output.includes("ENABLED: \"yes\""), false);
+    assert.match(output, /container_name: app-1/);
+});
+
+test("an octal value the user actually changed is written as the new value", () => {
+    const source = "services:\n  app:\n    image: nginx\n    tmpfs:\n      mode: 01777\n";
+    const analysis = analyseComposeSource(source);
+    const config = analysis.config;
+
+    // The editor sets a different number, so the old text must not come back
+    ((config["services"] as Record<string, Record<string, Record<string, unknown>>>)["app"]!["tmpfs"] as Record<string, unknown>)["mode"] = 493;
+
+    const output = applyStructuredEdit(source, config, { sourceHadNetworks: false });
+
+    assert.match(output, /mode: 493/);
+    assert.equal(output.includes("01777"), false);
 });
