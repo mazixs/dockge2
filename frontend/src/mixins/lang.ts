@@ -1,4 +1,5 @@
 import { currentLocale, i18n } from "../i18n";
+import { setI18nLocale } from "../i18n-locale";
 import { setPageLocale } from "../util-frontend";
 import { defineComponent } from "vue";
 const langModules = import.meta.glob<Record<string, string>>("../lang/*.json");
@@ -35,7 +36,7 @@ export default defineComponent({
             }
             const message = (await loadMessage()).default ?? {};
             i18n.global.setLocaleMessage(lang, message);
-            i18n.global.locale.value = lang;
+            setI18nLocale(i18n, lang);
             localStorage.locale = lang;
             setPageLocale();
         }

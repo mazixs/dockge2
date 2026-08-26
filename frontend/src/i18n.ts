@@ -1,4 +1,5 @@
 import { createI18n } from "vue-i18n";
+import { setI18nLocale } from "./i18n-locale";
 import en from "./lang/en.json";
 
 const languageList: Record<string, string> = {
@@ -68,3 +69,5 @@ export const i18n = createI18n({
     silentTranslationWarn: true,
     messages: messages,
 });
+
+export { setI18nLocale };

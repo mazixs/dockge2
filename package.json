@@ -9,7 +9,7 @@
         "fmt": "eslint \"**/*.{ts,vue}\" --fix",
         "lint": "eslint \"**/*.{ts,vue}\"",
         "check-ts": "tsc --noEmit",
-        "test:unit": "node --import tsx --test --test-concurrency=1 \"test/backend/*.test.ts\" \"test/common/*.test.ts\"",
+        "test:unit": "node --import tsx --test --test-concurrency=1 \"test/backend/*.test.ts\" \"test/common/*.test.ts\" \"test/frontend/*.test.ts\"",
         "test:docker-integration": "cross-env DOCKGE_DOCKER_INTEGRATION=1 node --import tsx --test test/backend/stack-docker.integration.test.ts",
         "coverage": "c8 npm run test:unit",
         "test": "npm run coverage",
