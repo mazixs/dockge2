@@ -235,25 +235,6 @@ export function normaliseNetworks(config : LooseObject, options : StructuredEdit
 }
 
 /**
- * Check whether two compose texts describe the same document.
- * Used to avoid writing a file when nothing actually changed.
- * @param a First text
- * @param b Second text
- * @returns True when both parse to the same structure
- */
-export function isSameComposeContent(a : string, b : string) : boolean {
-    if (a === b) {
-        return true;
-    }
-
-    try {
-        return JSON.stringify(parseDocument(a).toJS()) === JSON.stringify(parseDocument(b).toJS());
-    } catch (e) {
-        return false;
-    }
-}
-
-/**
  * Collect the service names of a parsed compose document
  * @param config Plain object view of the compose file
  * @returns Service names

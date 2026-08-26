@@ -3,6 +3,7 @@ import * as os from "node:os";
 import { execFileSync } from "node:child_process";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
 import { LimitQueue } from "./utils/limit-queue";
+import { sleep } from "../common/util-common";
 import { DockgeSocket } from "./util-server";
 import {
     PROGRESS_TERMINAL_ROWS,
@@ -227,6 +228,67 @@ export class Terminal {
         clearInterval(this.keepAliveInterval);
         // Send Ctrl+C to the terminal
         this.ptyProcess?.write("\x03");
+    }
+
+    /**
+     * Kill the local process of this terminal.
+     * For a container shell this is the last resort: killing `docker exec` does not end the
+     * process inside the container, so end() is the method to use for those.
+     */
+    kill() {
+        clearInterval(this.keepAliveInterval);
+        clearInterval(this.kickDisconnectedClientsInterval);
+
+        try {
+            this._ptyProcess?.kill();
+        } catch (e) {
+            if (e instanceof Error) {
+                log.debug("Terminal", "Failed to kill terminal " + this.name + ": " + e.message);
+            }
+        }
+
+        // The exit handler removes the entry as well, this covers a process that never started
+        Terminal.terminalMap.delete(this.name);
+    }
+
+    /**
+     * End the session for good.
+     *
+     * A shell sitting at an idle prompt survives Ctrl+C, and killing `docker exec` leaves the
+     * shell running inside the container. So the shell is asked to exit first, and only a
+     * session that ignores that is killed.
+     * @param graceMs How long the shell may take to exit on its own
+     */
+    async end(graceMs = 3000) : Promise<void> {
+        clearInterval(this.keepAliveInterval);
+        clearInterval(this.kickDisconnectedClientsInterval);
+
+        if (!this._ptyProcess) {
+            Terminal.terminalMap.delete(this.name);
+            return;
+        }
+
+        try {
+            // Cancel whatever is on the prompt, then leave the shell
+            this._ptyProcess.write("\x03");
+            this._ptyProcess.write("exit\r");
+        } catch (e) {
+            if (e instanceof Error) {
+                log.debug("Terminal", "Failed to ask terminal " + this.name + " to exit: " + e.message);
+            }
+        }
+
+        const started = Date.now();
+
+        while (Date.now() - started < graceMs) {
+            if (!Terminal.terminalMap.has(this.name)) {
+                return;
+            }
+            await sleep(100);
+        }
+
+        log.debug("Terminal", "Terminal " + this.name + " did not exit on its own, killing it");
+        this.kill();
     }
 
     /**

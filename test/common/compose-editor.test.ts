@@ -5,7 +5,6 @@ import {
     analyseComposeSource,
     applyStructuredEdit,
     canEditStructurally,
-    isSameComposeContent,
     listServiceNames,
     normaliseNetworks,
 } from "../../common/compose-editor";
@@ -108,11 +107,4 @@ services:
     const reparsed = parseDocument(output).toJS();
     assert.equal(reparsed.services.app.restart, "on-failure");
     assert.equal(reparsed.services.app.environment.ENABLED, "yes");
-});
-
-test("compose contents are compared by structure, not by formatting", () => {
-    assert.equal(isSameComposeContent("services:\n  app:\n    image: nginx\n", "services:\n  app:\n    image: nginx\n"), true);
-    assert.equal(isSameComposeContent("services:\n  app:\n    image: nginx\n", "services:\n  app:\n    image: nginx # comment\n"), true);
-    assert.equal(isSameComposeContent("services:\n  app:\n    image: nginx\n", "services:\n  app:\n    image: alpine\n"), false);
-    assert.equal(isSameComposeContent("services: [", "services: ["), true);
 });

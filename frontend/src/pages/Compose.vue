@@ -941,18 +941,21 @@ export default {
         writeStructuredEdit() {
             const source = this.stack.composeYAML;
 
+            const explicitNetworkRemoval = this.explicitNetworkRemoval;
+
+            // The flag describes this one edit, so it is cleared even if the edit fails
+            this.explicitNetworkRemoval = false;
+
             let next;
             try {
                 next = applyStructuredEdit(source, this.jsonConfig, {
                     sourceHadNetworks: this.composeAnalysis?.hasNetworksKey ?? false,
-                    explicitNetworkRemoval: this.explicitNetworkRemoval,
+                    explicitNetworkRemoval,
                 });
             } catch (e) {
                 this.yamlError = e.message;
                 return;
             }
-
-            this.explicitNetworkRemoval = false;
 
             if (next === source) {
                 return;

@@ -5,7 +5,7 @@ import yaml, { type Document, isMap, isSeq, parseDocument } from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
 import path from "path";
 import { emptyStackFileConfig, resolveStackFilePath, StackConfig } from "./stack-config";
-import { classifyStackFile } from "../common/stack-files";
+import { classifyStackFile, isSafeNameSegment } from "../common/stack-files";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
 import {
     ComposePsEntry,
@@ -372,8 +372,11 @@ export class Stack {
                 activeEnvFileName: this.composeENV.trim() === "" ? "" : this.activeEnvFileName,
                 secretBindings: [],
             });
-            await this.loadFileConfig();
         }
+
+        // Always load the stored selection before writing: the socket handlers build a
+        // Stack directly, so without this the write would fall back to compose.yaml and .env
+        await this.loadFileConfig();
 
         // Write or overwrite the selected compose file
         fs.writeFileSync(await resolveStackFilePath(dir, this._composeFileName), this.composeYAML);
@@ -427,9 +430,34 @@ export class Stack {
             const stderr = (e as { stderr? : string | Buffer }).stderr?.toString().trim() ?? "";
             const reason = stderr === "" ? (e instanceof Error ? e.message : String(e)) : stderr;
 
-            // Compose reports variable names, not values, so this is safe to show
-            throw new ValidationError("Invalid compose configuration: " + reason.slice(0, 2000));
+            // Compose normally reports keys and paths, but the message is redacted anyway:
+            // a secret value must never reach the client through an error
+            throw new ValidationError("Invalid compose configuration: " + (await this.redactSecrets(reason)).slice(0, 2000));
         }
+    }
+
+    /**
+     * Replace secret values with a placeholder before a text leaves the server
+     * @param text Text that may quote file content
+     * @returns Text with secret values removed
+     */
+    async redactSecrets(text : string) : Promise<string> {
+        let result = text;
+
+        for (const meta of this._fileConfig.secretBindings) {
+            try {
+                const content = (await fsAsync.readFile(path.join(this.path, meta.fileName), "utf-8")).trim();
+
+                // Very short values would match too much, they are not usable secrets anyway
+                if (content.length >= 4 && result.includes(content)) {
+                    result = result.split(content).join("[secret]");
+                }
+            } catch (e) {
+                // A secret that cannot be read cannot leak either
+            }
+        }
+
+        return result;
     }
 
     async deploy(socket : DockgeSocket) : Promise<number> {
@@ -1128,7 +1156,7 @@ export class Stack {
      * @param services Services that get access to the secret
      */
     async bindSecret(secretName : string, fileName : string, services : readonly string[]) : Promise<void> {
-        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(secretName)) {
+        if (!isSafeNameSegment(secretName)) {
             throw new ValidationError("Invalid secret name: " + secretName);
         }
 
@@ -1206,9 +1234,10 @@ export class Stack {
                 continue;
             }
 
-            const list = (current.toJSON() as string[]).filter((item) => item !== secretName);
+            const currentList = current.toJSON() as string[];
+            const list = currentList.filter((item) => item !== secretName);
 
-            if (list.length === (current.toJSON() as string[]).length) {
+            if (list.length === currentList.length) {
                 continue;
             }
 
