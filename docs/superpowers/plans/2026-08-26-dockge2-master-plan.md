@@ -196,8 +196,9 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 ## Текущее состояние
 
-- Рабочая ветка обзора: mzx/dependency-stack-review в /home/mazix/Documents/GitHub/dockge2-review.
-- Базовая модернизация зависимостей, Node.js, ESLint, TypeScript, тестов и CI уже подготовлена в этой рабочей копии.
+- Актуальная рабочая копия: /home/mazix/Documents/GitHub/dockge2. Каталога dockge2-review и ветки mzx/dependency-stack-review больше нет, их результат влит в master этого репозитория (коммиты 749e2c5, f809ae1, 276f5a6, b75a313). Прежняя запись про неизменяемую исходную копию отменена 2026-08-26.
+- Ветка текущей работы по upstream-исправлениям: mzx/upstream-fixes.
+- Базовая модернизация зависимостей, Node.js, ESLint, TypeScript, тестов и CI уже влита в master.
 - Добавлены unit-тесты Node test runner и c8; текущий целевой порог — 70%.
 - Проверка npm audit --omit=dev --audit-level=high завершалась без high-level уязвимостей.
 - Production child-process вызовы используют массивы аргументов; shell: true не используется.
@@ -205,12 +206,16 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - В проекте остаются Vue SFC с обычным JavaScript внутри script; это отдельный этап строгой типизации.
 - При запуске чистого UI-стенда обнаружена блокирующая ошибка текущей модернизации: `frontend/src/mixins/lang.ts` вызывает `i18n.global.locale.value` в Vue I18n 11 legacy mode, где `locale` — строка; это включено в UX baseline-задачу.
 - Визуальный снимок удалось получить только для стартовой страницы создания администратора; main dashboard требует локальной инициализации, поэтому его визуальные решения не считаются подтверждёнными до отдельного authenticated capture.
-- Исходная рабочая копия /home/mazix/Documents/GitHub/dockge2 не изменяется; локальный AGENTS.md сохраняется.
+- Локальные агентские файлы AGENTS.md и CLAUDE.md не коммитятся.
+- Tasks 1-5 плана 2026-08-26-upstream-dockge-fixes.md выполнены в ветке mzx/upstream-fixes: path traversal (#994), сохранение .env (#964), статус clean-exit init-контейнеров (#806) и octal tmpfs.mode (#990). Проверено `npm run check` (34 теста, покрытие ~80%), `npm run build:frontend`, `npm audit --omit=dev --audit-level=high` (0) и реальный `npm run test:docker-integration` на Docker Compose v5.5.0.
+- Известное последствие барьера путей: операции над стеком, чьё имя не проходит `^[a-z0-9_-]+$` (внешние Compose-проекты с точкой или заглавными буквами), отклоняются как ValidationError. В списке стеков такие проекты остаются видимыми, но Compose-действия по ним недоступны до отдельной задачи по внешним контейнерам.
+- Подтверждённые аудитом дефекты, ещё не закрытые задачами: отладочный `console.log(options)` в `Stack.getComposeOptions` (backend/stack.ts) и запись содержимого буфера обмена в `console.debug` в frontend/src/components/Terminal.vue, что нарушает зафиксированное требование не логировать буфер.
+- Блокирующая ошибка Vue I18n подтверждена в коде: `frontend/src/i18n.ts` создаёт i18n без `legacy: false`, поэтому `i18n.global.locale.value = lang` в `frontend/src/mixins/lang.ts` пишет свойство в строку и в strict mode бросает TypeError. Смена языка не работает; исправление относится к Task 0 плана product-dashboard.
 
 ## План реализации
 
-- [ ] Выполнить docs/superpowers/plans/2026-08-26-upstream-dockge-fixes.md: Tasks 1–4 — #997, #979, #950, #991.
-- [ ] Выполнить там Task 5: полный набор проверок, покрытие, отсутствие ложных заглушек и связь с issues.
+- [x] Выполнить docs/superpowers/plans/2026-08-26-upstream-dockge-fixes.md: Tasks 1–4 — #997, #979, #950, #991.
+- [x] Выполнить там Task 5: полный набор проверок, покрытие, отсутствие ложных заглушек и связь с issues.
 - [ ] Выполнить там Task 6: безопасный CLI Git → Docker Compose с dry-run и документацией.
 - [ ] Выполнить docs/superpowers/plans/2026-08-26-console-status-compose-git.md: Tasks 1–2 — вставка в терминал, жизненный цикл shell-сессии и рабочий `Switch to sh`.
 - [ ] Выполнить там Task 3: типизированный статус сервисов/экземпляров с `ATTENTION`, worker/init-правилами и реальным Docker-тестом.
@@ -280,3 +285,11 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 ## Правило ведения файла
 
 Каждое новое требование пользователя или совместно принятое решение добавлять в этот файл до реализации. Для каждой записи фиксировать дату, формулировку требования или решения, причину, затронутые задачи/файлы и текущий статус. Завершённые пункты отмечать только после проверок, перечисленных в соответствующей задаче.
+
+### 2026-08-26 — валидация плана перед реализацией
+
+- Проверено по коду: Tasks 1-4 upstream-плана действительно не были реализованы (`validate()` с инлайновым regex, `path.join` в `get path()` и `getStack()`, `save()` без записи `.env`, `getStatusList()` на агрегированной строке `docker compose ls`, потеря ведущего нуля в `copyYAMLComments`).
+- Ссылки плана на файлы и строки совпали с текущим checkout, поэтому план принят к исполнению без переработки.
+- Отменена устаревшая запись о рабочей копии dockge2-review: работа ведётся в /home/mazix/Documents/GitHub/dockge2.
+- Дополнение к Task 1 по необходимости: конструктор `Stack` и `isManagedByDockge` не должны падать на именах внешних Compose-проектов, поэтому добавлен внутренний `safePath`, возвращающий undefined вместо исключения. Строгий барьер сохранён для всех файловых и Docker-операций.
+- Дополнение к Task 4 по необходимости: восстановление octal распространено на элементы YAML-последовательностей, потому что в issue #990 `tmpfs.mode` находится внутри списка `volumes`, а исходный обход сопоставлял только пары ключ-значение. Побочный эффект YAML 1.1: строки `yes`/`no` выводятся в кавычках, семантика строки сохраняется.
