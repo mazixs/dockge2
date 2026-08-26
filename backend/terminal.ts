@@ -200,6 +200,11 @@ export class Terminal {
         delete this.socketList[socket.id];
     }
 
+    /** Number of clients currently attached to this terminal */
+    public get clientCount() : number {
+        return Object.keys(this.socketList).length;
+    }
+
     public get ptyProcess() {
         return this._ptyProcess;
     }

@@ -3,17 +3,32 @@
         <div>
             <h1 class="mb-3">{{ $t("terminal") }} - {{ serviceName }} ({{ stackName }})</h1>
 
-            <div class="mb-3">
-                <router-link :to="sh" class="btn btn-normal me-2">{{ $t("Switch to sh") }}</router-link>
+            <div class="mb-3 d-flex align-items-center gap-2">
+                <span class="badge bg-primary">{{ shell }}</span>
+
+                <!-- The button always offers the other shell and starts a separate session -->
+                <router-link :to="otherShellRoute" class="btn btn-normal">
+                    {{ $t("switchToShell", [ otherShell ]) }}
+                </router-link>
             </div>
 
-            <Terminal class="terminal" :rows="20" mode="interactive" :name="terminalName" :stack-name="stackName" :service-name="serviceName" :shell="shell" :endpoint="endpoint"></Terminal>
+            <Terminal
+                :key="terminalName"
+                class="terminal"
+                :rows="20"
+                mode="interactive"
+                :name="terminalName"
+                :stack-name="stackName"
+                :service-name="serviceName"
+                :shell="shell"
+                :endpoint="endpoint"
+            ></Terminal>
         </div>
     </transition>
 </template>
 
 <script>
-import { getContainerExecTerminalName } from "../../../common/util-common";
+import { CONTAINER_SHELLS, getContainerExecTerminalName, isContainerShell } from "../../../common/util-common";
 
 export default {
     components: {
@@ -30,24 +45,45 @@ export default {
         endpoint() {
             return this.$route.params.endpoint || "";
         },
+
+        /**
+         * Shell of this session, an unknown value falls back to sh instead of reaching Docker
+         * @returns {string} Shell name
+         */
         shell() {
-            return this.$route.params.type;
+            const type = this.$route.params.type;
+            return isContainerShell(type) ? type : CONTAINER_SHELLS[0];
         },
+
+        /**
+         * The shell the button switches to
+         * @returns {string} Shell name
+         */
+        otherShell() {
+            return this.shell === "bash" ? "sh" : "bash";
+        },
+
         serviceName() {
             return this.$route.params.serviceName;
         },
-        terminalName() {
-            return getContainerExecTerminalName(this.endpoint, this.stackName, this.serviceName, 0);
-        },
-        sh() {
-            let endpoint = this.$route.params.endpoint;
 
-            let data = {
+        /**
+         * Terminal name, which contains the shell so each shell has its own session
+         * @returns {string} Terminal name
+         */
+        terminalName() {
+            return getContainerExecTerminalName(this.endpoint, this.stackName, this.serviceName, this.shell, 0);
+        },
+
+        otherShellRoute() {
+            const endpoint = this.$route.params.endpoint;
+
+            const data = {
                 name: "containerTerminal",
                 params: {
                     stackName: this.stackName,
                     serviceName: this.serviceName,
-                    type: "sh",
+                    type: this.otherShell,
                 },
             };
 

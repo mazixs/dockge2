@@ -29,6 +29,7 @@ import {
     CREATED_STACK,
     EXITED, getCombinedTerminalName,
     getComposeTerminalName, getContainerExecTerminalName,
+    type ContainerShell, isContainerShell,
     RUNNING, TERMINAL_ROWS,
     UNKNOWN
 } from "../common/util-common";
@@ -896,11 +897,30 @@ export class Stack {
         }
     }
 
-    async joinContainerTerminal(socket: DockgeSocket, serviceName: string, shell : string = "sh", index: number = 0) {
-        const terminalName = getContainerExecTerminalName(socket.endpoint, this.name, serviceName, index);
+    /**
+     * Attach a client to an interactive shell of one service.
+     * The service has to exist in the selected compose file and the shell has to exist
+     * in the image, both are checked before a PTY is started.
+     * @param socket Client socket
+     * @param serviceName Service of this stack
+     * @param shell Allowed shell
+     * @param index Session index for the same service and shell
+     * @returns Name of the terminal the client joined
+     * @throws {ValidationError} If the service or the shell cannot be used
+     */
+    async joinContainerTerminal(socket: DockgeSocket, serviceName: string, shell : ContainerShell = "sh", index: number = 0) : Promise<string> {
+        if (!isContainerShell(shell)) {
+            throw new ValidationError("Unsupported shell: " + shell);
+        }
+
+        this.assertServiceExists(serviceName);
+
+        const terminalName = getContainerExecTerminalName(socket.endpoint, this.name, serviceName, shell, index);
         let terminal = Terminal.getTerminal(terminalName);
 
         if (!terminal) {
+            await this.assertShellExists(serviceName, shell);
+
             terminal = new InteractiveTerminal(this.server, terminalName, "docker", this.getComposeOptions("exec", serviceName, shell), this.path);
             terminal.rows = TERMINAL_ROWS;
             log.debug("joinContainerTerminal", "Terminal created");
@@ -908,6 +928,46 @@ export class Stack {
 
         terminal.join(socket);
         terminal.start();
+
+        return terminalName;
+    }
+
+    /**
+     * Refuse a service that the selected compose file does not declare
+     * @param serviceName Service name from the client
+     * @throws {ValidationError} If the service is unknown
+     */
+    assertServiceExists(serviceName : string) : void {
+        const services = readComposeServices(this.composeYAML);
+
+        if (services.length === 0) {
+            // The compose file could not be read, so nothing can be confirmed
+            throw new ValidationError("Cannot read the compose file of this stack");
+        }
+
+        if (!services.includes(serviceName)) {
+            throw new ValidationError("Unknown service: " + serviceName);
+        }
+    }
+
+    /**
+     * Check that the requested shell exists in the running container
+     * @param serviceName Service of this stack
+     * @param shell Allowed shell
+     * @throws {ValidationError} If the shell is missing or the container is not running
+     */
+    async assertShellExists(serviceName : string, shell : ContainerShell) : Promise<void> {
+        try {
+            await spawn("docker", this.getComposeOptions("exec", "-T", serviceName, "sh", "-c", `command -v ${shell}`), {
+                cwd: this.path,
+                encoding: "utf-8",
+                maxBuffer: 64 * 1024,
+                timeoutMs: 20_000,
+            });
+        } catch (e) {
+            log.debug("assertShellExists", `${shell} is not usable in ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
+            throw new ValidationError(`${shell} is not available in this container`);
+        }
     }
 
     /**

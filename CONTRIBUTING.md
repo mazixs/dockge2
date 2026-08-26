@@ -107,6 +107,15 @@ npm run test:docker-integration   # opt-in, needs a working Docker Compose
 `npm run test` enforces the c8 coverage thresholds. The Docker integration test is skipped unless
 `DOCKGE_DOCKER_INTEGRATION=1` is set, and CI runs it in a dedicated Linux job.
 
+```bash
+npx playwright install chromium   # once
+npm run test:e2e                  # real Chromium, real clipboard, real Docker
+```
+
+The end to end tests start their own backend and frontend, seed a temporary data directory and run a
+container from `test/e2e/seed.ts`. They deliberately use the real clipboard, the real xterm and a real
+container: a stub would hide exactly the bugs they are there to catch.
+
 ## Database Migration
 
 TODO

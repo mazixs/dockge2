@@ -5,6 +5,7 @@ import { InteractiveTerminal, MainTerminal, Terminal } from "../terminal";
 import { Stack } from "../stack";
 import { AgentSocketHandler } from "../agent-socket-handler";
 import { AgentSocket } from "../../common/agent-socket";
+import { isContainerShell } from "../../common/util-common";
 
 export class TerminalSocketHandler extends AgentSocketHandler {
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
@@ -96,8 +97,9 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Service name must be a string.");
                 }
 
-                if (typeof(shell) !== "string") {
-                    throw new ValidationError("Shell must be a string.");
+                // Only the allowed shells may reach Docker
+                if (!isContainerShell(shell)) {
+                    throw new ValidationError("Unsupported shell, use sh or bash.");
                 }
 
                 log.debug("interactiveTerminal", "Stack name: " + stackName);
@@ -105,10 +107,11 @@ export class TerminalSocketHandler extends AgentSocketHandler {
 
                 // Get stack
                 const stack = await Stack.getStack(server, stackName);
-                stack.joinContainerTerminal(socket, serviceName, shell);
+                const terminalName = await stack.joinContainerTerminal(socket, serviceName, shell);
 
                 callbackResult({
                     ok: true,
+                    terminalName,
                 }, callback);
             } catch (e) {
                 callbackError(e, callback);
@@ -138,6 +141,34 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     ok: true,
                     buffer,
                 });
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Leave a terminal explicitly, used when a client switches shell or unmounts
+        agentSocket.on("terminalLeave", async (terminalName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(terminalName) !== "string") {
+                    throw new ValidationError("Terminal name must be a string.");
+                }
+
+                const terminal = Terminal.getTerminal(terminalName);
+
+                if (terminal) {
+                    terminal.leave(socket);
+
+                    // A container shell without any client left is closed instead of lingering
+                    if (terminal.clientCount === 0 && terminalName.startsWith("container-exec-")) {
+                        terminal.close();
+                    }
+                }
+
+                callbackResult({
+                    ok: true,
+                }, callback);
             } catch (e) {
                 callbackError(e, callback);
             }
