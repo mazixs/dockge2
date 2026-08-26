@@ -10,3 +10,8 @@ tmp
 # Git only
 frontend-dist
 coverage
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/

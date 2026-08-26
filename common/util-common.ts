@@ -215,8 +215,33 @@ export function getContainerTerminalName(endpoint : string, container : string) 
     return "container-" + endpoint + "-" + container;
 }
 
-export function getContainerExecTerminalName(endpoint : string, stackName : string, container : string, index : number) {
-    return "container-exec-" + endpoint + "-" + stackName + "-" + container + "-" + index;
+/** Shells a container terminal may start, an allow-list on purpose */
+export const CONTAINER_SHELLS = [ "sh", "bash" ] as const;
+
+export type ContainerShell = typeof CONTAINER_SHELLS[number];
+
+/**
+ * Check that a value is one of the allowed container shells
+ * @param value Value to check
+ * @returns True for an allowed shell
+ */
+export function isContainerShell(value : unknown) : value is ContainerShell {
+    return typeof value === "string" && (CONTAINER_SHELLS as readonly string[]).includes(value);
+}
+
+/**
+ * Name of a container exec terminal.
+ * The shell is part of the identity, so switching between sh and bash starts a new
+ * session instead of attaching to the PTY of the other shell.
+ * @param endpoint Agent endpoint
+ * @param stackName Stack name
+ * @param container Service name
+ * @param shell Shell of the session
+ * @param index Session index for the same service
+ * @returns Terminal name
+ */
+export function getContainerExecTerminalName(endpoint : string, stackName : string, container : string, shell : ContainerShell = "sh", index : number = 0) {
+    return "container-exec-" + endpoint + "-" + stackName + "-" + container + "-" + shell + "-" + index;
 }
 
 export function copyYAMLComments(doc : Document, src : Document) {

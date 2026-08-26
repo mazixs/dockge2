@@ -198,5 +198,9 @@
     "confirmSecretAction": "Confirm with your password",
     "secretPasswordHint": "Reading and changing secrets is a separate action, so it needs your current password.",
     "confirm": "Confirm",
-    "textModeOnly": "This file uses {0}, which the structured editor cannot rewrite without changing its meaning. Edit it as text instead."
+    "textModeOnly": "This file uses {0}, which the structured editor cannot rewrite without changing its meaning. Edit it as text instead.",
+    "switchToShell": "Switch to {0}",
+    "paste": "Paste",
+    "clipboardDenied": "The browser did not allow reading the clipboard. Use Ctrl+V, Ctrl+Shift+V or Cmd+V instead.",
+    "clipboardEmpty": "The clipboard is empty."
 }

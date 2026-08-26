@@ -14,6 +14,7 @@ import {
     getCombinedTerminalName,
     getComposeTerminalName,
     getContainerExecTerminalName,
+    isContainerShell,
     getContainerTerminalName,
     getCryptoRandomInt,
     intHash,
@@ -65,7 +66,18 @@ test("common naming and hashing helpers are deterministic", () => {
     assert.equal(getComposeTerminalName("host", "stack"), "compose-host-stack");
     assert.equal(getCombinedTerminalName("host", "stack"), "combined-host-stack");
     assert.equal(getContainerTerminalName("host", "container"), "container-host-container");
-    assert.equal(getContainerExecTerminalName("host", "stack", "container", 2), "container-exec-host-stack-container-2");
+    // The shell is part of the terminal identity, so sh and bash never share a PTY
+    assert.equal(getContainerExecTerminalName("host", "stack", "container", "sh", 2), "container-exec-host-stack-container-sh-2");
+    assert.equal(getContainerExecTerminalName("host", "stack", "container", "bash"), "container-exec-host-stack-container-bash-0");
+    assert.notEqual(
+        getContainerExecTerminalName("host", "stack", "container", "sh"),
+        getContainerExecTerminalName("host", "stack", "container", "bash"),
+    );
+    assert.equal(isContainerShell("bash"), true);
+    assert.equal(isContainerShell("sh"), true);
+    for (const bad of [ "zsh", "bash -c ls", "/bin/sh", "", 5, null ]) {
+        assert.equal(isContainerShell(bad), false, `${JSON.stringify(bad)} must be refused`);
+    }
 });
 
 test("random helpers return values within their contracts", async () => {
