@@ -120,7 +120,7 @@ test("Stack validates, saves and reads compose files using the real filesystem",
 
         const loaded = await Stack.getStack(server, "demo-stack");
         assert.equal(loaded.composeYAML, stack.composeYAML);
-        assert.equal(loaded.composeENV, "");
+        assert.equal(loaded.composeENV, "APP_ENV=production\n");
         assert.equal(loaded.status, UNKNOWN);
 
         const updated = new Stack(server, "demo-stack", "services:\n  app:\n    image: alpine\n", "KEY=value", true);
@@ -146,6 +146,38 @@ test("Stack validates, saves and reads compose files using the real filesystem",
             "--format",
             "json",
         ]);
+    } finally {
+        await rm(stacksDir, { recursive: true,
+            force: true });
+    }
+});
+
+test("Stack persists environment files on save", async () => {
+    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-stack-env-"));
+    const server = { stacksDir } as never;
+    const envPath = path.join(stacksDir, "env-stack", ".env");
+
+    try {
+        // 1. A new stack with env content writes .env byte for byte
+        const created = new Stack(server, "env-stack", "services:\n  app:\n    image: nginx\n", "KEY=initial\n", true);
+        await created.save(true);
+        assert.equal(await readFile(envPath, "utf8"), "KEY=initial\n");
+
+        // 2. Saving an existing stack replaces the env file
+        const updated = new Stack(server, "env-stack", "services:\n  app:\n    image: nginx\n", "KEY=updated\n", true);
+        await updated.save(false);
+        assert.equal(await readFile(envPath, "utf8"), "KEY=updated\n");
+
+        // 3. Clearing the env content empties the existing file instead of leaving stale values
+        const cleared = new Stack(server, "env-stack", "services:\n  app:\n    image: nginx\n", "", true);
+        await cleared.save(false);
+        assert.equal(await fileExists(envPath), true);
+        assert.equal(await readFile(envPath, "utf8"), "");
+
+        // 4. A new stack without env content does not create an empty .env
+        const withoutEnv = new Stack(server, "plain-stack", "services:\n  app:\n    image: nginx\n", "", true);
+        await withoutEnv.save(true);
+        assert.equal(await fileExists(path.join(stacksDir, "plain-stack", ".env")), false);
     } finally {
         await rm(stacksDir, { recursive: true,
             force: true });
