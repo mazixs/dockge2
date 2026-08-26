@@ -1,0 +1,404 @@
+import yaml from "yaml";
+import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "./util-common";
+
+/**
+ * Raw entry of `docker compose ps --all --format json`.
+ * Every field is optional because Docker versions differ and output can be truncated.
+ */
+export interface ComposePsEntry {
+    Service? : string;
+    Name? : string;
+    State? : string;
+    Health? : string;
+    ExitCode? : number | string;
+    Status? : string;
+    Labels? : string;
+}
+
+export interface ContainerInstanceStatus {
+    service : string;
+    name : string;
+    /** Normalised lowercase Docker state, empty when it could not be read */
+    state : string;
+    /** Normalised lowercase health, empty when the container has no health check */
+    health : string;
+    exitCode : number | null;
+    statusText : string;
+    isOneShot : boolean;
+    /** Reason why this instance needs attention, null when it is fine */
+    issue : string | null;
+}
+
+export interface StackStatusIssue {
+    service : string;
+    name : string;
+    reason : string;
+    detail? : string;
+}
+
+export interface StackStatusResult {
+    status : number;
+    issues : StackStatusIssue[];
+}
+
+/**
+ * Raw entry of `docker ps --all --format json`, which is used for the whole host at once.
+ * It has no Service, Health or ExitCode field, so those are derived from labels and the status text.
+ */
+export interface DockerPsRaw {
+    State? : string;
+    Status? : string;
+    HealthStatus? : string;
+    Labels? : string;
+    Name? : string;
+    Names? : string;
+}
+
+/**
+ * Compose extension that marks a service as a one-shot worker or init container.
+ * Written as `x-dockge: { lifecycle: one-shot }` or `x-dockge.lifecycle: one-shot` in the service.
+ */
+export const ONE_SHOT_EXTENSION = "x-dockge";
+export const ONE_SHOT_VALUE = "one-shot";
+
+/** Container label with the same meaning, for stacks that were not created by Dockge */
+export const ONE_SHOT_LABEL = "dockge.lifecycle";
+
+export const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
+export const COMPOSE_SERVICE_LABEL = "com.docker.compose.service";
+
+const KNOWN_STATES = [ "running", "exited", "created", "restarting", "paused", "dead", "removing" ];
+
+/**
+ * Reasons that mean the stack is degraded rather than simply stopped
+ */
+const ATTENTION_REASONS = new Set([
+    "unhealthy",
+    "restarting",
+    "paused",
+    "dead",
+    "removing",
+    "unknownState",
+    "unknownExitCode",
+    "missingInstance",
+]);
+
+/**
+ * Parse the `Labels` field of Docker output, which is a comma separated `key=value` list
+ * @param labels Raw labels
+ * @returns Parsed labels
+ */
+export function parseDockerLabels(labels : string | undefined) : Record<string, string> {
+    const result : Record<string, string> = {};
+
+    if (!labels) {
+        return result;
+    }
+
+    for (const pair of labels.split(",")) {
+        const index = pair.indexOf("=");
+        if (index <= 0) {
+            continue;
+        }
+        result[pair.slice(0, index).trim()] = pair.slice(index + 1).trim();
+    }
+
+    return result;
+}
+
+/**
+ * Read the exit code of a container, preferring the explicit field over the status text
+ * @param entry Compose ps entry
+ * @returns Exit code, or null when the container exited and the code is unreadable
+ */
+function readExitCode(entry : ComposePsEntry) : number | null {
+    if (typeof entry.ExitCode === "number" && Number.isInteger(entry.ExitCode)) {
+        return entry.ExitCode;
+    }
+
+    if (typeof entry.ExitCode === "string" && /^-?\d+$/.test(entry.ExitCode.trim())) {
+        return Number.parseInt(entry.ExitCode, 10);
+    }
+
+    const match = /exited\s+\((-?\d+)\)/i.exec(entry.Status ?? "");
+    if (match?.[1] !== undefined) {
+        return Number.parseInt(match[1], 10);
+    }
+
+    return null;
+}
+
+/**
+ * Normalise the health field, which is empty in Compose output and "none" in `docker ps` output
+ * @param health Raw health value
+ * @returns Normalised health, empty when the container has no health check
+ */
+function normaliseHealth(health : string | undefined) : string {
+    const value = (health ?? "").trim().toLowerCase();
+    return value === "none" ? "" : value;
+}
+
+/**
+ * Convert a `docker ps` entry into the Compose shaped entry used by the aggregator
+ * @param raw Entry of `docker ps --all --format json`
+ * @returns Compose shaped entry plus the compose project it belongs to
+ */
+export function fromDockerPs(raw : DockerPsRaw) : ComposePsEntry & { project : string } {
+    const labels = parseDockerLabels(raw.Labels);
+
+    const entry : ComposePsEntry & { project : string } = {
+        project: labels[COMPOSE_PROJECT_LABEL] ?? "",
+        Service: labels[COMPOSE_SERVICE_LABEL] ?? "",
+        Name: raw.Name ?? raw.Names ?? "",
+        Labels: raw.Labels ?? "",
+    };
+
+    if (raw.State !== undefined) {
+        entry.State = raw.State;
+    }
+    if (raw.Status !== undefined) {
+        entry.Status = raw.Status;
+    }
+    const health = normaliseHealth(raw.HealthStatus);
+    if (health !== "") {
+        entry.Health = health;
+    }
+
+    return entry;
+}
+
+/**
+ * Read the services that the compose file explicitly marks as one-shot
+ * @param composeYAML Compose file content
+ * @returns Service names marked as one-shot
+ */
+export function readOneShotServices(composeYAML : string) : Set<string> {
+    const oneShot = new Set<string>();
+
+    let parsed : unknown;
+    try {
+        parsed = yaml.parse(composeYAML);
+    } catch (e) {
+        return oneShot;
+    }
+
+    const services = (parsed as { services? : Record<string, unknown> } | null)?.services;
+    if (!services || typeof services !== "object") {
+        return oneShot;
+    }
+
+    for (const [ name, rawService ] of Object.entries(services)) {
+        const service = rawService as Record<string, unknown> | null;
+        if (!service || typeof service !== "object") {
+            continue;
+        }
+
+        // x-dockge: { lifecycle: one-shot }
+        const extension = service[ONE_SHOT_EXTENSION] as { lifecycle? : unknown } | undefined;
+        if (extension && typeof extension === "object" && extension.lifecycle === ONE_SHOT_VALUE) {
+            oneShot.add(name);
+            continue;
+        }
+
+        // x-dockge.lifecycle: one-shot written as a flat key
+        if (service[`${ONE_SHOT_EXTENSION}.lifecycle`] === ONE_SHOT_VALUE) {
+            oneShot.add(name);
+            continue;
+        }
+
+        // dockge.lifecycle: one-shot as a container label
+        const labels = service["labels"];
+        if (labels && typeof labels === "object" && !Array.isArray(labels)) {
+            if ((labels as Record<string, unknown>)[ONE_SHOT_LABEL] === ONE_SHOT_VALUE) {
+                oneShot.add(name);
+            }
+        } else if (Array.isArray(labels) && labels.includes(`${ONE_SHOT_LABEL}=${ONE_SHOT_VALUE}`)) {
+            oneShot.add(name);
+        }
+    }
+
+    return oneShot;
+}
+
+/**
+ * Read the service names declared in a compose file
+ * @param composeYAML Compose file content
+ * @returns Declared service names
+ */
+export function readComposeServices(composeYAML : string) : string[] {
+    try {
+        const parsed = yaml.parse(composeYAML) as { services? : Record<string, unknown> } | null;
+        const services = parsed?.services;
+        if (!services || typeof services !== "object") {
+            return [];
+        }
+        return Object.keys(services);
+    } catch (e) {
+        return [];
+    }
+}
+
+/**
+ * Normalise one `docker compose ps` entry into a typed instance status.
+ * Unknown values are never promoted to a healthy state.
+ * @param entry Compose ps entry
+ * @param oneShotServices Services marked as one-shot in the compose file
+ * @returns Typed instance status
+ */
+export function normaliseInstance(entry : ComposePsEntry, oneShotServices : ReadonlySet<string> = new Set()) : ContainerInstanceStatus {
+    const labels = parseDockerLabels(entry.Labels);
+    const state = (entry.State ?? "").trim().toLowerCase();
+    const health = normaliseHealth(entry.Health);
+    const exitCode = readExitCode(entry);
+    const service = entry.Service ?? labels[COMPOSE_SERVICE_LABEL] ?? "";
+    const isOneShot = labels[ONE_SHOT_LABEL] === ONE_SHOT_VALUE || oneShotServices.has(service);
+
+    const instance : ContainerInstanceStatus = {
+        service,
+        name: entry.Name ?? "",
+        state,
+        health,
+        exitCode,
+        statusText: entry.Status ?? "",
+        isOneShot,
+        issue: null,
+    };
+
+    instance.issue = resolveInstanceIssue(instance);
+
+    return instance;
+}
+
+/**
+ * Decide whether a single instance is a problem, and why
+ * @param instance Normalised instance
+ * @returns Issue reason, or null when the instance is fine
+ */
+export function resolveInstanceIssue(instance : ContainerInstanceStatus) : string | null {
+    if (!KNOWN_STATES.includes(instance.state)) {
+        return "unknownState";
+    }
+
+    switch (instance.state) {
+        case "running":
+            return instance.health === "unhealthy" ? "unhealthy" : null;
+
+        case "restarting":
+            return "restarting";
+
+        case "paused":
+            return "paused";
+
+        case "dead":
+            return "dead";
+
+        case "removing":
+            return "removing";
+
+        case "exited":
+            if (instance.exitCode === null) {
+                return "unknownExitCode";
+            }
+            if (instance.exitCode !== 0) {
+                return instance.isOneShot ? "workerFailed" : "serviceFailed";
+            }
+            // A clean one-shot exit is the expected end of a worker or init container
+            return instance.isOneShot ? null : "serviceStopped";
+
+        default:
+            // created: not started yet, handled by the stack level rules
+            return null;
+    }
+}
+
+/**
+ * Aggregate instances into a stack status with the reasons behind it.
+ * A stack is RUNNING only when every long-lived service is up and nothing is degraded.
+ * @param instances Normalised instances of the stack
+ * @param expectedServices Services declared in the compose file, used to detect missing instances
+ * @returns Stack status and the list of issues explaining it
+ */
+export function resolveStackStatus(
+    instances : readonly ContainerInstanceStatus[],
+    expectedServices : readonly string[] = [],
+) : StackStatusResult {
+    const issues : StackStatusIssue[] = [];
+
+    for (const service of expectedServices) {
+        if (!instances.some((instance) => instance.service === service)) {
+            issues.push({ service,
+                name: "",
+                reason: "missingInstance" });
+        }
+    }
+
+    if (instances.length === 0) {
+        // Nothing to judge, do not claim the stack is stopped
+        return { status: UNKNOWN,
+            issues };
+    }
+
+    let hasRunningLongLived = false;
+    let allCreated = true;
+
+    for (const instance of instances) {
+        if (instance.state !== "created") {
+            allCreated = false;
+        }
+
+        if (instance.state === "running" && !instance.isOneShot && instance.health !== "unhealthy") {
+            hasRunningLongLived = true;
+        }
+
+        if (instance.issue) {
+            const issue : StackStatusIssue = {
+                service: instance.service,
+                name: instance.name,
+                reason: instance.issue,
+            };
+
+            if (instance.exitCode !== null && (instance.issue === "workerFailed" || instance.issue === "serviceFailed")) {
+                issue.detail = String(instance.exitCode);
+            }
+
+            issues.push(issue);
+        }
+    }
+
+    if (allCreated) {
+        return { status: CREATED_STACK,
+            issues };
+    }
+
+    if (hasRunningLongLived) {
+        return { status: issues.length > 0 ? ATTENTION : RUNNING,
+            issues };
+    }
+
+    if (issues.some((issue) => ATTENTION_REASONS.has(issue.reason))) {
+        return { status: ATTENTION,
+            issues };
+    }
+
+    return { status: EXITED,
+        issues };
+}
+
+/**
+ * Normalise and aggregate raw Docker output in one step
+ * @param entries Raw compose ps entries
+ * @param expectedServices Services declared in the compose file
+ * @param oneShotServices Services marked as one-shot in the compose file
+ * @returns Instances and the resulting stack status
+ */
+export function resolveComposePsStatus(
+    entries : readonly ComposePsEntry[],
+    expectedServices : readonly string[] = [],
+    oneShotServices : ReadonlySet<string> = new Set(),
+) : StackStatusResult & { instances : ContainerInstanceStatus[] } {
+    const instances = entries.map((entry) => normaliseInstance(entry, oneShotServices));
+    const result = resolveStackStatus(instances, expectedServices);
+
+    return { ...result,
+        instances };
+}
