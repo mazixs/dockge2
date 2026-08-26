@@ -224,7 +224,7 @@ git commit -m "fix: persist stack environment files"
 
 **Issue invariant:** Issue #806 описывает корректный стек как `exited(N), running(M)`, когда одноразовый init-контейнер завершился с кодом 0. PR #950 правильно требует, чтобы все завершившиеся контейнеры имели код 0 и хотя бы один контейнер оставался running.
 
-- [ ] **Step 1: Написать падающие чистые тесты классификации**
+- [x] **Step 1: Написать падающие чистые тесты классификации**
 
 Создать `test/backend/stack-status.test.ts` и проверять без заглушек функций приложения, передавая в чистую функцию реальные структуры данных:
 
@@ -258,13 +258,13 @@ node --import tsx --test test/backend/stack-status.test.ts
 
 Expected: тесты не проходят до появления чистой функции классификации.
 
-- [ ] **Step 2: Добавить timeout и ограничение вывода в локальную обёртку процесса**
+- [x] **Step 2: Добавить timeout и ограничение вывода в локальную обёртку процесса**
 
 Расширить `SpawnOptions` полем `timeoutMs?: number`. В `spawn()` после создания процесса установить таймер только при заданном `timeoutMs`; по срабатыванию вызвать `child.kill(killSignal ?? "SIGTERM")`, сохранить ошибку `Process timed out after ${timeoutMs}ms` и очистить таймер в обработчике `close`. Сохранить текущие `maxBuffer`, `stdout`, `stderr`, код завершения и отсутствие `shell: true`.
 
 Добавить в `test/backend/child-process.test.ts` реальный дочерний процесс `process.execPath`, который ждёт дольше лимита, и проверить, что Promise завершается ошибкой с `killed === true`. Не использовать fake timers и не подменять `child_process.spawn`.
 
-- [ ] **Step 3: Реализовать получение статусов через существующий `spawn`**
+- [x] **Step 3: Реализовать получение статусов через существующий `spawn`**
 
 В `backend/stack.ts` определить узкие интерфейсы:
 
@@ -299,7 +299,7 @@ interface DockerPsEntry {
 
 Не переносить из upstream PR зависимость `promisify-child-process`: текущая обёртка уже используется проектом и дополнительно ограничивает вывод.
 
-- [ ] **Step 4: Добавить реальный Docker Compose fixture**
+- [x] **Step 4: Добавить реальный Docker Compose fixture**
 
 Создать `test/fixtures/clean-exit-stack.compose.yaml`:
 
@@ -322,7 +322,7 @@ services:
 
 Без переменной окружения тест должен быть пропущен с явной причиной; этот skip не используется как доказательство корректности и не должен быть единственной проверкой. Классификация также обязана покрываться чистыми unit-тестами из Step 1.
 
-- [ ] **Step 5: Подключить Docker-проверку только к Linux CI**
+- [x] **Step 5: Подключить Docker-проверку только к Linux CI**
 
 В `package.json` добавить:
 
@@ -332,7 +332,7 @@ services:
 
 В `.github/workflows/ci.yml` добавить отдельный job `docker-integration` на `ubuntu-latest` и Node `24.19.0`, который выполняет `npm ci --no-audit --no-fund`, затем `npm run test:docker-integration`. Основную матрицу Windows/macOS/Linux оставить для unit-тестов и проверки TypeScript.
 
-- [ ] **Step 6: Запустить проверки и зафиксировать результат**
+- [x] **Step 6: Запустить проверки и зафиксировать результат**
 
 Run:
 
@@ -346,7 +346,7 @@ git diff --check
 
 Expected: unit-тесты используют реальную дочернюю программу, интеграционный тест — реальный Docker Compose, а malformed/failed Docker output не переводит стек в `RUNNING`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/child-process.ts backend/stack.ts test/backend/child-process.test.ts test/backend/stack-status.test.ts test/backend/stack-docker.integration.test.ts test/fixtures/clean-exit-stack.compose.yaml package.json .github/workflows/ci.yml

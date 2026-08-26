@@ -47,3 +47,26 @@ jobs:
 
       - name: Build
         run: npm run build:frontend
+
+  docker-integration:
+    name: Docker Compose integration
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Show Docker Compose version
+        run: docker compose version
+
+      - name: Test with real Docker Compose
+        run: npm run test:docker-integration

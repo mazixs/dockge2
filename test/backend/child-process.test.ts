@@ -39,3 +39,22 @@ test("spawn rejects with output and exit code for a failed child process", async
         },
     );
 });
+
+test("spawn kills a real child process that exceeds the timeout", async () => {
+    await assert.rejects(
+        spawn(process.execPath, [
+            "-e",
+            "setTimeout(() => {}, 10000);",
+        ], {
+            encoding: "utf8",
+            timeoutMs: 150,
+        }),
+        (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.match(error.message, /timed out after 150ms/);
+            const childError = error as ChildProcessError & { killed: boolean };
+            assert.equal(childError.killed, true);
+            return true;
+        },
+    );
+});

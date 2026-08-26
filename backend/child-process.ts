@@ -4,6 +4,7 @@ export interface SpawnOptions extends NodeSpawnOptions {
     encoding?: BufferEncoding | "buffer";
     maxBuffer?: number;
     killSignal?: NodeJS.Signals | number;
+    timeoutMs?: number;
 }
 
 export interface ChildProcessResult {
@@ -44,6 +45,7 @@ export function spawn(command: string, args: readonly string[], options: SpawnOp
         encoding,
         killSignal,
         maxBuffer,
+        timeoutMs,
         ...childOptions
     } = options;
     const child = spawnProcess(command, args, childOptions);
@@ -80,11 +82,19 @@ export function spawn(command: string, args: readonly string[], options: SpawnOp
             child.stderr?.on("data", captureStderr);
         }
 
+        const timer = timeoutMs !== undefined ? setTimeout(() => {
+            error = new Error(`Process timed out after ${timeoutMs}ms`);
+            child.kill(killSignal ?? "SIGTERM");
+        }, timeoutMs) : undefined;
+
         const onError = (childError: Error) => {
             error = childError;
         };
 
         const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+            if (timer) {
+                clearTimeout(timer);
+            }
             child.removeListener("error", onError);
             child.removeListener("close", onClose);
             if (captureStdout) {

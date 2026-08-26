@@ -19,13 +19,24 @@ import { InteractiveTerminal, Terminal } from "./terminal";
 import { spawn } from "./child-process";
 import { Settings } from "./settings";
 
+interface ComposeLsEntry {
+    Name : string;
+    Status : string;
+    ConfigFiles? : string;
+}
+
+interface DockerPsEntry {
+    State? : string;
+    Status? : string;
+}
+
 export class Stack {
 
     name: string;
     protected _status: number = UNKNOWN;
     protected _composeYAML : string | undefined;
     protected _composeENV : string | undefined;
-    protected _configFilePath?: string;
+    protected _configFilePath?: string | undefined;
     protected _composeFileName: string = "compose.yaml";
     protected server: DockgeServer;
 
@@ -391,7 +402,7 @@ export class Stack {
             return stackList;
         }
 
-        let composeList = JSON.parse(res.stdout.toString());
+        let composeList : ComposeLsEntry[] = JSON.parse(res.stdout.toString());
 
         for (let composeStack of composeList) {
             let stack = stackList.get(composeStack.Name);
@@ -406,7 +417,7 @@ export class Stack {
                 stackList.set(composeStack.Name, stack);
             }
 
-            stack._status = this.statusConvert(composeStack.Status);
+            stack._status = await this.resolveComposeStatus(composeStack);
             stack._configFilePath = composeStack.ConfigFiles;
         }
 
@@ -428,10 +439,10 @@ export class Stack {
             return statusList;
         }
 
-        let composeList = JSON.parse(res.stdout.toString());
+        let composeList : ComposeLsEntry[] = JSON.parse(res.stdout.toString());
 
         for (let composeStack of composeList) {
-            statusList.set(composeStack.Name, this.statusConvert(composeStack.Status));
+            statusList.set(composeStack.Name, await this.resolveComposeStatus(composeStack));
         }
 
         return statusList;
@@ -454,6 +465,104 @@ export class Stack {
         } else {
             return UNKNOWN;
         }
+    }
+
+    /**
+     * Read the container list of a compose project through the Docker CLI
+     * @param composeName Compose project name
+     * @returns Container entries, or null when Docker output cannot be trusted
+     */
+    static async getSingleComposeStatus(composeName : string) : Promise<readonly DockerPsEntry[] | null> {
+        try {
+            const res = await spawn("docker", [
+                "ps",
+                "-a",
+                "--filter",
+                `label=com.docker.compose.project=${composeName}`,
+                "--format",
+                "json",
+            ], {
+                encoding: "utf-8",
+                maxBuffer: 256 * 1024,
+                timeoutMs: 5000,
+            });
+
+            if (!res.stdout) {
+                return null;
+            }
+
+            const entries : DockerPsEntry[] = [];
+
+            // Docker returns JSON Lines, one container per line
+            for (const line of res.stdout.toString().split("\n")) {
+                if (line.trim() === "") {
+                    continue;
+                }
+                entries.push(JSON.parse(line) as DockerPsEntry);
+            }
+
+            return entries;
+        } catch (e) {
+            if (e instanceof Error) {
+                log.warn("getSingleComposeStatus", `Failed to read containers of ${composeName}: ${e.message}`);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Classify a compose project by the state of its containers.
+     * Fail-closed: only a running container can produce RUNNING, and every exited
+     * container must report a clean exit code.
+     * @param entries Container entries from `docker ps`
+     * @returns Status number
+     */
+    static resolveContainerStatuses(entries : readonly DockerPsEntry[]) : number {
+        if (entries.length === 0) {
+            return EXITED;
+        }
+
+        let hasRunning = false;
+
+        for (const entry of entries) {
+            const state = entry.State?.toLowerCase();
+
+            if (state === "running") {
+                hasRunning = true;
+                continue;
+            }
+
+            // A one-shot container is acceptable only when it exited cleanly
+            if (state === "exited" && /^exited\s+\(0\)/i.test(entry.Status ?? "")) {
+                continue;
+            }
+
+            return EXITED;
+        }
+
+        return hasRunning ? RUNNING : EXITED;
+    }
+
+    /**
+     * Resolve the status of a compose project, looking at containers only when the
+     * aggregated output mixes exited and running services
+     * @param composeStack Entry of `docker compose ls`
+     * @returns Status number
+     */
+    static async resolveComposeStatus(composeStack : ComposeLsEntry) : Promise<number> {
+        const status = this.statusConvert(composeStack.Status);
+
+        if (status !== EXITED || !composeStack.Status.includes("running")) {
+            return status;
+        }
+
+        const entries = await this.getSingleComposeStatus(composeStack.Name);
+
+        if (!entries) {
+            return status;
+        }
+
+        return this.resolveContainerStatuses(entries);
     }
 
     static async getStack(server: DockgeServer, stackName: string, skipFSOperations = false) : Promise<Stack> {
