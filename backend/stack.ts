@@ -1,7 +1,7 @@
 import { DockgeServer } from "./dockge-server";
 import fs, { promises as fsAsync } from "fs";
 import { log } from "./log";
-import yaml, { isMap, isSeq, parseDocument } from "yaml";
+import yaml, { type Document, isMap, isSeq, parseDocument } from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
 import path from "path";
 import { emptyStackFileConfig, resolveStackFilePath, StackConfig } from "./stack-config";
@@ -1021,6 +1021,18 @@ export class Stack {
     }
 
     /**
+     * Serialise a compose document after an explicit structural edit.
+     * `flowCollectionPadding` is disabled so untouched inline arrays such as
+     * `["sh", "-c", "..."]` keep the spacing Compose files normally use.
+     * Task 5 of the plan replaces this with real source preservation.
+     * @param doc Parsed compose document
+     * @returns YAML text
+     */
+    protected serialiseComposeDocument(doc : Document) : string {
+        return doc.toString({ flowCollectionPadding: false });
+    }
+
+    /**
      * Reference a secret file from the compose file, only on an explicit user action.
      * The compose document is edited in place, so comments and formatting survive.
      * @param secretName Compose secret name
@@ -1063,7 +1075,7 @@ export class Stack {
             doc.setIn([ "services", service, "secrets" ], list);
         }
 
-        const composeYAML = doc.toString();
+        const composeYAML = this.serialiseComposeDocument(doc);
         fs.writeFileSync(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
         this._composeYAML = composeYAML;
 
@@ -1122,7 +1134,7 @@ export class Stack {
         }
 
         if (changed) {
-            const composeYAML = doc.toString();
+            const composeYAML = this.serialiseComposeDocument(doc);
             fs.writeFileSync(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
             this._composeYAML = composeYAML;
         }
