@@ -409,7 +409,31 @@ export class Stack {
         }
     }
 
+    /**
+     * Let Docker Compose validate the selected file and env files before anything is started.
+     * The canonical output of `config` is never written back, only the exit code is used.
+     * @throws {ValidationError} If Compose refuses the project
+     */
+    async validateComposeConfig() : Promise<void> {
+        try {
+            await spawn("docker", this.getComposeOptions("config", "--quiet"), {
+                cwd: this.path,
+                encoding: "utf-8",
+                maxBuffer: 256 * 1024,
+                timeoutMs: 60_000,
+            });
+        } catch (e) {
+            const stderr = (e as { stderr? : string | Buffer }).stderr?.toString().trim() ?? "";
+            const reason = stderr === "" ? (e instanceof Error ? e.message : String(e)) : stderr;
+
+            // Compose reports variable names, not values, so this is safe to show
+            throw new ValidationError("Invalid compose configuration: " + reason.slice(0, 2000));
+        }
+    }
+
     async deploy(socket : DockgeSocket) : Promise<number> {
+        await this.validateComposeConfig();
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("up", "-d", "--remove-orphans"), this.path);
         if (exitCode !== 0) {
@@ -794,6 +818,8 @@ export class Stack {
     }
 
     async start(socket: DockgeSocket) {
+        await this.validateComposeConfig();
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("up", "-d", "--remove-orphans"), this.path);
         if (exitCode !== 0) {
@@ -830,6 +856,8 @@ export class Stack {
     }
 
     async update(socket: DockgeSocket) {
+        await this.validateComposeConfig();
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("pull"), this.path);
         if (exitCode !== 0) {

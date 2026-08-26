@@ -3,7 +3,7 @@
         <h5>{{ $t("Internal Networks") }}</h5>
         <ul class="list-group">
             <li v-for="(networkRow, index) in networkList" :key="index" class="list-group-item">
-                <input v-model="networkRow.key" type="text" class="no-bg domain-input" :placeholder="$t(`Network name...`)" />
+                <input v-model="networkRow.key" type="text" class="no-bg domain-input" :placeholder="$t(`Network name...`)" @change="applyToYAML" />
                 <font-awesome-icon icon="times" class="action remove ms-2 me-3 text-danger" @click="remove(index)" />
             </li>
         </ul>
@@ -51,6 +51,8 @@ export default {
             externalList: {},
             selectedExternalList: {},
             externalNetworkList: [],
+            /** True while the editor is filled from the compose file */
+            loading: true,
         };
     },
     computed: {
@@ -95,18 +97,12 @@ export default {
                         delete this.externalList[networkName];
                     }
                 }
+
+                // Filling the switches from the compose file is not a user action
                 this.applyToYAML();
             },
             deep: true,
         },
-
-        "networkList": {
-            handler() {
-                this.applyToYAML();
-            },
-            deep: true,
-        }
-
     },
     mounted() {
         this.loadNetworkList();
@@ -114,6 +110,7 @@ export default {
     },
     methods: {
         loadNetworkList() {
+            this.loading = true;
             this.networkList = [];
             this.externalList = {};
 
@@ -135,6 +132,10 @@ export default {
             for (const networkName in this.externalList) {
                 this.selectedExternalList[networkName] = true;
             }
+
+            this.$nextTick(() => {
+                this.loading = false;
+            });
         },
 
         loadExternalNetworkList() {
@@ -167,27 +168,35 @@ export default {
 
         remove(index) {
             this.networkList.splice(index, 1);
-            this.applyToYAML();
+
+            // Deleting the last network by hand is the explicit action that removes the key
+            this.applyToYAML(this.networkList.length === 0 && Object.keys(this.externalList).length === 0);
         },
 
-        applyToYAML() {
-            if (this.editorFocus) {
+        /**
+         * Hand the configured networks to the page, which decides how to write them.
+         * Nothing happens while the editor is still being filled from the file.
+         * @param {boolean} explicitRemoval True when the user removed the last network
+         * @returns {void}
+         */
+        applyToYAML(explicitRemoval = false) {
+            if (this.editorFocus || this.loading) {
                 return;
             }
 
-            this.jsonConfig.networks = {};
+            const networks = {};
 
             // Internal networks
             for (const networkRow of this.networkList) {
-                this.jsonConfig.networks[networkRow.key] = networkRow.value;
+                networks[networkRow.key] = networkRow.value;
             }
 
             // External networks
             for (const networkName in this.externalList) {
-                this.jsonConfig.networks[networkName] = this.externalList[networkName];
+                networks[networkName] = this.externalList[networkName];
             }
 
-            console.debug("applyToYAML", this.jsonConfig.networks);
+            this.$parent.$parent.applyNetworksEdit(networks, { explicitRemoval });
         }
 
     },

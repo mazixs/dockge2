@@ -197,5 +197,6 @@
     "unbindSecret": "Unbind",
     "confirmSecretAction": "Confirm with your password",
     "secretPasswordHint": "Reading and changing secrets is a separate action, so it needs your current password.",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "textModeOnly": "This file uses {0}, which the structured editor cannot rewrite without changing its meaning. Edit it as text instead."
 }

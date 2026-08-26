@@ -124,3 +124,41 @@ test("the env file order decides which value compose interpolates", { skip }, as
         }
     });
 });
+
+test("a compose file that Docker refuses is never deployed", { skip }, async () => {
+    await withDatabase(async () => {
+        const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-it-invalid-"));
+        const stackName = `dockge-it-invalid-${process.pid}`;
+        const stackDir = path.join(stacksDir, stackName);
+        await mkdir(stackDir);
+
+        // A service without image or build is a project Compose rejects
+        await writeFile(path.join(stackDir, "compose.yaml"), `services:
+  app:
+    restart: always
+`);
+
+        const stack = await Stack.getStack({ stacksDir } as never, stackName);
+
+        try {
+            await assert.rejects(stack.validateComposeConfig(), (error : unknown) => {
+                assert.ok(error instanceof Error);
+                assert.match(error.message, /Invalid compose configuration/);
+                assert.match(error.message, /neither an image nor a build context/);
+                return true;
+            });
+
+            // Nothing was started, so Compose knows no container of this project
+            const containers = await spawn("docker", [
+                "ps", "--all", "--filter", `label=com.docker.compose.project=${stackName}`, "--format", "json",
+            ], {
+                encoding: "utf-8",
+                timeoutMs: 60_000,
+            });
+            assert.equal(containers.stdout?.toString().trim(), "");
+        } finally {
+            await rm(stacksDir, { recursive: true,
+                force: true });
+        }
+    });
+});

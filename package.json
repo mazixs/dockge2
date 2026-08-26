@@ -30,7 +30,8 @@
         "mark-as-nightly": "tsx ./extra/mark-as-nightly.ts",
         "reformat-changelog": "tsx ./extra/reformat-changelog.ts",
         "reset-password": "tsx ./extra/reset-password.ts",
-        "update-docker": "tsx ./extra/update-dockge.ts"
+        "update-docker": "tsx ./extra/update-dockge.ts",
+        "deploy-stack": "tsx ./extra/deploy-stack.ts"
     },
     "dependencies": {
         "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",

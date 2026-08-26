@@ -123,7 +123,7 @@
                     <!-- Containers -->
                     <h4 class="mb-3">{{ $t("container", 2) }}</h4>
 
-                    <div v-if="isEditMode" class="input-group mb-3">
+                    <div v-if="isEditMode && structuredEditsEnabled" class="input-group mb-3">
                         <input
                             v-model="newContainerName"
                             :placeholder="$t(`New Container Name...`)"
@@ -140,7 +140,7 @@
                             v-for="(service, name) in jsonConfig.services"
                             :key="name"
                             :name="name"
-                            :is-edit-mode="isEditMode"
+                            :is-edit-mode="isEditMode && structuredEditsEnabled"
                             :first="name === Object.keys(jsonConfig.services)[0]"
                             :serviceStatus="serviceStatusList[name]"
                             :dockerStats="dockerStats"
@@ -153,7 +153,7 @@
                     <button v-if="false && isEditMode && jsonConfig.services && Object.keys(jsonConfig.services).length > 0" class="btn btn-normal mb-3" @click="addContainer">{{ $t("addContainer") }}</button>
 
                     <!-- General -->
-                    <div v-if="isEditMode">
+                    <div v-if="isEditMode && structuredEditsEnabled">
                         <h4 class="mb-3">{{ $t("extra") }}</h4>
                         <div class="shadow-box big-padding mb-3">
                             <!-- URLs -->
@@ -202,6 +202,12 @@
                         {{ yamlError }}
                     </div>
 
+                    <!-- A file the structured editor cannot rebuild stays in text mode -->
+                    <div v-if="isEditMode && composeAnalysis && !structuredEditsEnabled && unsupportedConstructs.length > 0" class="alert alert-warning" role="alert">
+                        <font-awesome-icon icon="triangle-exclamation" class="me-1" />
+                        {{ $t("textModeOnly", [ unsupportedConstructs.join(", ") ]) }}
+                    </div>
+
                     <!-- Files of the stack directory -->
                     <div v-if="!isAdd && stack.isManagedByDockge && fileInventory">
                         <h4 class="mb-3">{{ $t("stackFiles") }}</h4>
@@ -244,7 +250,7 @@
                         </div>
                     </div>
 
-                    <div v-if="isEditMode">
+                    <div v-if="isEditMode && structuredEditsEnabled">
                         <!-- Volumes -->
                         <div v-if="false">
                             <h4 class="mb-3">{{ $t("volume", 2) }}</h4>
@@ -288,19 +294,20 @@ import { yaml } from "@codemirror/lang-yaml";
 import { python } from "@codemirror/lang-python";
 import { oneDark as editorTheme } from "@codemirror/theme-one-dark";
 import { lineNumbers, EditorView } from "@codemirror/view";
-import { parseDocument, Document } from "yaml";
+import { parseDocument } from "yaml";
 
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import {
     COMBINED_TERMINAL_COLS,
     COMBINED_TERMINAL_ROWS,
-    copyYAMLComments, envsubstYAML,
+    envsubstYAML,
     getCombinedTerminalName,
     getComposeTerminalName,
     PROGRESS_TERMINAL_ROWS,
     RUNNING,
     ATTENTION
 } from "../../../common/util-common";
+import { analyseComposeSource, applyStructuredEdit, canEditStructurally } from "../../../common/compose-editor";
 import { BModal } from "bootstrap-vue-next";
 import NetworkInput from "../components/NetworkInput.vue";
 import StackFilesEditor from "../components/StackFilesEditor.vue";
@@ -381,6 +388,11 @@ export default {
             serviceStatusList: {},
             serviceIssues: [],
             fileInventory: null,
+            composeAnalysis: null,
+            /** True while the model is filled from the server or the text editor */
+            applyingExternal: false,
+            /** Set when the user removed the last network by hand */
+            explicitNetworkRemoval: false,
             dockerStats: {},
             isEditMode: false,
             submitted: false,
@@ -441,6 +453,23 @@ export default {
         active() {
             // A partially degraded stack is still up, so stop and restart stay available
             return this.status === RUNNING || this.status === ATTENTION;
+        },
+
+        /**
+         * Whether the structured editor may write the compose file back.
+         * Files with include, custom tags, anchors or merge keys stay in text mode.
+         * @returns {boolean} True when a structured edit keeps the meaning of the file
+         */
+        structuredEditsEnabled() {
+            return this.composeAnalysis ? canEditStructurally(this.composeAnalysis) : false;
+        },
+
+        /**
+         * Constructs that keep the file in text mode
+         * @returns {Array<string>} Reasons
+         */
+        unsupportedConstructs() {
+            return this.composeAnalysis?.unsupported ?? [];
         },
 
         /**
@@ -523,19 +552,27 @@ export default {
 
         jsonConfig: {
             handler() {
-                if (!this.editorFocus) {
-                    console.debug("jsonConfig changed");
-
-                    let doc = new Document(this.jsonConfig);
-
-                    // Stick back the yaml comments
-                    if (this.yamlDoc) {
-                        copyYAMLComments(doc, this.yamlDoc);
-                    }
-
-                    this.stack.composeYAML = doc.toString();
-                    this.yamlDoc = doc;
+                // The text editor is the source of truth while the user types in it
+                if (this.editorFocus) {
+                    return;
                 }
+
+                // Values that came from the server or from the parsed source are not an edit
+                if (this.applyingExternal) {
+                    return;
+                }
+
+                // Viewing a stack must never rewrite its file
+                if (!this.isEditMode) {
+                    return;
+                }
+
+                // A file the editor cannot rebuild stays untouched
+                if (!this.structuredEditsEnabled) {
+                    return;
+                }
+
+                this.writeStructuredEdit();
             },
             deep: true,
         },
@@ -867,7 +904,14 @@ export default {
                 let { config, doc } = this.yamlToJSON(this.stack.composeYAML);
 
                 this.yamlDoc = doc;
+                this.composeAnalysis = analyseComposeSource(this.stack.composeYAML);
+
+                // Filling the model from the source is not a user edit
+                this.applyingExternal = true;
                 this.jsonConfig = config;
+                this.$nextTick(() => {
+                    this.applyingExternal = false;
+                });
 
                 let env = dotenv.parse(this.stack.composeENV);
                 let envYAML = envsubstYAML(this.stack.composeYAML, env);
@@ -886,6 +930,65 @@ export default {
                         this.yamlError = e.message;
                     }, 3000);
                 }
+            }
+        },
+
+        /**
+         * Write an explicit structured edit into the compose source.
+         * Untouched values keep their formatting, comments and octal notation.
+         * @returns {void}
+         */
+        writeStructuredEdit() {
+            const source = this.stack.composeYAML;
+
+            let next;
+            try {
+                next = applyStructuredEdit(source, this.jsonConfig, {
+                    sourceHadNetworks: this.composeAnalysis?.hasNetworksKey ?? false,
+                    explicitNetworkRemoval: this.explicitNetworkRemoval,
+                });
+            } catch (e) {
+                this.yamlError = e.message;
+                return;
+            }
+
+            this.explicitNetworkRemoval = false;
+
+            if (next === source) {
+                return;
+            }
+
+            this.applyingExternal = true;
+            this.stack.composeYAML = next;
+            this.composeAnalysis = analyseComposeSource(next);
+            this.yamlDoc = this.composeAnalysis.doc;
+            this.$nextTick(() => {
+                this.applyingExternal = false;
+            });
+        },
+
+        /**
+         * Apply a network edit coming from the network editor.
+         * An empty result never introduces `networks: {}` on its own.
+         * @param {object} networks Networks the user configured
+         * @param {object} options Extra flags, `explicitRemoval` when the user deleted the last network
+         * @returns {void}
+         */
+        applyNetworksEdit(networks, options = {}) {
+            const cleaned = {};
+
+            for (const [ name, value ] of Object.entries(networks)) {
+                if (name.trim() === "") {
+                    continue;
+                }
+                cleaned[name] = value;
+            }
+
+            if (Object.keys(cleaned).length === 0) {
+                this.explicitNetworkRemoval = options.explicitRemoval === true;
+                delete this.jsonConfig.networks;
+            } else {
+                this.jsonConfig.networks = cleaned;
             }
         },
 

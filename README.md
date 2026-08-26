@@ -149,6 +149,20 @@ npm run update-docker
 It fast-forwards `origin/main` by default; a deployment that tracks another branch names it with
 `npm run update-docker -- --branch=release/2.0`.
 
+### Updating one stack from Git
+
+A stack directory that is a Git checkout can be updated the same way, with the compose file and the
+env files named explicitly and the configuration validated before anything starts:
+
+```bash
+npm run deploy-stack -- --stack=my-stack --dry-run
+npm run deploy-stack -- --stack=my-stack --file=compose.yaml --env-file=.env --env-file=.env.product
+```
+
+The command stops when the stack directory has local changes, never runs `git reset` or `git clean`,
+and `--skip-git` deploys a stack that is not a checkout. As above, this is a local administrative
+command, not a browser action.
+
 - `docker compose up` already recreates the container when the image or configuration changed, and it
   keeps attached volumes and bind mounts.
 - `--force-recreate` (`npm run update-docker -- --force-recreate`) forces recreation without deleting
