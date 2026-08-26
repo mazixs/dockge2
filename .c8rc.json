@@ -1,0 +1,34 @@
+{
+    "all": true,
+    "include": [
+        "backend/**/*.ts",
+        "common/**/*.ts"
+    ],
+    "exclude": [
+        "backend/index.ts",
+        "backend/migrations/**",
+        "**/*.d.ts",
+        "backend/dockge-server.ts",
+        "backend/agent-manager.ts",
+        "backend/agent-socket-handler.ts",
+        "backend/check-version.ts",
+        "backend/router.ts",
+        "backend/socket-handler.ts",
+        "backend/terminal.ts",
+        "backend/agent-socket-handlers/**",
+        "backend/routers/**",
+        "backend/socket-handlers/agent-proxy-socket-handler.ts",
+        "backend/socket-handlers/manage-agent-socket-handler.ts"
+    ],
+    "excludeAfterRemap": true,
+    "checkCoverage": true,
+    "lines": 70,
+    "statements": 70,
+    "functions": 70,
+    "branches": 70,
+    "reporter": [
+        "text",
+        "text-summary",
+        "lcov"
+    ]
+}

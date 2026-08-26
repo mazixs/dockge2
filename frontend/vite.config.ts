@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import Components from "unplugin-vue-components/vite";
 import { BootstrapVueNextResolver } from "unplugin-vue-components/resolvers";
-import viteCompression from "vite-plugin-compression";
+import { compression } from "vite-plugin-compression2";
 import "vue";
 
 const viteCompressionFilter = /\.(js|mjs|json|css|html|svg)$/i;
@@ -23,14 +23,11 @@ export default defineConfig({
         vue(),
         Components({
             resolvers: [ BootstrapVueNextResolver() ],
+            dts: false,
         }),
-        viteCompression({
-            algorithm: "gzip",
-            filter: viteCompressionFilter,
-        }),
-        viteCompression({
-            algorithm: "brotliCompress",
-            filter: viteCompressionFilter,
+        compression({
+            include: viteCompressionFilter,
+            algorithms: [ "gzip", "brotliCompress" ],
         }),
     ],
 });

@@ -4,7 +4,6 @@ import { log } from "./log";
 import { Agent } from "./models/agent";
 import { isDev, LooseObject, sleep } from "../common/util-common";
 import semver from "semver";
-import { R } from "redbean-node";
 import dayjs, { Dayjs } from "dayjs";
 
 /**
@@ -76,30 +75,21 @@ export class AgentManager {
      * @param url
      * @param username
      * @param password
-     * @param name
+    * @param name
      */
     async add(url: string, username: string, password: string, name: string): Promise<Agent> {
-        let bean = R.dispense("agent") as Agent;
-        bean.url = url;
-        bean.username = username;
-        bean.password = password;
-        bean.name = name;
-        await R.store(bean);
-        return bean;
+        return Agent.create(url, username, password, name);
     }
 
     /**
      *
-     * @param url
+    * @param url
      */
     async remove(url : string) {
-        let bean = await R.findOne("agent", " url = ? ", [
-            url,
-        ]);
+        const agent = await Agent.deleteByUrl(url);
 
-        if (bean) {
-            await R.trash(bean);
-            let endpoint = bean.endpoint;
+        if (agent) {
+            const endpoint = agent.endpoint;
             this.disconnect(endpoint);
             this.sendAgentList();
             delete this.agentSocketList[endpoint];
@@ -111,15 +101,12 @@ export class AgentManager {
     /**
      *
      * @param url
-     * @param updatedName
+    * @param updatedName
      */
     async update(url: string, updatedName: string) {
-        const agent = await R.findOne("agent", " url = ? ", [
-            url,
-        ]);
+        const agent = await Agent.updateName(url, updatedName);
         if (agent) {
-            agent.name = updatedName;
-            await R.store(agent);
+            this.sendAgentList();
         } else {
             throw new Error("Agent not found");
         }
@@ -234,6 +221,9 @@ export class AgentManager {
 
         for (let endpoint in list) {
             let agent = list[endpoint];
+            if (!agent) {
+                continue;
+            }
             this.connect(agent.url, agent.username, agent.password);
         }
     }
@@ -303,6 +293,9 @@ export class AgentManager {
 
         for (let endpoint in list) {
             let agent = list[endpoint];
+            if (!agent) {
+                continue;
+            }
             result[endpoint] = agent.toJSON();
         }
 

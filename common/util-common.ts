@@ -1,15 +1,14 @@
 /*
  * Common utilities for backend and frontend
  */
-import yaml, { Document, Pair, Scalar } from "yaml";
-import { DotenvParseOutput } from "dotenv";
+import yaml, { Document, Pair, isCollection, isNode, isPair, isScalar, type Node } from "yaml";
+import type { DotenvParseOutput } from "dotenv";
 
 // Init dayjs
 import dayjs from "dayjs";
 import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 import relativeTime from "dayjs/plugin/relativeTime";
-// @ts-ignore
 import { replaceVariablesSync } from "@inventage/envsubst";
 
 dayjs.extend(utc);
@@ -185,7 +184,7 @@ export function getCryptoRandomInt(min: number, max: number):number {
     let randomValue = 0;
 
     for (let i = 0; i < bytesNeeded; i++) {
-        randomValue |= bytes[i] << 8 * i;
+        randomValue |= (bytes[i] ?? 0) << 8 * i;
     }
 
     randomValue = randomValue & mask;
@@ -217,8 +216,7 @@ export function copyYAMLComments(doc : Document, src : Document) {
     doc.comment = src.comment;
     doc.commentBefore = src.commentBefore;
 
-    if (doc && doc.contents && src && src.contents) {
-        // @ts-ignore
+    if (isCollection(doc.contents) && isCollection(src.contents)) {
         copyYAMLCommentsItems(doc.contents.items, src.contents.items);
     }
 }
@@ -309,16 +307,16 @@ export function parseDockerPort(input : string, hostname : string) {
     let display;
 
     const parts = input.split("/");
-    let part1 = parts[0];
+    let part1 = parts[0] ?? "";
     let protocol = parts[1] || "tcp";
 
     // coming from docker ps, split host part
     const arrow = part1.indexOf("->");
     if (arrow >= 0) {
-        part1 = part1.split("->")[0];
+        part1 = part1.split("->")[0] ?? "";
         const colon = part1.indexOf(":");
         if (colon >= 0) {
-            part1 = part1.split(":")[1];
+            part1 = part1.split(":")[1] ?? "";
         }
     }
 
@@ -365,7 +363,7 @@ export function parseDockerPort(input : string, hostname : string) {
         }
     }
 
-    let portInt = parseInt(port);
+    const portInt = parseInt(port, 10);
 
     if (portInt == 443) {
         protocol = "https";
@@ -392,11 +390,8 @@ export function envsubst(string : string, variables : LooseObject) : string {
  */
 export function envsubstYAML(content : string, env : DotenvParseOutput) : string {
     const doc = yaml.parseDocument(content);
-    if (doc.contents) {
-        // @ts-ignore
-        for (const item of doc.contents.items) {
-            traverseYAML(item, env);
-        }
+    if (doc.contents && isNode(doc.contents)) {
+        traverseYAML(doc.contents, env);
     }
     return doc.toString();
 }
@@ -406,25 +401,24 @@ export function envsubstYAML(content : string, env : DotenvParseOutput) : string
  * @param pair
  * @param env
  */
-function traverseYAML(pair : Pair, env : DotenvParseOutput) : void {
-    // @ts-ignore
-    if (pair.value && pair.value.items) {
-        // @ts-ignore
-        for (const item of pair.value.items) {
-            if (item instanceof Pair) {
-                traverseYAML(item, env);
-            } else if (item instanceof Scalar) {
-                let value = item.value as unknown;
+function traverseYAML(node : Node | Pair, env : DotenvParseOutput) : void {
+    if (isPair(node)) {
+        if (node.value && isNode(node.value)) {
+            traverseYAML(node.value, env);
+        }
+        return;
+    }
 
-                if (typeof(value) === "string") {
-                    item.value = envsubst(value, env);
-                }
+    if (isCollection(node)) {
+        for (const item of node.items) {
+            if (isPair(item) || isNode(item)) {
+                traverseYAML(item, env);
             }
         }
-    // @ts-ignore
-    } else if (pair.value && typeof(pair.value.value) === "string") {
-        // @ts-ignore
-        pair.value.value = envsubst(pair.value.value, env);
+        return;
+    }
+
+    if (isScalar(node) && typeof node.value === "string") {
+        node.value = envsubst(node.value, env);
     }
 }
-

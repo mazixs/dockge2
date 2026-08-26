@@ -1,5 +1,6 @@
 import { DockgeServer } from "./dockge-server";
 import * as os from "node:os";
+import { execFileSync } from "node:child_process";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
 import { LimitQueue } from "./utils/limit-queue";
 import { DockgeSocket } from "./util-server";
@@ -8,8 +9,18 @@ import {
     TERMINAL_COLS,
     TERMINAL_ROWS
 } from "../common/util-common";
-import { sync as commandExistsSync } from "command-exists";
 import { log } from "./log";
+
+function commandExistsSync(command : string) {
+    try {
+        execFileSync(process.platform === "win32" ? "where.exe" : "which", [ command ], {
+            stdio: "ignore",
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Terminal for running commands, no user interaction
@@ -86,6 +97,9 @@ export class Terminal {
         this.kickDisconnectedClientsInterval = setInterval(() => {
             for (const socketID in this.socketList) {
                 const socket = this.socketList[socketID];
+                if (!socket) {
+                    continue;
+                }
                 if (!socket.connected) {
                     log.debug("Terminal", "Kicking disconnected client " + socket.id + " from terminal " + this.name);
                     this.leave(socket);
@@ -125,6 +139,9 @@ export class Terminal {
 
                 for (const socketID in this.socketList) {
                     const socket = this.socketList[socketID];
+                    if (!socket) {
+                        continue;
+                    }
                     socket.emitAgent("terminalWrite", this.name, data);
                 }
             });
@@ -151,6 +168,9 @@ export class Terminal {
     protected exit = (res : {exitCode: number, signal?: number | undefined}) => {
         for (const socketID in this.socketList) {
             const socket = this.socketList[socketID];
+            if (!socket) {
+                continue;
+            }
             socket.emitAgent("terminalExit", this.name, res.exitCode);
         }
 

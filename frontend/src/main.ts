@@ -9,12 +9,12 @@ import { i18n } from "./i18n";
 
 // Dependencies
 import "bootstrap";
-import Toast, { POSITION, useToast } from "vue-toastification";
+import Vue3Toastify, { toast } from "vue3-toastify";
 import "@xterm/xterm/lib/xterm.js";
 
 // CSS
 import "@fontsource/jetbrains-mono";
-import "vue-toastification/dist/index.css";
+import "vue3-toastify/dist/index.css";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/main.scss";
 
@@ -23,14 +23,21 @@ import socket from "./mixins/socket";
 import lang from "./mixins/lang";
 import theme from "./mixins/theme";
 
+interface ToastResponse {
+    ok: boolean;
+    msg?: string | { key: string; values?: Record<string, unknown> };
+    msgi18n?: boolean;
+}
+
 // Set Title
 document.title = document.title + " - " + location.host;
 
 const app = createApp(rootApp());
 
-app.use(Toast, {
-    position: POSITION.BOTTOM_RIGHT,
-    showCloseButtonOnHover: true,
+app.use(Vue3Toastify, {
+    position: toast.POSITION.BOTTOM_RIGHT,
+    containerClassName: "toast-container",
+    closeButton: true,
 });
 app.use(router);
 app.use(i18n);
@@ -41,8 +48,6 @@ app.mount("#app");
  * Root Vue component
  */
 function rootApp() {
-    const toast = useToast();
-
     return defineComponent({
         mixins: [
             socket,
@@ -66,13 +71,15 @@ function rootApp() {
              * @param {object} res Response object
              * @returns {void}
              */
-            toastRes(res) {
-                let msg = res.msg;
+            toastRes(res: ToastResponse) {
+                let msg = typeof res.msg === "string" ? res.msg : "";
                 if (res.msgi18n) {
-                    if (msg != null && typeof msg === "object") {
-                        msg = this.$t(msg.key, msg.values);
-                    } else {
-                        msg = this.$t(msg);
+                    if (res.msg && typeof res.msg === "object") {
+                        msg = res.msg.values
+                            ? this.$t(res.msg.key, res.msg.values)
+                            : this.$t(res.msg.key);
+                    } else if (res.msg) {
+                        msg = this.$t(res.msg);
                     }
                 }
 

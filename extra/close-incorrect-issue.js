@@ -3,8 +3,12 @@ import github from "@actions/github";
 (async () => {
     try {
         const token = process.argv[2];
-        const issueNumber = process.argv[3];
+        const issueNumber = Number(process.argv[3]);
         const username = process.argv[4];
+
+        if (!token || !Number.isInteger(issueNumber) || !username) {
+            throw new Error("Token, issue number and username are required");
+        }
 
         const client = github.getOctokit(token).rest;
 
@@ -51,7 +55,8 @@ import github from "@actions/github";
             console.log("Pass!");
         }
     } catch (e) {
-        console.log(e);
+        console.error(e);
+        process.exitCode = 1;
     }
 
 })();

@@ -17,10 +17,8 @@ import { SocketHandler } from "./socket-handler";
 import { Settings } from "./settings";
 import checkVersion from "./check-version";
 import dayjs from "dayjs";
-import { R } from "redbean-node";
 import { genSecret, isDev, LooseObject } from "../common/util-common";
 import { generatePasswordHash } from "./password-hash";
-import { Bean } from "redbean-node/dist/bean";
 import { Arguments, Config, DockgeSocket } from "./util-server";
 import { DockerSocketHandler } from "./agent-socket-handlers/docker-socket-handler";
 import expressStaticGzip from "express-static-gzip";
@@ -30,7 +28,7 @@ import { Stack } from "./stack";
 import { Cron } from "croner";
 import gracefulShutdown from "http-graceful-shutdown";
 import User from "./models/user";
-import childProcessAsync from "promisify-child-process";
+import { spawn } from "./child-process";
 import { AgentManager } from "./agent-manager";
 import { AgentProxySocketHandler } from "./socket-handlers/agent-proxy-socket-handler";
 import { AgentSocketHandler } from "./agent-socket-handler";
@@ -203,7 +201,7 @@ export class DockgeServer {
         });
 
         // Allow all CORS origins in development
-        let cors = undefined;
+        let cors : socketIO.ServerOptions["cors"];
         if (isDev) {
             cors = {
                 origin: "*",
@@ -211,8 +209,7 @@ export class DockgeServer {
         }
 
         // Create Socket.io
-        this.io = new socketIO.Server(this.httpServer, {
-            cors,
+        const socketOptions: Partial<socketIO.ServerOptions> = {
             allowRequest: (req, callback) => {
                 let isOriginValid = true;
                 const bypass = isDev || process.env.UPTIME_KUMA_WS_ORIGIN_CHECK === "bypass";
@@ -246,7 +243,11 @@ export class DockgeServer {
 
                 callback(null, isOriginValid);
             }
-        });
+        };
+        if (cors) {
+            socketOptions.cors = cors;
+        }
+        this.io = new socketIO.Server(this.httpServer, socketOptions);
 
         this.io.on("connection", async (socket: Socket) => {
             let dockgeSocket = socket as DockgeSocket;
@@ -302,8 +303,11 @@ export class DockgeServer {
             log.debug("auth", "check auto login");
             if (await Settings.get("disableAuth")) {
                 log.info("auth", "Disabled Auth: auto login to admin");
-                this.afterLogin(dockgeSocket, await R.findOne("user") as User);
-                dockgeSocket.emit("autoLogin");
+                const user = await User.findFirst();
+                if (user) {
+                    this.afterLogin(dockgeSocket, user);
+                    dockgeSocket.emit("autoLogin");
+                }
             } else {
                 log.debug("auth", "need auth");
             }
@@ -363,9 +367,8 @@ export class DockgeServer {
         }
 
         // First time setup if needed
-        let jwtSecretBean = await R.findOne("setting", " `key` = ? ", [
-            "jwtSecret",
-        ]);
+        const db = Database.getKnex();
+        let jwtSecretBean = await db("setting").where("key", "jwtSecret").first();
 
         if (! jwtSecretBean) {
             log.info("server", "JWT secret is not found, generate one.");
@@ -377,7 +380,8 @@ export class DockgeServer {
 
         this.jwtSecret = jwtSecretBean.value;
 
-        const userCount = (await R.knex("user").count("id as count").first()).count;
+        const userCountRow = await db("user").count("id as count").first();
+        const userCount = Number(userCountRow?.count ?? 0);
 
         log.debug("server", "User count: " + userCount);
 
@@ -396,7 +400,7 @@ export class DockgeServer {
             }
 
             // Run every 10 seconds
-            Cron("*/10 * * * * *", {
+            new Cron("*/10 * * * * *", {
                 protect: true,  // Enabled over-run protection.
             }, () => {
                 //log.debug("server", "Cron job running");
@@ -460,7 +464,7 @@ export class DockgeServer {
             const forwardedFor = socket.client.conn.request.headers["x-forwarded-for"];
 
             if (typeof forwardedFor === "string") {
-                return forwardedFor.split(",")[0].trim();
+                return forwardedFor.split(",")[0]?.trim() || "";
             } else if (typeof socket.client.conn.request.headers["x-real-ip"] === "string") {
                 return socket.client.conn.request.headers["x-real-ip"];
             }
@@ -537,7 +541,7 @@ export class DockgeServer {
         try {
             dayjs.utc("2013-11-18 11:55").tz(timezone).format();
         } catch (e) {
-            throw new Error("Invalid timezone:" + timezone);
+            throw new Error("Invalid timezone:" + timezone, { cause: e });
         }
     }
 
@@ -566,19 +570,21 @@ export class DockgeServer {
      * Init or reset JWT secret
      * @returns  JWT secret
      */
-    async initJWTSecret() : Promise<Bean> {
-        let jwtSecretBean = await R.findOne("setting", " `key` = ? ", [
-            "jwtSecret",
-        ]);
+    async initJWTSecret() : Promise<{ value: string }> {
+        const db = Database.getKnex();
+        const value = generatePasswordHash(genSecret());
+        const setting = await db("setting").where("key", "jwtSecret").first();
 
-        if (!jwtSecretBean) {
-            jwtSecretBean = R.dispense("setting");
-            jwtSecretBean.key = "jwtSecret";
+        if (setting) {
+            await db("setting").where("id", setting.id).update({ value });
+        } else {
+            await db("setting").insert({
+                key: "jwtSecret",
+                value,
+            });
         }
 
-        jwtSecretBean.value = generatePasswordHash(genSecret());
-        await R.store(jwtSecretBean);
-        return jwtSecretBean;
+        return { value };
     }
 
     /**
@@ -617,7 +623,7 @@ export class DockgeServer {
     }
 
     async getDockerNetworkList() : Promise<string[]> {
-        let res = await childProcessAsync.spawn("docker", [ "network", "ls", "--format", "{{.Name}}" ], {
+        let res = await spawn("docker", [ "network", "ls", "--format", "{{.Name}}" ], {
             encoding: "utf-8",
         });
 
@@ -641,7 +647,7 @@ export class DockgeServer {
         let stats = new Map<string, object>();
 
         try {
-            let res = await childProcessAsync.spawn("docker", [ "stats", "--format", "json", "--no-stream" ], {
+            let res = await spawn("docker", [ "stats", "--format", "json", "--no-stream" ], {
                 encoding: "utf-8",
             });
 

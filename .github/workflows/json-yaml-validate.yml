@@ -11,17 +11,17 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # enable write permissions for pull request comments
+  pull-requests: read
 
 jobs:
   json-yaml-validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: json-yaml-validate
         id: json-yaml-validate
-        uses: GrantBirki/json-yaml-validate@v2.6.1
+        uses: GrantBirki/json-yaml-validate@v5
         with:
           comment: "false" # enable comment mode
           exclude_file: ".github/config/exclude.txt" # gitignore style file for exclusions
