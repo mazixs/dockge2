@@ -22,6 +22,11 @@ npm run test               # = coverage: c8 + node:test, enforces 70% lines/stat
 npm run test:unit          # tests without coverage gate
 npm run check              # lint + check-ts + test — run this before claiming work is done
 npm run build:frontend     # production bundle into frontend-dist/
+
+npm run test:docker-integration   # test/docker/**, needs a working Docker Compose
+npm run test:e2e                  # Playwright, real Chromium + real clipboard + real container
+npm run update-docker -- --dry-run   # safe git pull + compose up for this deployment
+npm run deploy-stack -- --stack=<name> --dry-run   # same for one stack directory
 ```
 
 Run a single test file or a single test:
@@ -33,7 +38,13 @@ node --import tsx --test --test-name-pattern "envsubst" test/common/util-common.
 
 Tests use the Node test runner with `--test-concurrency=1` (shared SQLite/`Settings` static state). Backend tests that need a DB wrap the body in `withDatabase()` from `test/helpers/database.ts`, which creates a temp `dataDir`, runs Knex migrations, and tears everything down. Coverage counts only `backend/**` and `common/**`; `.c8rc.json` excludes the socket/agent plumbing that needs a live Docker host, so new logic belongs in testable units rather than inside handlers.
 
-CI (`.github/workflows/ci.yml`) runs lint → check-ts → test → build on Linux/Windows/macOS × Node 22.23.2/24.19.0.
+Three test layers, deliberately without stubs for the boundaries they exercise:
+
+- **Unit** (`test/backend`, `test/common`, `test/frontend`) — real temp filesystem, real child processes, real `vue-i18n`.
+- **Docker** (`test/docker/*.integration.test.ts`) — skipped unless `DOCKGE_DOCKER_INTEGRATION=1`; they start real Compose projects, so they must clean up in `finally`.
+- **Browser** (`test/e2e/*.spec.ts`) — Playwright starts its own backend and frontend, `test/e2e/seed.ts` seeds a temp data dir, enables `disableAuth` and runs containers. The clipboard, xterm, Socket.IO and Docker are the real ones.
+
+CI (`.github/workflows/ci.yml`) runs lint → check-ts → test → build on Linux/Windows/macOS × Node 22.23.2/24.19.0, plus a Linux job for the Docker tests and one for the browser tests.
 
 ## Architecture
 
@@ -67,11 +78,17 @@ Secrets are plain files written with mode `0600`. Metadata (name, size, mtime, b
 
 `backend/stack.ts` is the core model. A stack is a directory under `stacksDir` (`DOCKGE_STACKS_DIR`, default `/opt/stacks`) containing one of `acceptedComposeFileNames` plus `.env`; the database stores only users, settings, and agents (`backend/migrations/`, accessed through Knex — `Database.getKnex()`). Status comes from shelling out to `docker`/`docker compose` via `spawn` in `backend/child-process.ts` (a promise wrapper over `node:child_process`, with `timeoutMs` and `maxBuffer`). The numeric constants live in `common/util-common.ts` (`UNKNOWN`/`CREATED_FILE`/`CREATED_STACK`/`RUNNING`/`EXITED`/`ATTENTION`) and the aggregation is in `common/compose-status.ts`: instances are normalised from `docker ps`/`docker compose ps` and judged fail-closed — `RUNNING` needs a running long-lived service and zero issues, anything degraded is `ATTENTION` with reasons, unreadable output is `UNKNOWN`. A clean `exited(0)` only counts as expected when the service is marked one-shot (`x-dockge: {lifecycle: one-shot}` in the compose file or a `dockge.lifecycle=one-shot` container label). The stack list resolves every project from a single host-wide `docker ps` call; a 10-second cron in `DockgeServer.serve()` pushes `stackList` to every logged-in socket.
 
-Compose YAML edits must preserve the user's file: `copyYAMLComments` exists because the file on disk is the source of truth, and per the master plan a load/validate/deploy round trip must not silently re-serialize YAML.
+Compose YAML edits must preserve the user's file, and `common/compose-editor.ts` is how: `analyseComposeSource()` reports what a rebuild would destroy (`include`, anchors, aliases, merge keys, custom tags), `canEditStructurally()` gates the structured editor on that, and `applyStructuredEdit()` writes only the values that actually changed into the parsed source document, restoring legacy octal such as `mode: 01777`. The rule in `Compose.vue` is that only an explicit edit may rewrite the text: the `jsonConfig` watcher returns early while the text editor has focus, while the model is being filled from the server (`applyingExternal`), in view mode, and for files that cannot be rebuilt. `NetworkInput` never introduces `networks: {}` — it hands its result to `applyNetworksEdit()`, which drops an empty key unless the source had one.
+
+Before every `up` (`deploy`, `start`, `update`) `Stack.validateComposeConfig()` runs `docker compose config --quiet` with the selected `-f`/`--env-file`; a failure aborts the deploy, and the message passes through `redactSecrets()` so a secret value cannot travel inside an error.
 
 ### Terminals
 
-`backend/terminal.ts` wraps node-pty. `Terminal` instances are kept in a static `terminalMap` keyed by name, so names are generated by the shared helpers in `common/util-common.ts` (`getComposeTerminalName`, `getCombinedTerminalName`, `getContainerExecTerminalName`) — always reuse those instead of building name strings ad hoc, since the frontend joins the same key via `bindTerminal`. Output is broadcast to socket rooms; `InteractiveTerminal`/`MainTerminal` add stdin. The main shell terminal is gated by `enableConsole` / `DOCKGE_ENABLE_CONSOLE`.
+`backend/terminal.ts` wraps node-pty. `Terminal` instances are kept in a static `terminalMap` keyed by name, so names are generated by the shared helpers in `common/util-common.ts` (`getComposeTerminalName`, `getCombinedTerminalName`, `getContainerExecTerminalName`) — always reuse those instead of building name strings ad hoc, since the frontend joins the same key via `bindTerminal`. The container exec name includes the shell, so `sh` and `bash` never share a PTY. Output is broadcast to socket rooms; `InteractiveTerminal`/`MainTerminal` add stdin. The main shell terminal is gated by `enableConsole` / `DOCKGE_ENABLE_CONSOLE`.
+
+Ending a session is not one call: `close()` only sends Ctrl+C, which an idle shell ignores, and killing the local `docker exec` process leaves the shell running inside the container. `Terminal.end()` asks the shell to exit and kills only a session that ignores that — use it (the `terminalLeave` event does) whenever the last client of a container shell goes away.
+
+On the frontend, the interactive terminal subscribes to `onData`, not `onKey`: `onData` carries both typed keys and pasted text, which is why native paste works at all. `attachCustomKeyEventHandler` hands Ctrl+V / Ctrl+Shift+V / Cmd+V to the browser, and the limited main console gets paste through the real `paste` event of the hidden xterm textarea. Never log clipboard or selection content.
 
 ### Shared code and frontend
 

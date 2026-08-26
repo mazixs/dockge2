@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { Stack } from "../../backend/stack";
 import { StackConfig } from "../../backend/stack-config";
-import { ValidationError } from "../../backend/util-server";
+import { fileExists, ValidationError } from "../../backend/util-server";
 import { withDatabase } from "../helpers/database";
 
 const composeYAML = `services:
@@ -329,6 +329,83 @@ test("a compose error never quotes a secret value", async () => {
             assert.equal(await stack.redactSecrets("services.app.image is required"), "services.app.image is required");
         } finally {
             await rm(stacksDir, { recursive: true,
+                force: true });
+        }
+    });
+});
+
+test("a stack directory that is a symlink cannot be written through", async () => {
+    await withDatabase(async () => {
+        const root = await mkdtemp(path.join(os.tmpdir(), "dockge-symlink-"));
+        const stacksDir = path.join(root, "stacks");
+        const outsideDir = path.join(root, "outside");
+        await mkdir(stacksDir);
+        await mkdir(outsideDir);
+        await writeFile(path.join(outsideDir, "compose.yaml"), "services: {}\n");
+
+        // Somebody with write access to the stacks directory points a stack at another place
+        await symlink(outsideDir, path.join(stacksDir, "linked"), "dir");
+
+        try {
+            const server = { stacksDir } as never;
+
+            // Reading is refused
+            await assert.rejects(Stack.getStack(server, "linked"), ValidationError);
+
+            // And so is the production save path, which builds the stack directly
+            const stack = new Stack(server, "linked", "services:\n  app:\n    image: nginx\n", "KEY=value\n", true);
+            await assert.rejects(stack.save(false), ValidationError);
+
+            // The file behind the symlink is untouched
+            assert.equal(await readFile(path.join(outsideDir, "compose.yaml"), "utf8"), "services: {}\n");
+            assert.equal(await fileExists(path.join(outsideDir, ".env")), false);
+        } finally {
+            await rm(root, { recursive: true,
+                force: true });
+        }
+    });
+});
+
+test("a file swapped for a symlink is not read or written", async () => {
+    await withDatabase(async () => {
+        const root = await mkdtemp(path.join(os.tmpdir(), "dockge-swap-"));
+        const stacksDir = path.join(root, "stacks");
+        const stackDir = path.join(stacksDir, "swap-stack");
+        const outside = path.join(root, "outside.env");
+        await mkdir(stackDir, { recursive: true });
+        await writeFile(path.join(stackDir, "compose.yaml"), composeYAML);
+        await writeFile(outside, "SECRET=outside\n");
+
+        try {
+            const server = { stacksDir } as never;
+            const stack = await Stack.getStack(server, "swap-stack");
+
+            // The env file passes validation as a regular file
+            await writeFile(path.join(stackDir, ".env.swap"), "STAGE=ok\n");
+            await stack.setFileConfig({
+                composeFileName: "compose.yaml",
+                envFileNames: [ ".env.swap" ],
+                activeEnvFileName: ".env.swap",
+                secretBindings: [],
+            });
+            assert.equal(stack.composeENV, "STAGE=ok\n");
+
+            // Then it is swapped for a symlink pointing outside
+            await rm(path.join(stackDir, ".env.swap"));
+            await symlink(outside, path.join(stackDir, ".env.swap"), "file");
+
+            const reloaded = await Stack.getStack(server, "swap-stack");
+
+            // The content of the target is not exposed and the file is not offered to compose
+            assert.equal(reloaded.composeENV, "");
+            assert.equal(JSON.stringify(await reloaded.toJSON("")).includes("SECRET=outside"), false);
+            assert.deepEqual(reloaded.getComposeOptions("ps"), [ "compose", "-f", "compose.yaml", "ps" ]);
+
+            // Writing through the symlink is refused, the outside file keeps its content
+            await assert.rejects(reloaded.writeEnvFile(".env.swap", "STAGE=hacked\n"), ValidationError);
+            assert.equal(await readFile(outside, "utf8"), "SECRET=outside\n");
+        } finally {
+            await rm(root, { recursive: true,
                 force: true });
         }
     });

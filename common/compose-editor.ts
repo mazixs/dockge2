@@ -129,38 +129,109 @@ export function applyStructuredEdit(source : string, config : LooseObject, optio
     const current = (doc.toJS() ?? {}) as LooseObject;
     const next = normaliseNetworks(config, options);
 
+    // Where the source used legacy octal, remember the exact text before anything is written
+    const octalByPath = collectLegacyOctal(doc);
+
     applyDiff(doc, [], current, next);
 
-    // YAML 1.2 reads `01777` as decimal 1777, so the original notation has to be restored
-    if (preserveLegacyOctal(doc)) {
-        doc.setSchema("1.1");
-    }
+    const output = doc.toString({ flowCollectionPadding: false });
 
-    return doc.toString({ flowCollectionPadding: false });
+    // YAML 1.2 prints `01777` as `1777`, so the original text is put back.
+    // Switching the whole document to YAML 1.1 would fix the octal but quote every
+    // `yes`/`no`/`on`/`off` in the file, which are lines the user never touched.
+    return restoreLegacyOctal(output, octalByPath);
 }
 
 /**
- * Restore values written as legacy octal, such as `mode: 01777`
- * @param doc Document to fix in place
- * @returns Whether any legacy octal value was found
+ * Find the values written as legacy octal, such as `mode: 01777`
+ * @param doc Parsed source document
+ * @returns Original text per node path
  */
-export function preserveLegacyOctal(doc : Document) : boolean {
-    let found = false;
+export function collectLegacyOctal(doc : Document) : Map<string, string> {
+    const result = new Map<string, string>();
 
-    visit(doc, (_key, node) => {
+    visit(doc, (key, node, path) => {
         if (
-            isScalar(node) &&
-            typeof node.value === "number" &&
-            typeof node.source === "string" &&
-            /^0[0-7]+$/.test(node.source)
+            !isScalar(node) ||
+            typeof node.value !== "number" ||
+            typeof node.source !== "string" ||
+            !/^0[0-7]+$/.test(node.source)
         ) {
-            node.value = Number.parseInt(node.source, 8);
-            node.format = "OCT";
-            found = true;
+            return;
+        }
+
+        const nodePath = toNodePath(key, path);
+
+        if (nodePath) {
+            result.set(JSON.stringify(nodePath), node.source);
         }
     });
 
-    return found;
+    return result;
+}
+
+/**
+ * Put the original octal text back into a serialised document
+ * @param output Serialised YAML
+ * @param octalByPath Original text per node path
+ * @returns YAML with the original octal notation
+ */
+export function restoreLegacyOctal(output : string, octalByPath : Map<string, string>) : string {
+    if (octalByPath.size === 0) {
+        return output;
+    }
+
+    const doc = parseDocument(output);
+    const edits : Array<{ start : number, end : number, text : string }> = [];
+
+    for (const [ pathKey, text ] of octalByPath) {
+        const nodePath = JSON.parse(pathKey) as Array<string | number>;
+        const node = doc.getIn(nodePath, true);
+
+        // Only a value that is still the same number is replaced, an edited one stays edited
+        if (isScalar(node) && node.range && typeof node.value === "number" && node.value === Number.parseInt(text, 10)) {
+            edits.push({ start: node.range[0],
+                end: node.range[1],
+                text });
+        }
+    }
+
+    // Later edits first, so earlier offsets stay valid
+    edits.sort((a, b) => b.start - a.start);
+
+    let result = output;
+
+    for (const edit of edits) {
+        result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
+    }
+
+    return result;
+}
+
+/**
+ * Build the key path of a node from the visitor path
+ * @param key Key of the node inside its parent
+ * @param path Ancestors of the node
+ * @returns Path usable with Document.getIn(), or null when it cannot be built
+ */
+function toNodePath(key : unknown, path : readonly unknown[]) : Array<string | number> | null {
+    const result : Array<string | number> = [];
+
+    for (const ancestor of path) {
+        if (isPair(ancestor)) {
+            if (!isScalar(ancestor.key) || typeof ancestor.key.value !== "string") {
+                return null;
+            }
+            result.push(ancestor.key.value);
+        }
+    }
+
+    // A sequence entry is addressed by its index, a map value by nothing extra
+    if (typeof key === "number") {
+        result.push(key);
+    }
+
+    return result;
 }
 
 /**

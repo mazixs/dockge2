@@ -58,6 +58,7 @@ import {
     faChevronCircleRight,
     faChevronCircleDown,
     faTriangleExclamation,
+    faPaste,
 } from "@fortawesome/free-solid-svg-icons";
 
 library.add(
@@ -117,6 +118,7 @@ library.add(
     faChevronCircleRight,
     faChevronCircleDown,
     faTriangleExclamation,
+    faPaste,
 );
 
 export { FontAwesomeIcon };

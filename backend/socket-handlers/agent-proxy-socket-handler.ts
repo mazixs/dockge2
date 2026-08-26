@@ -1,7 +1,7 @@
 import { SocketHandler } from "../socket-handler.js";
 import { DockgeServer } from "../dockge-server";
 import { log } from "../log";
-import { checkLogin, DockgeSocket } from "../util-server";
+import { callbackError, checkLogin, DockgeSocket } from "../util-server";
 import { AgentSocket } from "../../common/agent-socket";
 import { ALL_ENDPOINTS } from "../../common/util-common";
 
@@ -10,6 +10,9 @@ export class AgentProxySocketHandler extends SocketHandler {
     create2(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
         // Agent - proxying requests if needed
         socket.on("agent", async (endpoint : unknown, eventName : unknown, ...args : unknown[]) => {
+            // The last argument is the ack callback when the client passed one
+            const callback = typeof args[args.length - 1] === "function" ? args[args.length - 1] as (res : unknown) => void : undefined;
+
             try {
                 checkLogin(socket);
 
@@ -37,6 +40,9 @@ export class AgentProxySocketHandler extends SocketHandler {
                 if (e instanceof Error) {
                     log.warn("agent", e.message);
                 }
+
+                // Without this the browser keeps waiting for an answer that never comes
+                callbackError(e, callback);
             }
         });
     }

@@ -24,11 +24,22 @@ export class TerminalSocketHandler extends AgentSocketHandler {
 
                 let terminal = Terminal.getTerminal(terminalName);
                 if (terminal instanceof InteractiveTerminal) {
+                    // Writing into a session the client never joined would let one client
+                    // type into the shell of another, so the membership is checked
+                    if (!terminal.hasClient(socket)) {
+                        throw new ValidationError("You are not attached to this terminal.");
+                    }
+
                     //log.debug("terminalInput", "Terminal found, writing to terminal.");
                     terminal.write(cmd);
                 } else {
                     throw new Error("Terminal not found or it is not a Interactive Terminal.");
                 }
+
+                // Answering the ack keeps the client from collecting callbacks forever
+                callbackResult({
+                    ok: true,
+                }, callback);
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -157,7 +168,9 @@ export class TerminalSocketHandler extends AgentSocketHandler {
 
                 const terminal = Terminal.getTerminal(terminalName);
 
-                if (terminal) {
+                // Only a client that actually joined may end a session, otherwise any
+                // logged in client could kill somebody else's container shell by guessing the name
+                if (terminal && terminal.hasClient(socket)) {
                     terminal.leave(socket);
 
                     // A container shell without any client left has to end, otherwise the
@@ -214,6 +227,11 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                 }
 
                 let terminal = Terminal.getTerminal(terminalName);
+
+                // Resizing somebody else's terminal would garble their output
+                if (terminal && !terminal.hasClient(socket)) {
+                    throw new ValidationError("You are not attached to this terminal.");
+                }
 
                 // log.info("terminal", terminal);
                 if (terminal instanceof Terminal) {

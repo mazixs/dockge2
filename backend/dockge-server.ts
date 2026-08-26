@@ -625,6 +625,8 @@ export class DockgeServer {
     async getDockerNetworkList() : Promise<string[]> {
         let res = await spawn("docker", [ "network", "ls", "--format", "{{.Name}}" ], {
             encoding: "utf-8",
+            maxBuffer: 1024 * 1024,
+            timeoutMs: 30_000,
         });
 
         if (!res.stdout) {
@@ -649,6 +651,8 @@ export class DockgeServer {
         try {
             let res = await spawn("docker", [ "stats", "--format", "json", "--no-stream" ], {
                 encoding: "utf-8",
+                maxBuffer: 4 * 1024 * 1024,
+                timeoutMs: 30_000,
             });
 
             if (!res.stdout) {
