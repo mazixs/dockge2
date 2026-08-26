@@ -16,6 +16,10 @@
                                 <span class="num active">{{ activeNum }}</span>
                             </div>
                             <div class="col">
+                                <h3>{{ $t("attention") }}</h3>
+                                <span class="num attention">{{ attentionNum }}</span>
+                            </div>
+                            <div class="col">
                                 <h3>{{ $t("exited") }}</h3>
                                 <span class="num exited">{{ exitedNum }}</span>
                             </div>
@@ -38,7 +42,7 @@
                 <div class="col-md-5">
                     <!-- Agent List -->
                     <div class="shadow-box big-padding">
-                        <h4 class="mb-3">{{ $tc("dockgeAgent", 2) }} <span class="badge bg-warning" style="font-size: 12px;">beta</span></h4>
+                        <h4 class="mb-3">{{ $t("dockgeAgent", 2) }} <span class="badge bg-warning" style="font-size: 12px;">beta</span></h4>
 
                         <div v-for="(agentItem, endpoint) in $root.agentList" :key="endpoint" class="mb-3 agent">
                             <!-- Agent Status -->
@@ -159,6 +163,12 @@ export default {
         },
         exitedNum() {
             return this.getStatusNum("exited");
+        },
+        attentionNum() {
+            return this.getStatusNum("attention");
+        },
+        unknownNum() {
+            return this.getStatusNum("unknown");
         },
     },
 
@@ -338,6 +348,10 @@ export default {
 
     &.exited {
         color: $danger;
+    }
+
+    &.attention {
+        color: $warning;
     }
 }
 
