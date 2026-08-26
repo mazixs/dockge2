@@ -198,15 +198,17 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 ## Текущее состояние
 
 - Актуальная рабочая копия: /home/mazix/Documents/GitHub/dockge2. Каталога dockge2-review и ветки mzx/dependency-stack-review больше нет, их результат влит в основную ветку этого репозитория (коммиты 749e2c5, f809ae1, 276f5a6, b75a313). Прежняя запись про неизменяемую исходную копию отменена 2026-08-26.
-- Ветка текущей работы по upstream-исправлениям: mzx/upstream-fixes.
+- Основная ветка называется main; ветки задач: mzx/upstream-fixes, mzx/compose-status, mzx/stack-files, mzx/compose-source, mzx/review-fixes (все влиты или ждут слияния).
 - Базовая модернизация зависимостей, Node.js, ESLint, TypeScript, тестов и CI уже влита в основную ветку.
-- Добавлены unit-тесты Node test runner и c8; текущий целевой порог — 70%.
+- Три уровня проверок: unit (node:test + c8, порог 70%, фактически ~85% строк), Docker-интеграционные в test/docker (по переменной DOCKGE_DOCKER_INTEGRATION=1) и браузерные Playwright в test/e2e. Все три подключены к CI отдельными джобами.
+- Границы, которые запрещено подменять, действительно не подменяются: тесты используют настоящую файловую систему, настоящие дочерние процессы, настоящий Docker Compose, настоящий Clipboard API и настоящий xterm.
 - Проверка npm audit --omit=dev --audit-level=high завершалась без high-level уязвимостей.
 - Production child-process вызовы используют массивы аргументов; shell: true не используется.
 - Формальный diff security scan локальных изменений завершён без новых reportable findings; это не означает, что pre-existing auth и Docker socket архитектура безопасны.
 - В проекте остаются Vue SFC с обычным JavaScript внутри script; это отдельный этап строгой типизации.
 - При запуске чистого UI-стенда обнаружена блокирующая ошибка текущей модернизации: `frontend/src/mixins/lang.ts` вызывает `i18n.global.locale.value` в Vue I18n 11 legacy mode, где `locale` — строка; это включено в UX baseline-задачу.
-- Визуальный снимок удалось получить только для стартовой страницы создания администратора; main dashboard требует локальной инициализации, поэтому его визуальные решения не считаются подтверждёнными до отдельного authenticated capture.
+- Аутентифицированный UI уже осматривался вживую (главная, страница стека, статусы, файлы и секреты, консоль контейнера), поэтому ограничение про недоступный dashboard снято. Дизайн-направление всё ещё не выбрано: это Task 0 плана product-dashboard.
+- Закрыт весь план 2026-08-26-console-status-compose-git.md: задачи 1-6. Осталось направление product-dashboard (Tasks 0-9), Better Auth, строгий TypeScript в SFC и миграция vue-i18n на Composition API.
 - Локальные агентские файлы AGENTS.md и CLAUDE.md не коммитятся.
 - Tasks 1-5 плана 2026-08-26-upstream-dockge-fixes.md выполнены в ветке mzx/upstream-fixes: path traversal (#994), сохранение .env (#964), статус clean-exit init-контейнеров (#806) и octal tmpfs.mode (#990). Проверено `npm run check` (34 теста, покрытие ~80%), `npm run build:frontend`, `npm audit --omit=dev --audit-level=high` (0) и реальный `npm run test:docker-integration` на Docker Compose v5.5.0.
 - Известное последствие барьера путей: операции над стеком, чьё имя не проходит `^[a-z0-9_-]+$` (внешние Compose-проекты с точкой или заглавными буквами), отклоняются как ValidationError. В списке стеков такие проекты остаются видимыми, но Compose-действия по ним недоступны до отдельной задачи по внешним контейнерам.
