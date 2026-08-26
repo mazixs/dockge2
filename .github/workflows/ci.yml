@@ -48,6 +48,9 @@ jobs:
       - name: Build
         run: npm run build:frontend
 
+      - name: Check update command (dry run)
+        run: npm run update-docker -- --dry-run
+
   docker-integration:
     name: Docker Compose integration
     timeout-minutes: 20

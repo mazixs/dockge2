@@ -216,7 +216,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 - [x] Выполнить docs/superpowers/plans/2026-08-26-upstream-dockge-fixes.md: Tasks 1–4 — #997, #979, #950, #991.
 - [x] Выполнить там Task 5: полный набор проверок, покрытие, отсутствие ложных заглушек и связь с issues.
-- [ ] Выполнить там Task 6: безопасный CLI Git → Docker Compose с dry-run и документацией.
+- [x] Выполнить там Task 6: безопасный CLI Git → Docker Compose с dry-run и документацией.
 - [ ] Выполнить docs/superpowers/plans/2026-08-26-console-status-compose-git.md: Tasks 1–2 — вставка в терминал, жизненный цикл shell-сессии и рабочий `Switch to sh`.
 - [ ] Выполнить там Task 3: типизированный статус сервисов/экземпляров с `ATTENTION`, worker/init-правилами и реальным Docker-тестом.
 - [ ] Выполнить там Task 4: основной Compose-файл, активные env-файлы, `.secret` и Compose secrets с отдельной авторизацией.
