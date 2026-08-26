@@ -106,6 +106,7 @@ test("Stack validates, saves and reads compose files using the real filesystem",
         assert.deepEqual(stack.toSimpleJSON("localhost"), {
             name: "demo-stack",
             status: UNKNOWN,
+            issues: [],
             tags: [],
             isManagedByDockge: false,
             composeFileName: "compose.yaml",

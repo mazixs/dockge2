@@ -2,6 +2,7 @@ import { AgentSocketHandler } from "../agent-socket-handler";
 import { DockgeServer } from "../dockge-server";
 import { callbackError, callbackResult, checkLogin, DockgeSocket, ValidationError } from "../util-server";
 import { Stack } from "../stack";
+import { ContainerInstanceStatus } from "../../common/compose-status";
 import { AgentSocket } from "../../common/agent-socket";
 
 export class DockerSocketHandler extends AgentSocketHandler {
@@ -230,10 +231,20 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName, true);
-                const serviceStatusList = Object.fromEntries(await stack.getServiceStatusList());
+                const detailed = await stack.getDetailedStatus();
+                const serviceStatusList : Record<string, ContainerInstanceStatus[]> = {};
+
+                for (const instance of detailed.instances) {
+                    const list = serviceStatusList[instance.service] ?? [];
+                    list.push(instance);
+                    serviceStatusList[instance.service] = list;
+                }
+
                 callbackResult({
                     ok: true,
                     serviceStatusList,
+                    stackStatus: detailed.status,
+                    issues: detailed.issues,
                 }, callback);
             } catch (e) {
                 callbackError(e, callback);
