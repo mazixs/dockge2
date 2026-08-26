@@ -366,7 +366,7 @@ export default {
         async copyToClipboard(text) {
             try {
                 await navigator.clipboard.writeText(text);
-                console.debug("Text copied to clipboard:", text);
+                // The selection itself is never logged
             } catch (error) {
                 console.error("Failed to copy to clipboard:", error);
             }

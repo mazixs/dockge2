@@ -209,8 +209,8 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - Локальные агентские файлы AGENTS.md и CLAUDE.md не коммитятся.
 - Tasks 1-5 плана 2026-08-26-upstream-dockge-fixes.md выполнены в ветке mzx/upstream-fixes: path traversal (#994), сохранение .env (#964), статус clean-exit init-контейнеров (#806) и octal tmpfs.mode (#990). Проверено `npm run check` (34 теста, покрытие ~80%), `npm run build:frontend`, `npm audit --omit=dev --audit-level=high` (0) и реальный `npm run test:docker-integration` на Docker Compose v5.5.0.
 - Известное последствие барьера путей: операции над стеком, чьё имя не проходит `^[a-z0-9_-]+$` (внешние Compose-проекты с точкой или заглавными буквами), отклоняются как ValidationError. В списке стеков такие проекты остаются видимыми, но Compose-действия по ним недоступны до отдельной задачи по внешним контейнерам.
-- Подтверждённые аудитом дефекты, ещё не закрытые задачами: отладочный `console.log(options)` в `Stack.getComposeOptions` (backend/stack.ts) и запись содержимого буфера обмена в `console.debug` в frontend/src/components/Terminal.vue, что нарушает зафиксированное требование не логировать буфер.
-- Блокирующая ошибка Vue I18n подтверждена в коде: `frontend/src/i18n.ts` создаёт i18n без `legacy: false`, поэтому `i18n.global.locale.value = lang` в `frontend/src/mixins/lang.ts` пишет свойство в строку и в strict mode бросает TypeError. Смена языка не работает; исправление относится к Task 0 плана product-dashboard.
+- Закрыто 2026-08-26: отладочный `console.log(options)` в `Stack.getComposeOptions` переведён в `log.debug`, а запись содержимого буфера обмена в `console.debug` из frontend/src/components/Terminal.vue удалена.
+- Блокирующая ошибка Vue I18n закрыта 2026-08-26: смена локали вынесена в чистый `frontend/src/i18n-locale.ts` и работает и в Legacy, и в Composition API mode; регрессия закрыта тестом test/frontend/i18n-locale.test.ts на настоящем vue-i18n. Отдельным пунктом остаётся миграция на Composition API mode, потому что Legacy API объявлен deprecated в vue-i18n 11 и будет удалён в 12, а код использует `$i18n.messages[lang]` и `$i18n.availableLocales`, которые в Composition mode ведут себя иначе.
 
 ## План реализации
 
@@ -233,7 +233,8 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [ ] Выполнить там Task 8: бренд, иконка, repository map и SemVer 2.x.
 - [ ] Выполнить там Task 9: итоговая UX/accessibility/performance-проверка.
 - [ ] Провести отдельный аудит и миграцию Better Auth после стабилизации Stack/Compose/YAML-изменений.
-- [ ] Перевести оставшиеся Vue SFC на строгий TypeScript и добавить frontend-проверку в покрытие там, где это не ухудшает архитектуру.
+- [ ] Перевести оставшиеся Vue SFC на строгий TypeScript и добавить frontend-проверку в покрытие там, где это не ухудшает архитектуру. Тестовый каталог test/frontend уже подключён к `npm run test:unit`.
+- [ ] Миграция vue-i18n с Legacy API mode на Composition API mode: `legacy: false`, `globalInjection`, замена `$i18n.messages[lang]`/`$i18n.availableLocales` и проверка компонента `<i18n-t>`. Причина - deprecation в vue-i18n 11 и удаление в 12.
 - [ ] Проверить production deployment: bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy и rollback образа.
 
 ## Журнал решений
