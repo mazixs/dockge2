@@ -222,7 +222,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [x] Выполнить там Task 3: типизированный статус сервисов/экземпляров с `ATTENTION`, worker/init-правилами и реальным Docker-тестом.
 - [x] Выполнить там Task 4: основной Compose-файл, активные env-файлы, `.secret` и Compose secrets с отдельной авторизацией.
 - [x] Выполнить там Task 5: сохранение Git/YAML без потери исходника, явный `-f`, проверка `config --quiet`, `include`/custom tags и устранение `networks: {}`.
-- [ ] Выполнить там Task 6: браузерные, файловые и Docker-интеграционные проверки новых сценариев; подключить их к CI без ложных заглушек.
+- [x] Выполнить там Task 6: браузерные, файловые и Docker-интеграционные проверки новых сценариев; подключить их к CI без ложных заглушек.
 - [ ] Выполнить там Task 0: UX baseline, устранение блокирующей ошибки Vue I18n и утверждение одного design direction до изменения интерфейса.
 - [ ] Выполнить docs/superpowers/plans/2026-08-26-product-dashboard-scope-branding.md: Task 1 — общий типизированный global overview contract.
 - [ ] Выполнить там Task 2: dashboard без выбранного агента с агентскими/stack/container-счётчиками и доступностью.
