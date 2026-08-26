@@ -106,8 +106,22 @@
                         </div>
                     </div>
 
+                    <!-- Problems that explain an attention status -->
+                    <div v-if="!isEditMode && stackIssues.length > 0" class="alert alert-warning" role="alert">
+                        <div class="mb-1">
+                            <font-awesome-icon icon="triangle-exclamation" class="me-1" />
+                            {{ $t("stackIssues") }}
+                        </div>
+                        <ul class="mb-0">
+                            <li v-for="issue in stackIssues" :key="`${issue.service}-${issue.name}-${issue.reason}`">
+                                {{ issue.service }}<span v-if="issue.name"> / {{ issue.name }}</span>:
+                                {{ $t(issue.reason) }}<span v-if="issue.detail"> ({{ issue.detail }})</span>
+                            </li>
+                        </ul>
+                    </div>
+
                     <!-- Containers -->
-                    <h4 class="mb-3">{{ $tc("container", 2) }}</h4>
+                    <h4 class="mb-3">{{ $t("container", 2) }}</h4>
 
                     <div v-if="isEditMode" class="input-group mb-3">
                         <input
@@ -145,7 +159,7 @@
                             <!-- URLs -->
                             <div class="mb-4">
                                 <label class="form-label">
-                                    {{ $tc("url", 2) }}
+                                    {{ $t("url", 2) }}
                                 </label>
                                 <ArrayInput name="urls" :display-name="$t('url')" placeholder="https://" object-type="x-dockge" />
                             </div>
@@ -210,13 +224,13 @@
                     <div v-if="isEditMode">
                         <!-- Volumes -->
                         <div v-if="false">
-                            <h4 class="mb-3">{{ $tc("volume", 2) }}</h4>
+                            <h4 class="mb-3">{{ $t("volume", 2) }}</h4>
                             <div class="shadow-box big-padding mb-3">
                             </div>
                         </div>
 
                         <!-- Networks -->
-                        <h4 class="mb-3">{{ $tc("network", 2) }}</h4>
+                        <h4 class="mb-3">{{ $t("network", 2) }}</h4>
                         <div class="shadow-box big-padding mb-3">
                             <NetworkInput />
                         </div>
@@ -261,7 +275,8 @@ import {
     getCombinedTerminalName,
     getComposeTerminalName,
     PROGRESS_TERMINAL_ROWS,
-    RUNNING
+    RUNNING,
+    ATTENTION
 } from "../../../common/util-common";
 import { BModal } from "bootstrap-vue-next";
 import NetworkInput from "../components/NetworkInput.vue";
@@ -337,6 +352,7 @@ export default {
 
             },
             serviceStatusList: {},
+            serviceIssues: [],
             dockerStats: {},
             isEditMode: false,
             submitted: false,
@@ -395,7 +411,19 @@ export default {
         },
 
         active() {
-            return this.status === RUNNING;
+            // A partially degraded stack is still up, so stop and restart stay available
+            return this.status === RUNNING || this.status === ATTENTION;
+        },
+
+        /**
+         * Problems reported by the backend for this stack
+         * @returns {Array<object>} Issue list
+         */
+        stackIssues() {
+            if (Array.isArray(this.serviceIssues) && this.serviceIssues.length > 0) {
+                return this.serviceIssues;
+            }
+            return this.globalStack?.issues ?? [];
         },
 
         terminalName() {
@@ -539,6 +567,7 @@ export default {
             this.$root.emitAgent(this.endpoint, "serviceStatusList", this.stack.name, (res) => {
                 if (res.ok) {
                     this.serviceStatusList = res.serviceStatusList;
+                    this.serviceIssues = res.issues ?? [];
                 }
                 if (!this.stopServiceStatusTimeout) {
                     this.startServiceStatusTimeout();

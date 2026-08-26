@@ -7,22 +7,32 @@
                     <span class="me-1">{{ imageName }}:</span><span class="tag">{{ imageTag }}</span>
                 </div>
                 <div v-if="!isEditMode">
-                    <span class="badge me-1" :class="bgStyle">{{ status }}</span>
+                    <span class="badge me-1" :class="bgStyle">
+                        <font-awesome-icon v-if="needsAttention" icon="triangle-exclamation" class="me-1" />{{ statusLabel }}
+                    </span>
 
                     <a v-for="port in (ports ?? envsubstService.ports)" :key="port" :href="parsePort(port).url" target="_blank">
                         <span class="badge me-1 bg-secondary">{{ parsePort(port).display }}</span>
                     </a>
+
+                    <ul v-if="instances.length > 0" class="instance-list mt-2">
+                        <li v-for="instance in instances" :key="instance.name">
+                            <span class="instance-name">{{ instance.name || $t("unknown") }}</span>
+                            <span class="badge ms-1" :class="instanceStyle(instance)">{{ instanceLabel(instance) }}</span>
+                            <span v-if="instance.issue" class="issue ms-1">{{ instanceIssueText(instance) }}</span>
+                        </li>
+                    </ul>
                 </div>
             </div>
             <div class="col-7">
                 <div class="function">
                     <div class="btn-group me-2" role="group">
-                        <router-link v-if="!isEditMode && (status === 'running' || status === 'healthy')" class="btn btn-normal" :to="terminalRouteLink" disabled="">
+                        <router-link v-if="!isEditMode && hasRunningInstance" class="btn btn-normal" :to="terminalRouteLink" disabled="">
                             <font-awesome-icon icon="terminal" />
                             Bash
                         </router-link>
                         <button
-                            v-if="serviceCount > 1 && !isEditMode && status !== 'running' && status !== 'healthy'"
+                            v-if="serviceCount > 1 && !isEditMode && !hasRunningInstance"
                             class="btn btn-primary"
                             :disabled="processing"
                             @click="startService"
@@ -31,7 +41,7 @@
                             {{ $t("startStack") }}
                         </button>
                         <button
-                            v-if="serviceCount > 1 && !isEditMode && (status === 'running' || status === 'healthy' || status === 'unhealthy')"
+                            v-if="serviceCount > 1 && !isEditMode && hasRunningInstance"
                             class="btn btn-normal"
                             :disabled="processing"
                             @click="restartService"
@@ -40,7 +50,7 @@
                             {{ $t("restartStack") }}
                         </button>
                         <button
-                            v-if="serviceCount > 1 && !isEditMode && (status === 'running' || status === 'healthy' || status === 'unhealthy')"
+                            v-if="serviceCount > 1 && !isEditMode && hasRunningInstance"
                             class="btn btn-normal"
                             :disabled="processing"
                             @click="stopService"
@@ -116,7 +126,7 @@
                 <!-- Ports -->
                 <div class="mb-4">
                     <label class="form-label">
-                        {{ $tc("port", 2) }}
+                        {{ $t("port", 2) }}
                     </label>
                     <ArrayInput name="ports" :display-name="$t('port')" placeholder="HOST:CONTAINER" />
                 </div>
@@ -124,7 +134,7 @@
                 <!-- Volumes -->
                 <div class="mb-4">
                     <label class="form-label">
-                        {{ $tc("volume", 2) }}
+                        {{ $t("volume", 2) }}
                     </label>
                     <ArrayInput name="volumes" :display-name="$t('volume')" placeholder="HOST:CONTAINER" />
                 </div>
@@ -145,7 +155,7 @@
                 <!-- Environment Variables -->
                 <div class="mb-4">
                     <label class="form-label">
-                        {{ $tc("environmentVariable", 2) }}
+                        {{ $t("environmentVariable", 2) }}
                     </label>
                     <ArrayInput name="environment" :display-name="$t('environmentVariable')" placeholder="KEY=VALUE" />
                 </div>
@@ -167,7 +177,7 @@
                 <!-- Network -->
                 <div class="mb-4">
                     <label class="form-label">
-                        {{ $tc("network", 2) }}
+                        {{ $t("network", 2) }}
                     </label>
 
                     <div v-if="networkList.length === 0 && service.networks && service.networks.length > 0" class="text-warning mb-3">
@@ -244,13 +254,13 @@ export default defineComponent({
         },
 
         bgStyle() {
-            if (this.status === "running" || this.status === "healthy") {
-                return "bg-primary";
-            } else if (this.status === "unhealthy") {
-                return "bg-danger";
-            } else {
-                return "bg-secondary";
+            if (this.needsAttention) {
+                return "bg-warning";
             }
+            if (this.hasRunningInstance) {
+                return "bg-primary";
+            }
+            return "bg-secondary";
         },
 
         terminalRouteLink() {
@@ -336,21 +346,47 @@ export default defineComponent({
             }
         },
         statsInstances() {
-            if (!this.serviceStatus) {
-                return [];
-            }
-
-            return this.serviceStatus
-                .map(s => this.dockerStats[s.name])
-                .filter(s => !!s)
+            return this.instances
+                .map(instance => this.dockerStats[instance.name])
+                .filter(stat => !!stat)
                 .sort((a, b) => a.Name.localeCompare(b.Name));
         },
-        status() {
-            if (!this.serviceStatus) {
-                return "N/A";
+
+        /**
+         * Every container of this service, typed by the backend
+         */
+        instances() {
+            if (!Array.isArray(this.serviceStatus)) {
+                return [];
             }
-            return this.serviceStatus[0].status;
-        }
+            return this.serviceStatus;
+        },
+
+        hasRunningInstance() {
+            return this.instances.some(instance => instance.state === "running");
+        },
+
+        /**
+         * Whether at least one instance needs attention, which never means "inactive"
+         */
+        needsAttention() {
+            return this.instances.some(instance => !!instance.issue);
+        },
+
+        /**
+         * Service level label: the instance state when they agree, otherwise a mixed marker
+         */
+        statusLabel() {
+            if (this.instances.length === 0) {
+                return this.$t("unknown");
+            }
+
+            const labels = new Set(this.instances.map(instance => this.instanceLabel(instance)));
+            if (labels.size === 1) {
+                return [ ...labels ][0];
+            }
+            return this.$t("mixedState");
+        },
     },
     mounted() {
         if (this.first) {
@@ -358,6 +394,51 @@ export default defineComponent({
         }
     },
     methods: {
+        /**
+         * Human readable state of one instance
+         * @param {object} instance Typed instance status
+         * @returns {string} Label
+         */
+        instanceLabel(instance) {
+            if (instance.health) {
+                return this.$t(instance.health);
+            }
+            if (!instance.state) {
+                return this.$t("unknown");
+            }
+            return this.$t(instance.state);
+        },
+
+        /**
+         * Badge style of one instance
+         * @param {object} instance Typed instance status
+         * @returns {string} Bootstrap class
+         */
+        instanceStyle(instance) {
+            if (instance.issue) {
+                return "bg-warning";
+            }
+            if (instance.state === "running") {
+                return "bg-primary";
+            }
+            return "bg-secondary";
+        },
+
+        /**
+         * Explain why an instance needs attention
+         * @param {object} instance Typed instance status
+         * @returns {string} Reason text
+         */
+        instanceIssueText(instance) {
+            if (!instance.issue) {
+                return "";
+            }
+            if (instance.exitCode !== null && (instance.issue === "workerFailed" || instance.issue === "serviceFailed")) {
+                return `${this.$t(instance.issue)} (${instance.exitCode})`;
+            }
+            return this.$t(instance.issue);
+        },
+
         parsePort(port) {
             if (this.stack.endpoint) {
                 return parseDockerPort(port, this.stack.primaryHostname);
@@ -384,6 +465,21 @@ export default defineComponent({
 </script>
 
 <style scoped lang="scss">
+.instance-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.8rem;
+
+    .instance-name {
+        opacity: 0.8;
+    }
+
+    .issue {
+        opacity: 0.8;
+    }
+}
+
 @import "../styles/vars";
 
 .container {
