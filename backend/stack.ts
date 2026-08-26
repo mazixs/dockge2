@@ -1,9 +1,12 @@
 import { DockgeServer } from "./dockge-server";
 import fs, { promises as fsAsync } from "fs";
 import { log } from "./log";
-import yaml from "yaml";
+import yaml, { isMap, isSeq, parseDocument } from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
 import path from "path";
+import { emptyStackFileConfig, resolveStackFilePath, StackConfig } from "./stack-config";
+import { classifyStackFile } from "../common/stack-files";
+import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
 import {
     ComposePsEntry,
     ContainerInstanceStatus,
@@ -48,6 +51,8 @@ export class Stack {
     protected _configFilePath?: string | undefined;
     protected _composeFileName: string = "compose.yaml";
     protected _issues : StackStatusIssue[] = [];
+    protected _fileConfig : StackFileConfig = emptyStackFileConfig();
+    protected _inventory? : StackFileInventory;
     protected server: DockgeServer;
 
     protected combinedTerminal? : Terminal;
@@ -73,6 +78,67 @@ export class Stack {
                 }
             }
         }
+    }
+
+    /**
+     * Load the file selection of this stack from the settings and the directory.
+     * Called before any Compose command so `-f` and `--env-file` are explicit.
+     * @returns Inventory of the stack files
+     */
+    async loadFileConfig() : Promise<StackFileInventory> {
+        const dir = this.safePath;
+
+        if (!dir) {
+            // A stack that is not managed by Dockge has no directory to inspect
+            this._inventory = {
+                config: emptyStackFileConfig(),
+                composeFileNames: [],
+                envFileNames: [],
+                secretFiles: [],
+                needsComposeSelection: false,
+            };
+            return this._inventory;
+        }
+
+        const inventory = await StackConfig.inventory(dir, this.name);
+
+        this._inventory = inventory;
+        this._fileConfig = inventory.config;
+
+        if (inventory.config.composeFileName) {
+            this._composeFileName = inventory.config.composeFileName;
+        }
+
+        return inventory;
+    }
+
+    get fileConfig() : StackFileConfig {
+        return this._fileConfig;
+    }
+
+    get composeFileName() : string {
+        return this._composeFileName;
+    }
+
+    /**
+     * Env files passed to compose for interpolation, in order and only when they exist
+     * @returns File names inside the stack directory
+     */
+    get envFileNames() : string[] {
+        // A stack whose config was never loaded keeps the historic behaviour of using .env
+        if (!this._inventory && this._fileConfig.envFileNames.length === 0) {
+            return fs.existsSync(path.join(this.path, ".env")) ? [ ".env" ] : [];
+        }
+
+        return this._fileConfig.envFileNames.filter((fileName) => fs.existsSync(path.join(this.path, fileName)));
+    }
+
+    /**
+     * Env file shown and edited in the UI
+     * @returns File name, or ".env" for a stack that has no selection yet
+     */
+    get activeEnvFileName() : string {
+        return this._fileConfig.activeEnvFileName || ".env";
     }
 
     /**
@@ -158,11 +224,22 @@ export class Stack {
         }
 
         let obj = this.toSimpleJSON(endpoint);
+        const inventory = this._inventory ?? await this.loadFileConfig();
+
         return {
             ...obj,
             composeYAML: this.composeYAML,
             composeENV: this.composeENV,
             primaryHostname,
+            // Only names, sizes and bindings of secrets, never their content
+            files: {
+                composeFileNames: inventory.composeFileNames,
+                envFileNames: inventory.envFileNames,
+                activeEnvFileName: this.activeEnvFileName,
+                selectedEnvFileNames: inventory.config.envFileNames,
+                secretFiles: inventory.secretFiles,
+                needsComposeSelection: inventory.needsComposeSelection,
+            },
         };
     }
 
@@ -236,7 +313,7 @@ export class Stack {
     get composeENV() : string {
         if (this._composeENV === undefined) {
             try {
-                this._composeENV = fs.readFileSync(path.join(this.path, ".env"), "utf-8");
+                this._composeENV = fs.readFileSync(path.join(this.path, this.activeEnvFileName), "utf-8");
             } catch (e) {
                 this._composeENV = "";
             }
@@ -286,17 +363,39 @@ export class Stack {
             }
         }
 
-        // Write or overwrite the compose.yaml
-        fs.writeFileSync(path.join(dir, this._composeFileName), this.composeYAML);
+        if (isAdd) {
+            // A new stack starts with the compose file it was created with
+            await StackConfig.setQuiet(this.name, {
+                composeFileName: this._composeFileName,
+                envFileNames: this.composeENV.trim() === "" ? [] : [ this.activeEnvFileName ],
+                activeEnvFileName: this.composeENV.trim() === "" ? "" : this.activeEnvFileName,
+                secretBindings: [],
+            });
+            await this.loadFileConfig();
+        }
 
-        // Write the .env file, but do not create an empty one for a stack that never had it
-        const envPath = path.join(dir, ".env");
+        // Write or overwrite the selected compose file
+        fs.writeFileSync(await resolveStackFilePath(dir, this._composeFileName), this.composeYAML);
+
+        // Write the active env file, but do not create an empty one for a stack that never had it
+        const envPath = await resolveStackFilePath(dir, this.activeEnvFileName);
         const envContent = this.composeENV;
         const hasEnvFile = await fileExists(envPath);
         const shouldWriteEnv = hasEnvFile || envContent.trim() !== "";
 
         if (shouldWriteEnv) {
             await fsAsync.writeFile(envPath, envContent, "utf-8");
+        }
+
+        if (shouldWriteEnv && !this._fileConfig.envFileNames.includes(this.activeEnvFileName)) {
+            // A newly created env file becomes part of the interpolation set
+            const config = {
+                ...this._fileConfig,
+                envFileNames: [ ...this._fileConfig.envFileNames, this.activeEnvFileName ],
+                activeEnvFileName: this.activeEnvFileName,
+            };
+            await StackConfig.setQuiet(this.name, config);
+            this._fileConfig = config;
         }
 
         if (process.env.PUID && process.env.PGID) {
@@ -331,6 +430,8 @@ export class Stack {
             recursive: true,
             force: true
         });
+
+        await StackConfig.removeQuiet(this.name);
 
         return exitCode;
     }
@@ -655,18 +756,39 @@ export class Stack {
 
         stack._status = UNKNOWN;
         stack._configFilePath = path.resolve(dir);
+
+        if (!skipFSOperations) {
+            await stack.loadFileConfig();
+        }
+
         return stack;
     }
 
+    /**
+     * Build the argument array of a `docker compose` call.
+     * The compose file is always explicit, so the UI and Compose can never disagree about it,
+     * and env files are passed in the configured order.
+     * @param command Compose sub command
+     * @param extraOptions Arguments of the sub command
+     * @returns Argument array, never a shell string
+     */
     getComposeOptions(command : string, ...extraOptions : string[]) {
-        //--env-file ./../global.env --env-file .env
-        let options = [ "compose", command, ...extraOptions ];
+        const globalOptions : string[] = [];
+
+        // The global env file stays the outermost source, stack files override it
         if (fs.existsSync(path.join(this.server.stacksDir, "global.env"))) {
-            if (fs.existsSync(path.join(this.path, ".env"))) {
-                options.splice(1, 0, "--env-file", "./.env");
-            }
-            options.splice(1, 0, "--env-file", "../global.env");
+            globalOptions.push("--env-file", "../global.env");
         }
+
+        for (const fileName of this.envFileNames) {
+            globalOptions.push("--env-file", "./" + fileName);
+        }
+
+        if (this._composeFileName) {
+            globalOptions.push("-f", this._composeFileName);
+        }
+
+        const options = [ "compose", ...globalOptions, command, ...extraOptions ];
         log.debug("getComposeOptions", options);
         return options;
     }
@@ -779,6 +901,238 @@ export class Stack {
         }
 
         return statusList;
+    }
+
+    /**
+     * Apply a new file selection after validating it against the directory
+     * @param config Selection coming from the UI
+     * @returns The stored selection
+     */
+    async setFileConfig(config : StackFileConfig) : Promise<StackFileConfig> {
+        const dir = this.path;
+        const validated = await StackConfig.validate(dir, config);
+
+        await StackConfig.set(this.name, validated);
+        await this.loadFileConfig();
+
+        // Drop cached texts, the selected files may be different now
+        this._composeYAML = undefined;
+        this._composeENV = undefined;
+
+        return validated;
+    }
+
+    /**
+     * Write an env file of the stack
+     * @param fileName Env file inside the stack directory
+     * @param content New content
+     */
+    async writeEnvFile(fileName : string, content : string) : Promise<void> {
+        if (classifyStackFile(fileName) !== "env") {
+            throw new ValidationError("Not an env file: " + fileName);
+        }
+
+        const filePath = await resolveStackFilePath(this.path, fileName);
+        await fsAsync.writeFile(filePath, content, "utf-8");
+
+        if (fileName === this.activeEnvFileName) {
+            this._composeENV = content;
+        }
+    }
+
+    /**
+     * Metadata of the secret files, without any content
+     * @returns Secret file metadata
+     */
+    async listSecretFiles() : Promise<SecretFileMeta[]> {
+        const inventory = await this.loadFileConfig();
+        return inventory.secretFiles;
+    }
+
+    /**
+     * Read the content of a secret file.
+     * The caller has to authorise this separately, it is not part of the stack response.
+     * @param fileName Secret file inside the stack directory
+     * @returns File content
+     */
+    async readSecretFile(fileName : string) : Promise<string> {
+        if (classifyStackFile(fileName) !== "secret") {
+            throw new ValidationError("Not a secret file: " + fileName);
+        }
+
+        const filePath = await resolveStackFilePath(this.path, fileName);
+
+        try {
+            return await fsAsync.readFile(filePath, "utf-8");
+        } catch (e) {
+            throw new ValidationError("Secret file not found: " + fileName);
+        }
+    }
+
+    /**
+     * Create or replace a secret file with restrictive permissions
+     * @param fileName Secret file inside the stack directory
+     * @param content New content
+     */
+    async writeSecretFile(fileName : string, content : string) : Promise<void> {
+        if (classifyStackFile(fileName) !== "secret") {
+            throw new ValidationError("Not a secret file: " + fileName);
+        }
+
+        const filePath = await resolveStackFilePath(this.path, fileName);
+
+        // mode is applied on creation, chmod covers an existing file
+        await fsAsync.writeFile(filePath, content, {
+            encoding: "utf-8",
+            mode: 0o600,
+        });
+
+        if (process.platform !== "win32") {
+            await fsAsync.chmod(filePath, 0o600);
+
+            if (process.env.PUID && process.env.PGID) {
+                const uid = Number(process.env.PUID);
+                const gid = Number(process.env.PGID);
+                if (Number.isInteger(uid) && Number.isInteger(gid)) {
+                    await fsAsync.chown(filePath, uid, gid);
+                }
+            }
+        } else {
+            log.warn("writeSecretFile", "File permissions cannot be restricted on Windows, the file inherits the directory ACL");
+        }
+    }
+
+    /**
+     * Delete a secret file and its binding
+     * @param fileName Secret file inside the stack directory
+     */
+    async deleteSecretFile(fileName : string) : Promise<void> {
+        if (classifyStackFile(fileName) !== "secret") {
+            throw new ValidationError("Not a secret file: " + fileName);
+        }
+
+        const filePath = await resolveStackFilePath(this.path, fileName);
+        await fsAsync.rm(filePath, { force: true });
+
+        const binding = this._fileConfig.secretBindings.find((item) => item.fileName === fileName);
+        if (binding) {
+            await this.unbindSecret(binding.name);
+        }
+    }
+
+    /**
+     * Reference a secret file from the compose file, only on an explicit user action.
+     * The compose document is edited in place, so comments and formatting survive.
+     * @param secretName Compose secret name
+     * @param fileName Secret file inside the stack directory
+     * @param services Services that get access to the secret
+     */
+    async bindSecret(secretName : string, fileName : string, services : readonly string[]) : Promise<void> {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(secretName)) {
+            throw new ValidationError("Invalid secret name: " + secretName);
+        }
+
+        if (classifyStackFile(fileName) !== "secret") {
+            throw new ValidationError("Not a secret file: " + fileName);
+        }
+
+        const filePath = await resolveStackFilePath(this.path, fileName);
+        await fsAsync.access(filePath).catch(() => {
+            throw new ValidationError("Secret file not found: " + fileName);
+        });
+
+        const doc = parseDocument(this.composeYAML);
+        const declaredServices = readComposeServices(this.composeYAML);
+
+        for (const service of services) {
+            if (!declaredServices.includes(service)) {
+                throw new ValidationError("Unknown service: " + service);
+            }
+        }
+
+        doc.setIn([ "secrets", secretName, "file" ], "./" + fileName);
+
+        for (const service of services) {
+            const current = doc.getIn([ "services", service, "secrets" ]);
+            const list = isSeq(current) ? current.toJSON() as string[] : [];
+
+            if (!list.includes(secretName)) {
+                list.push(secretName);
+            }
+
+            doc.setIn([ "services", service, "secrets" ], list);
+        }
+
+        const composeYAML = doc.toString();
+        fs.writeFileSync(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
+        this._composeYAML = composeYAML;
+
+        const bindings = this._fileConfig.secretBindings.filter((item) => item.name !== secretName);
+        bindings.push({
+            name: secretName,
+            fileName,
+            services: [ ...services ],
+        });
+
+        const config = {
+            ...this._fileConfig,
+            secretBindings: bindings,
+        };
+        await StackConfig.set(this.name, config);
+        this._fileConfig = config;
+    }
+
+    /**
+     * Remove a secret reference from the compose file and from the stored bindings
+     * @param secretName Compose secret name
+     */
+    async unbindSecret(secretName : string) : Promise<void> {
+        const doc = parseDocument(this.composeYAML);
+        let changed = false;
+
+        if (doc.hasIn([ "secrets", secretName ])) {
+            doc.deleteIn([ "secrets", secretName ]);
+            changed = true;
+        }
+
+        const secretsNode = doc.getIn([ "secrets" ]);
+        if (isMap(secretsNode) && secretsNode.items.length === 0) {
+            doc.deleteIn([ "secrets" ]);
+        }
+
+        for (const service of readComposeServices(this.composeYAML)) {
+            const current = doc.getIn([ "services", service, "secrets" ]);
+            if (!isSeq(current)) {
+                continue;
+            }
+
+            const list = (current.toJSON() as string[]).filter((item) => item !== secretName);
+
+            if (list.length === (current.toJSON() as string[]).length) {
+                continue;
+            }
+
+            changed = true;
+
+            if (list.length === 0) {
+                doc.deleteIn([ "services", service, "secrets" ]);
+            } else {
+                doc.setIn([ "services", service, "secrets" ], list);
+            }
+        }
+
+        if (changed) {
+            const composeYAML = doc.toString();
+            fs.writeFileSync(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
+            this._composeYAML = composeYAML;
+        }
+
+        const config = {
+            ...this._fileConfig,
+            secretBindings: this._fileConfig.secretBindings.filter((item) => item.name !== secretName),
+        };
+        await StackConfig.set(this.name, config);
+        this._fileConfig = config;
     }
 
     async startService(socket: DockgeSocket, serviceName: string) {

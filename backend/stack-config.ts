@@ -2,6 +2,7 @@ import { promises as fsAsync } from "fs";
 import path from "path";
 import { classifyStackFile, isSafeStackFileName, pickDefaultComposeFile } from "../common/stack-files";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
+import { log } from "./log";
 import { Settings } from "./settings";
 import { ValidationError } from "./util-server";
 
@@ -71,7 +72,17 @@ export class StackConfig {
      * @returns Config per stack name
      */
     static async getAll() : Promise<Record<string, StackFileConfig>> {
-        const stored = await Settings.get(STACK_FILES_SETTING_KEY);
+        let stored : unknown;
+
+        try {
+            stored = await Settings.get(STACK_FILES_SETTING_KEY);
+        } catch (e) {
+            // The files on disk are the source of truth, missing metadata must not break a stack
+            if (e instanceof Error) {
+                log.debug("stack-config", "Cannot read the stack file selection: " + e.message);
+            }
+            return {};
+        }
 
         if (!stored || typeof stored !== "object") {
             return {};
@@ -114,6 +125,42 @@ export class StackConfig {
 
         delete all[stackName];
         await Settings.set(STACK_FILES_SETTING_KEY, all, STACK_FILES_SETTING_TYPE);
+    }
+
+    /**
+     * Store a selection without failing when the database is unavailable.
+     * Used by paths whose real goal is writing files, not metadata.
+     * @param stackName Stack name
+     * @param config Selection to store
+     * @returns Whether the selection could be stored
+     */
+    static async setQuiet(stackName : string, config : StackFileConfig) : Promise<boolean> {
+        try {
+            await this.set(stackName, config);
+            return true;
+        } catch (e) {
+            if (e instanceof Error) {
+                log.warn("stack-config", `Cannot store the file selection of ${stackName}: ${e.message}`);
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Forget a selection without failing when the database is unavailable
+     * @param stackName Stack name
+     * @returns Whether the selection could be removed
+     */
+    static async removeQuiet(stackName : string) : Promise<boolean> {
+        try {
+            await this.remove(stackName);
+            return true;
+        } catch (e) {
+            if (e instanceof Error) {
+                log.warn("stack-config", `Cannot forget the file selection of ${stackName}: ${e.message}`);
+            }
+            return false;
+        }
     }
 
     /**

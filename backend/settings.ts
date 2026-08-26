@@ -42,6 +42,9 @@ export class Settings {
                 }
 
             }, 60 * 1000);
+
+            // The cache cleaner must never keep the process alive on its own
+            Settings.cacheCleaner.unref?.();
         }
 
         // Query from cache
