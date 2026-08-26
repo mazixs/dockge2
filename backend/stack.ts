@@ -40,13 +40,81 @@ export class Stack {
         this._composeENV = composeENV;
 
         if (!skipFSOperations) {
+            const dir = this.safePath;
+
             // Check if compose file name is different from compose.yaml
-            for (const filename of acceptedComposeFileNames) {
-                if (fs.existsSync(path.join(this.path, filename))) {
-                    this._composeFileName = filename;
-                    break;
+            if (dir) {
+                for (const filename of acceptedComposeFileNames) {
+                    if (fs.existsSync(path.join(dir, filename))) {
+                        this._composeFileName = filename;
+                        break;
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * Check that a stack name can be used as a directory name inside the stacks directory
+     * @param name Stack name
+     * @throws {ValidationError} If the name is not allowed
+     */
+    static validateName(name : string) : void {
+        if (!name.match(/^[a-z0-9_-]+$/)) {
+            throw new ValidationError("Stack name can only contain [a-z][0-9] _ - only");
+        }
+    }
+
+    /**
+     * Resolve the directory of a stack and make sure it stays inside the stacks directory.
+     * This is the single barrier that must be passed before any filesystem or Docker operation.
+     * @param server Dockge server holding the stacks directory
+     * @param name Stack name
+     * @returns Absolute path of the stack directory
+     * @throws {ValidationError} If the name is not allowed or escapes the stacks directory
+     */
+    static getSafePath(server : DockgeServer, name : string) : string {
+        Stack.validateName(name);
+
+        const base = path.resolve(server.stacksDir);
+        const resolved = path.resolve(base, name);
+        const relative = path.relative(base, resolved);
+
+        if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+            throw new ValidationError("Stack path is outside the stacks directory");
+        }
+
+        return resolved;
+    }
+
+    /**
+     * Reject a stack directory that is a symbolic link, so a valid name cannot point outside
+     * @param dir Stack directory returned by getSafePath()
+     * @throws {ValidationError} If the directory itself is a symbolic link
+     */
+    static async assertNotSymlink(dir : string) : Promise<void> {
+        try {
+            const stat = await fsAsync.lstat(dir);
+            if (stat.isSymbolicLink()) {
+                throw new ValidationError("Stack path is outside the stacks directory");
+            }
+        } catch (e) {
+            if (e instanceof ValidationError) {
+                throw e;
+            }
+            // Not existing yet is not a traversal problem, the caller handles it
+        }
+    }
+
+    /**
+     * Stack directory, or undefined when the stack name cannot be used on the filesystem.
+     * Used for display-only code paths that must not fail for stacks created outside Dockge.
+     */
+    protected get safePath() : string | undefined {
+        try {
+            return this.path;
+        } catch (e) {
+            return undefined;
         }
     }
 
@@ -103,7 +171,11 @@ export class Stack {
     }
 
     get isManagedByDockge() : boolean {
-        return fs.existsSync(this.path) && fs.statSync(this.path).isDirectory();
+        const dir = this.safePath;
+        if (!dir) {
+            return false;
+        }
+        return fs.existsSync(dir) && fs.statSync(dir).isDirectory();
     }
 
     get status() : number {
@@ -112,9 +184,7 @@ export class Stack {
 
     validate() {
         // Check name, allows [a-z][0-9] _ - only
-        if (!this.name.match(/^[a-z0-9_-]+$/)) {
-            throw new ValidationError("Stack name can only contain [a-z][0-9] _ - only");
-        }
+        Stack.validateName(this.name);
 
         // Check YAML format
         yaml.parse(this.composeYAML);
@@ -153,7 +223,7 @@ export class Stack {
     }
 
     get path() : string {
-        return path.join(this.server.stacksDir, this.name);
+        return Stack.getSafePath(this.server, this.name);
     }
 
     get fullPath() : string {
@@ -373,9 +443,12 @@ export class Stack {
     }
 
     static async getStack(server: DockgeServer, stackName: string, skipFSOperations = false) : Promise<Stack> {
-        let dir = path.join(server.stacksDir, stackName);
+        // Validate the name and resolve the directory before any filesystem or Docker access
+        let dir = Stack.getSafePath(server, stackName);
 
         if (!skipFSOperations) {
+            await Stack.assertNotSymlink(dir);
+
             if (!await fileExists(dir) || !(await fsAsync.stat(dir)).isDirectory()) {
                 // Maybe it is a stack managed by docker compose directly
                 let stackList = await this.getStackList(server, true);

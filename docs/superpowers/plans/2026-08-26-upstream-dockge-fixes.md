@@ -34,7 +34,7 @@
 
 **Issue invariant:** Issue #994 подтверждает чтение `.env`/Compose за пределами `stacksDir` и рекурсивное удаление внешнего каталога; при `disableAuth` тот же путь становится неаутентифицированным. Поэтому проверка только в `save()` недостаточна.
 
-- [ ] **Step 1: Добавить реальные падающие тесты для небезопасных имён**
+- [x] **Step 1: Добавить реальные падающие тесты для небезопасных имён**
 
 В `test/backend/util-stack.test.ts` расширить уже существующий тест с `mkdtemp()`:
 
@@ -69,7 +69,7 @@ node --import tsx --test test/backend/util-stack.test.ts
 
 Expected: новые проверки сначала завершаются ошибкой на текущем коде, потому что `getStack()` вызывает `path.join()` до проверки имени.
 
-- [ ] **Step 2: Вынести проверку имени и безопасного пути**
+- [x] **Step 2: Вынести проверку имени и безопасного пути**
 
 В `backend/stack.ts` вынести проверку из `validate()`:
 
@@ -100,7 +100,7 @@ static getSafePath(server: DockgeServer, name: string): string {
 
 Для уже существующего каталога перед операциями чтения/удаления проверить `lstat` и отклонить symlink самого каталога стека; это закрывает обход через разрешённое имя `linked`, указывающее наружу. Не менять доверенный корень `stacksDir` во время этой задачи.
 
-- [ ] **Step 3: Проверить, что все Socket.IO входы проходят через общий барьер**
+- [x] **Step 3: Проверить, что все Socket.IO входы проходят через общий барьер**
 
 Проверить вызовы `Stack.getStack()` в `backend/agent-socket-handlers/docker-socket-handler.ts` и `backend/agent-socket-handlers/terminal-socket-handler.ts`. Не дублировать регулярное выражение в обработчиках: они могут оставить проверку типа `string`, а содержательная проверка должна происходить в `getStack()`/`getSafePath()`.
 
@@ -112,7 +112,7 @@ rg -n "path\.join\([^\n]*stacksDir|Stack\.getStack|new Stack" backend test
 
 Expected: `getStack()` и `Stack.path` используют один барьер; ни один обработчик не может выполнить `docker compose` с непроверенным именем.
 
-- [ ] **Step 4: Запустить тесты и зафиксировать результат**
+- [x] **Step 4: Запустить тесты и зафиксировать результат**
 
 Run:
 
@@ -125,7 +125,7 @@ git diff --check
 
 Expected: path traversal тесты используют только реальную временную файловую систему, не запускают Docker и не подменяют `Terminal.exec`; валидные стеки продолжают загружаться.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/stack.ts test/backend/util-stack.test.ts
