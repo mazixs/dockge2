@@ -216,32 +216,42 @@ export function copyYAMLComments(doc : Document, src : Document) {
     doc.comment = src.comment;
     doc.commentBefore = src.commentBefore;
 
+    let hasLegacyOctal = false;
+
     if (isCollection(doc.contents) && isCollection(src.contents)) {
-        copyYAMLCommentsItems(doc.contents.items, src.contents.items);
+        hasLegacyOctal = copyYAMLCommentsItems(doc.contents.items, src.contents.items);
+    }
+
+    // YAML 1.2 has no leading-zero octal notation, so `mode: 01777` would be written as `1777`
+    if (hasLegacyOctal) {
+        doc.setSchema("1.1");
     }
 }
 
 /**
  * Copy yaml comments from srcItems to items
  * Attempts to preserve comments by matching content rather than just array indices
+ * @returns Whether a legacy octal scalar such as `01777` was restored
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function copyYAMLCommentsItems(items: any, srcItems: any) {
+function copyYAMLCommentsItems(items: any, srcItems: any) : boolean {
     if (!items || !srcItems) {
-        return;
+        return false;
     }
+
+    let hasLegacyOctal = false;
 
     // First pass - try to match items by their content
     for (let i = 0; i < items.length; i++) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const item: any = items[i];
 
-        // Try to find matching source item by content
+        // Try to find matching source item by content, sequence entries keep their position
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const srcIndex = srcItems.findIndex((srcItem: any) =>
+        const srcIndex = isPair(item) ? srcItems.findIndex((srcItem: any) =>
             JSON.stringify(srcItem.value) === JSON.stringify(item.value) &&
             JSON.stringify(srcItem.key) === JSON.stringify(item.key)
-        );
+        ) : (srcItems[i] === undefined ? -1 : i);
 
         if (srcIndex !== -1) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -272,18 +282,50 @@ function copyYAMLCommentsItems(items: any, srcItems: any) {
                 }
             }
 
+            // Keep the original octal notation of values such as `mode: 01777`
+            if (
+                isScalar(item.value) &&
+                isScalar(srcItem.value) &&
+                typeof item.value.value === "number" &&
+                typeof srcItem.value.source === "string" &&
+                /^0[0-7]+$/.test(srcItem.value.source)
+            ) {
+                item.value.value = Number.parseInt(srcItem.value.source, 8);
+                item.value.format = "OCT";
+                hasLegacyOctal = true;
+            }
+
+            // Sequence entries are nodes themselves, not key/value pairs
+            if (!isPair(item)) {
+                if (isCollection(item) && isCollection(srcItem)) {
+                    hasLegacyOctal = copyYAMLCommentsItems(item.items, srcItem.items) || hasLegacyOctal;
+                } else if (
+                    isScalar(item) &&
+                    isScalar(srcItem) &&
+                    typeof item.value === "number" &&
+                    typeof srcItem.source === "string" &&
+                    /^0[0-7]+$/.test(srcItem.source)
+                ) {
+                    item.value = Number.parseInt(srcItem.source, 8);
+                    item.format = "OCT";
+                    hasLegacyOctal = true;
+                }
+            }
+
             if (item.value && srcItem.value) {
                 if (typeof item.value === "object" && typeof srcItem.value === "object") {
                     item.value.comment = srcItem.value.comment;
                     item.value.commentBefore = srcItem.value.commentBefore;
 
                     if (item.value.items && srcItem.value.items) {
-                        copyYAMLCommentsItems(item.value.items, srcItem.value.items);
+                        hasLegacyOctal = copyYAMLCommentsItems(item.value.items, srcItem.value.items) || hasLegacyOctal;
                     }
                 }
             }
         }
     }
+
+    return hasLegacyOctal;
 }
 
 /**
