@@ -149,8 +149,14 @@ test("stack file and secret events keep secret content behind a password", async
     });
 });
 
-test("stack file events reject wrong types before touching the filesystem", async () => {
+test("stack file events reject wrong types with a type error, not by accident", async () => {
     await withDatabase(async ({ stacksDir }) => {
+        // A stack that exists, so a refusal can only come from the type checks themselves
+        const stackDir = path.join(stacksDir, "typed-stack");
+        await mkdir(stackDir);
+        await writeFile(path.join(stackDir, "compose.yaml"), composeYAML);
+        await writeFile(path.join(stackDir, ".env"), "BASE=1\n");
+
         const socket = { userID: 1,
             endpoint: "" } as DockgeSocket;
         const server = { stacksDir,
@@ -158,19 +164,32 @@ test("stack file events reject wrong types before touching the filesystem", asyn
         const agentSocket = new AgentSocket();
         new DockerSocketHandler().create(socket, server, agentSocket);
 
-        for (const [ event, args ] of [
-            [ "getStackFiles", [ 123 ]],
-            [ "setStackFiles", [ "a-stack", "not-an-object" ]],
-            [ "setStackFiles", [ "a-stack", { composeFileName: 1,
-                envFileNames: [] }]],
-            [ "setStackFiles", [ "a-stack", { composeFileName: "compose.yaml",
-                envFileNames: "nope" }]],
-            [ "saveEnvFile", [ "a-stack", ".env", 5 ]],
-            [ "listSecrets", [ null ]],
-            [ "bindSecret", [ "a-stack", "name", ".secret", "not-an-array" ]],
-        ] as Array<[string, unknown[]]>) {
+        // A correct call on the same stack succeeds, which proves the refusals below come
+        // from the arguments and not from a missing stack
+        const healthy = await call(agentSocket, "getStackFiles", "typed-stack");
+        assert.equal(healthy.ok, true);
+
+        const cases : Array<[string, unknown[], RegExp]> = [
+            [ "getStackFiles", [ 123 ], /must be a string/ ],
+            [ "setStackFiles", [ "typed-stack", "not-an-object" ], /must be an object/ ],
+            [ "setStackFiles", [ "typed-stack", { composeFileName: 1,
+                envFileNames: [] }], /composeFileName must be a string/ ],
+            [ "setStackFiles", [ "typed-stack", { composeFileName: "compose.yaml",
+                envFileNames: "nope" }], /envFileNames must be a string array/ ],
+            [ "setStackFiles", [ "typed-stack", { composeFileName: "compose.yaml",
+                envFileNames: Array.from({ length: 100 }, () => ".env") }], /Too many env files/ ],
+            [ "saveEnvFile", [ "typed-stack", ".env", 5 ], /Content must be a string/ ],
+            [ "listSecrets", [ null ], /must be a string/ ],
+            [ "bindSecret", [ "typed-stack", "name", ".secret", "not-an-array" ], /must be a string array/ ],
+        ];
+
+        for (const [ event, args, expected ] of cases) {
             const response = await call(agentSocket, event, ...args);
             assert.equal(response.ok, false, `${event} should refuse ${JSON.stringify(args)}`);
+            assert.match(String(response.msg), expected, `${event} should say why it refused`);
         }
+
+        // None of the refused calls touched the env file
+        assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "BASE=1\n");
     });
 });

@@ -23,6 +23,7 @@ import {
 } from "../common/compose-status";
 import {
     acceptedComposeFileNames,
+    ATTENTION,
     COMBINED_TERMINAL_COLS,
     COMBINED_TERMINAL_ROWS,
     CREATED_FILE,
@@ -576,17 +577,34 @@ export class Stack {
         }
 
         // Get the project list and config paths from docker compose ls
-        let res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
-            encoding: "utf-8",
-            maxBuffer: 4 * 1024 * 1024,
-            timeoutMs: 30_000,
-        });
+        let composeList : ComposeLsEntry[];
 
-        if (!res.stdout) {
+        try {
+            const res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
+                encoding: "utf-8",
+                maxBuffer: 4 * 1024 * 1024,
+                timeoutMs: 30_000,
+            });
+
+            if (!res.stdout) {
+                return stackList;
+            }
+
+            composeList = JSON.parse(res.stdout.toString());
+        } catch (e) {
+            // Docker is unreachable. The managed stacks are still listed, but their status
+            // becomes UNKNOWN instead of keeping the last known green value.
+            if (e instanceof Error) {
+                log.warn("getStackList", "Cannot read the compose project list: " + e.message);
+            }
+
+            for (const stack of stackList.values()) {
+                stack._status = UNKNOWN;
+                stack._issues = [];
+            }
+
             return stackList;
         }
-
-        let composeList : ComposeLsEntry[] = JSON.parse(res.stdout.toString());
 
         // Container states of every compose project, read in one Docker call
         const instanceMap = await this.getInstanceMap();
@@ -644,17 +662,27 @@ export class Stack {
     static async getStatusList() : Promise<Map<string, number>> {
         let statusList = new Map<string, number>();
 
-        let res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
-            encoding: "utf-8",
-            maxBuffer: 4 * 1024 * 1024,
-            timeoutMs: 30_000,
-        });
+        let composeList : ComposeLsEntry[];
 
-        if (!res.stdout) {
+        try {
+            const res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
+                encoding: "utf-8",
+                maxBuffer: 4 * 1024 * 1024,
+                timeoutMs: 30_000,
+            });
+
+            if (!res.stdout) {
+                return statusList;
+            }
+
+            composeList = JSON.parse(res.stdout.toString());
+        } catch (e) {
+            if (e instanceof Error) {
+                log.warn("getStatusList", "Cannot read the compose project list: " + e.message);
+            }
             return statusList;
         }
 
-        let composeList : ComposeLsEntry[] = JSON.parse(res.stdout.toString());
         const instanceMap = await this.getInstanceMap();
 
         for (let composeStack of composeList) {
@@ -914,10 +942,11 @@ export class Stack {
             throw new Error("Failed to pull, please check the terminal output for more information.");
         }
 
-        // If the stack is not running, we don't need to restart it
+        // If the stack is not up, there is nothing to recreate.
+        // A degraded stack (ATTENTION) is up, so it does get the new images.
         await this.updateStatus();
         log.debug("update", "Status: " + this.status);
-        if (this.status !== RUNNING) {
+        if (this.status !== RUNNING && this.status !== ATTENTION) {
             return exitCode;
         }
 
@@ -1021,27 +1050,6 @@ export class Stack {
             log.debug("assertShellExists", `${shell} is not usable in ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
             throw new ValidationError(`${shell} is not available in this container`);
         }
-    }
-
-    /**
-     * Group the containers of this stack by service, with the typed state of every instance
-     * @returns Instances grouped by service name
-     */
-    async getServiceStatusList() : Promise<Map<string, ContainerInstanceStatus[]>> {
-        const statusList = new Map<string, ContainerInstanceStatus[]>();
-        const instances = await this.getInstances();
-
-        if (!instances) {
-            return statusList;
-        }
-
-        for (const instance of instances) {
-            const list = statusList.get(instance.service) ?? [];
-            list.push(instance);
-            statusList.set(instance.service, list);
-        }
-
-        return statusList;
     }
 
     /**

@@ -24,6 +24,25 @@ async function terminalText(page : Page) : Promise<string> {
 }
 
 test.describe("switching the container shell", () => {
+    test("the session really runs the requested shell", async ({ page }) => {
+        // bash sets BASH_VERSION, the ash shell of the image does not
+        await openTerminal(page, "bash");
+        await page.locator(".xterm-screen").click();
+        await page.keyboard.type("echo shell-is-[$BASH_VERSION]");
+        await page.keyboard.press("Enter");
+
+        await expect.poll(() => terminalText(page), { timeout: 15_000 })
+            .toMatch(/shell-is-\[5\./);
+
+        await openTerminal(page, "sh");
+        await page.locator(".xterm-screen").click();
+        await page.keyboard.type("echo shell-is-[$BASH_VERSION]");
+        await page.keyboard.press("Enter");
+
+        await expect.poll(() => terminalText(page), { timeout: 15_000 })
+            .toContain("shell-is-[]");
+    });
+
     test("each shell gets its own session instead of reusing the other PTY", async ({ page }) => {
         await openTerminal(page, "bash");
 

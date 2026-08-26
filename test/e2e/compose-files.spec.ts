@@ -19,6 +19,9 @@ test.describe("choosing stack files and handling secrets", () => {
         await page.selectOption("#active-env-select", ".env.dev");
         await page.getByRole("button", { name: "Save file selection" }).click();
 
+        // Wait for the server to confirm, otherwise the reload can race the write
+        await expect(page.getByText("Saved").first()).toBeVisible();
+
         // The question is gone and the selection survives a reload
         await page.reload();
         await expect(page.locator("#compose-file-select")).toHaveValue("staging.yml");
@@ -63,6 +66,18 @@ test.describe("choosing stack files and handling secrets", () => {
 
     test("binding a secret edits only the selected compose file", async ({ page }) => {
         await page.goto(`/compose/${E2E_FILES_STACK}`);
+
+        // Make sure this test does not depend on the order of tests. The save button is
+        // disabled when nothing changed, so the selection is only saved when needed.
+        const composeSelect = page.locator("#compose-file-select");
+
+        if (await composeSelect.inputValue() !== "staging.yml") {
+            await composeSelect.selectOption("staging.yml");
+            await page.getByRole("button", { name: "Save file selection" }).click();
+            await expect(page.getByText("Saved").first()).toBeVisible();
+        }
+
+        await expect(composeSelect).toHaveValue("staging.yml");
 
         const secretRow = page.locator(".secret", { hasText: ".secret.db" });
         await secretRow.locator("input.secret-name").fill("db_password");

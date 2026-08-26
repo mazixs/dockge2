@@ -17,6 +17,13 @@ async function openTerminal(page : Page, shell : "sh" | "bash") : Promise<void> 
 
     // The PTY needs a moment before it echoes anything back
     await page.waitForTimeout(1500);
+
+    // A closed page never sends terminalLeave, so the session is shared between tests.
+    // Ctrl+U clears whatever a previous test left on the prompt, otherwise the counts
+    // below would depend on the order of the tests.
+    await page.locator(".xterm-screen").click();
+    await page.keyboard.press("Control+U");
+    await page.waitForTimeout(300);
 }
 
 /**

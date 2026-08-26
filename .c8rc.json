@@ -2,20 +2,22 @@
     "all": true,
     "include": [
         "backend/**/*.ts",
-        "common/**/*.ts"
+        "common/**/*.ts",
+        "extra/deploy-stack.ts",
+        "extra/update-dockge.ts"
     ],
     "exclude": [
         "backend/index.ts",
         "backend/migrations/**",
         "**/*.d.ts",
+        "common/types/**",
         "backend/dockge-server.ts",
         "backend/agent-manager.ts",
         "backend/agent-socket-handler.ts",
         "backend/check-version.ts",
         "backend/router.ts",
         "backend/socket-handler.ts",
-        "backend/terminal.ts",
-        "backend/agent-socket-handlers/**",
+        "backend/agent-socket-handlers/terminal-socket-handler.ts",
         "backend/routers/**",
         "backend/socket-handlers/agent-proxy-socket-handler.ts",
         "backend/socket-handlers/manage-agent-socket-handler.ts"
