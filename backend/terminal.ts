@@ -48,6 +48,12 @@ export class Terminal {
 
     protected socketList : Record<string, DockgeSocket> = {};
 
+    /** True once this terminal started shutting down, so it is never revived */
+    protected ending : boolean = false;
+
+    /** True once the process of this terminal exited */
+    protected _exited : boolean = false;
+
     constructor(server : DockgeServer, name : string, file : string, args : string | string[], cwd : string) {
         this.server = server;
         this._name = name;
@@ -106,6 +112,13 @@ export class Terminal {
                     this.leave(socket);
                 }
             }
+
+            // A closed browser tab never sends terminalLeave, so an abandoned container
+            // shell has to be ended here, otherwise `docker exec` lives on forever
+            if (this.clientCount === 0 && this.name.startsWith("container-exec-")) {
+                log.debug("Terminal", "Terminal " + this.name + " lost all clients, ending it");
+                void this.end();
+            }
         }, 60 * 1000);
 
         if (this.enableKeepAlive) {
@@ -130,7 +143,7 @@ export class Terminal {
             this._ptyProcess = pty.spawn(this.file, this.args, {
                 name: this.name,
                 cwd: this.cwd,
-                cols: TERMINAL_COLS,
+                cols: this.cols,
                 rows: this.rows,
             });
 
@@ -178,7 +191,8 @@ export class Terminal {
         // Remove all clients
         this.socketList = {};
 
-        Terminal.terminalMap.delete(this.name);
+        this._exited = true;
+        this.forgetSelf();
         log.debug("Terminal", "Terminal " + this.name + " exited with code " + res.exitCode);
 
         clearInterval(this.keepAliveInterval);
@@ -193,8 +207,27 @@ export class Terminal {
         this.callback = callback;
     }
 
+    /**
+     * Remove this terminal from the registry, but only when the entry is still this object.
+     * A late shutdown must not delete the entry of a terminal that was opened again.
+     */
+    protected forgetSelf() {
+        if (Terminal.terminalMap.get(this.name) === this) {
+            Terminal.terminalMap.delete(this.name);
+        }
+    }
+
     public join(socket : DockgeSocket) {
         this.socketList[socket.id] = socket;
+    }
+
+    /**
+     * Whether a client is currently attached to this terminal
+     * @param socket Client socket
+     * @returns True when the client joined this terminal
+     */
+    public hasClient(socket : DockgeSocket) : boolean {
+        return this.socketList[socket.id] !== undefined;
     }
 
     public leave(socket : DockgeSocket) {
@@ -226,6 +259,7 @@ export class Terminal {
 
     close() {
         clearInterval(this.keepAliveInterval);
+        clearInterval(this.kickDisconnectedClientsInterval);
         // Send Ctrl+C to the terminal
         this.ptyProcess?.write("\x03");
     }
@@ -248,7 +282,7 @@ export class Terminal {
         }
 
         // The exit handler removes the entry as well, this covers a process that never started
-        Terminal.terminalMap.delete(this.name);
+        this.forgetSelf();
     }
 
     /**
@@ -260,16 +294,25 @@ export class Terminal {
      * @param graceMs How long the shell may take to exit on its own
      */
     async end(graceMs = 3000) : Promise<void> {
+        // A second call must not start another shutdown of the same session
+        if (this.ending) {
+            return;
+        }
+
+        this.ending = true;
         clearInterval(this.keepAliveInterval);
         clearInterval(this.kickDisconnectedClientsInterval);
 
+        // Taken out of the registry right away, so a client that reconnects during the
+        // grace period gets a fresh session instead of one that is about to die
+        this.forgetSelf();
+
         if (!this._ptyProcess) {
-            Terminal.terminalMap.delete(this.name);
             return;
         }
 
         try {
-            // Cancel whatever is on the prompt, then leave the shell
+            // Cancel whatever is on the prompt, then leave the shell, then send EOF
             this._ptyProcess.write("\x03");
             this._ptyProcess.write("exit\r");
         } catch (e) {
@@ -279,16 +322,33 @@ export class Terminal {
         }
 
         const started = Date.now();
+        let sentEOF = false;
 
         while (Date.now() - started < graceMs) {
-            if (!Terminal.terminalMap.has(this.name)) {
+            if (this.exited) {
                 return;
             }
+
+            // Halfway through, try EOF as well: a shell reading input takes it as a hangup
+            if (!sentEOF && Date.now() - started > graceMs / 2) {
+                sentEOF = true;
+                try {
+                    this._ptyProcess.write("\x04");
+                } catch (e) {
+                    // Nothing more to do, the kill below is the fallback
+                }
+            }
+
             await sleep(100);
         }
 
         log.debug("Terminal", "Terminal " + this.name + " did not exit on its own, killing it");
         this.kill();
+    }
+
+    /** Whether the process of this terminal already exited */
+    public get exited() : boolean {
+        return this._exited;
     }
 
     /**

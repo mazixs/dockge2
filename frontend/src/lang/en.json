@@ -202,5 +202,6 @@
     "switchToShell": "Switch to {0}",
     "paste": "Paste",
     "clipboardDenied": "The browser did not allow reading the clipboard. Use Ctrl+V, Ctrl+Shift+V or Cmd+V instead.",
-    "clipboardEmpty": "The clipboard is empty."
+    "clipboardEmpty": "The clipboard is empty.",
+    "multilinePasteTruncated": "Only the first line was pasted: this console edits one command at a time."
 }

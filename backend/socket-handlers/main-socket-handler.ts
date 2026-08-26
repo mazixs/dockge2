@@ -1,4 +1,5 @@
 import composerize from "composerize";
+import type { LooseObject } from "../../common/util-common";
 import { SocketHandler } from "../socket-handler.js";
 import { DockgeServer } from "../dockge-server";
 import { log } from "../log";
@@ -288,7 +289,7 @@ export class MainSocketHandler extends SocketHandler {
                 }
                 delete data.globalENV;
 
-                await Settings.setSettings("general", data);
+                await Settings.setSettings("general", pickGeneralSettings(data));
 
                 callback({
                     ok: true,
@@ -362,4 +363,34 @@ export class MainSocketHandler extends SocketHandler {
 
         return null;
     }
+}
+
+/** Settings the general settings screen is allowed to write */
+const GENERAL_SETTING_KEYS = [
+    "checkBeta",
+    "checkUpdate",
+    "disableAuth",
+    "keepDataPeriodDays",
+    "primaryHostname",
+    "serverTimezone",
+    "trustProxy",
+];
+
+/**
+ * Keep only the known settings.
+ * Without this a client could create arbitrary rows, including internal keys such as
+ * the stack file selection, which is stored under its own type on purpose.
+ * @param data Values from the client
+ * @returns Values that may be stored
+ */
+function pickGeneralSettings(data : LooseObject) : LooseObject {
+    const result : LooseObject = {};
+
+    for (const key of GENERAL_SETTING_KEYS) {
+        if (key in data) {
+            result[key] = data[key];
+        }
+    }
+
+    return result;
 }

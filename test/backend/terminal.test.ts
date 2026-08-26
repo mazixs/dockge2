@@ -135,3 +135,91 @@ test("leaving a container terminal without other clients kills the session", asy
     assert.ok(await waitFor(() => exitCode !== undefined), "the last client leaving must end the session");
     assert.equal(Terminal.getTerminal(name), undefined);
 });
+
+test("a client that never joined cannot end or write to a session", async () => {
+    const server = { stacksDir: os.tmpdir() } as unknown as DockgeServer;
+    const name = "container-exec-test-ownership";
+    const owner = makeSocket("owner");
+    const stranger = makeSocket("stranger");
+
+    const terminal = new InteractiveTerminal(server, name, process.execPath, [
+        "-e",
+        "process.on('SIGINT', () => {}); process.stdin.resume(); setTimeout(() => {}, 60000);",
+    ], os.tmpdir());
+
+    let exitCode : number | undefined;
+    terminal.onExit((code) => {
+        exitCode = code;
+    });
+
+    terminal.join(owner);
+    terminal.start();
+    assert.ok(await waitFor(() => terminal.ptyProcess !== undefined));
+
+    const call = (target : DockgeSocket, event : string, ...args : unknown[]) => new Promise<Record<string, unknown>>((resolve) => {
+        const handler = new AgentSocket();
+        new TerminalSocketHandler().create(target, server, handler);
+        handler.call(event, ...args, (res : Record<string, unknown>) => resolve(res));
+    });
+
+    // A stranger cannot type into the session
+    const written = await call(stranger, "terminalInput", name, "exit\r");
+    assert.equal(written.ok, false);
+    assert.match(String(written.msg), /not attached/i);
+
+    // And cannot end it either
+    const left = await call(stranger, "terminalLeave", name);
+    assert.equal(left.ok, true, "the event answers, but it must not touch the session");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(exitCode, undefined, "a stranger must not end the session");
+    assert.equal(terminal.clientCount, 1);
+    assert.equal(Terminal.getTerminal(name), terminal);
+
+    // The owner can
+    const ownerLeft = await call(owner, "terminalLeave", name);
+    assert.equal(ownerLeft.ok, true);
+    assert.ok(await waitFor(() => exitCode !== undefined), "the owner leaving must end the session");
+});
+
+test("a session that ends is removed from the registry at once, so a reconnect is fresh", async () => {
+    const server = { stacksDir: os.tmpdir() } as unknown as DockgeServer;
+    const name = "container-exec-test-reconnect";
+    const socket = makeSocket("client-reconnect");
+
+    const first = new InteractiveTerminal(server, name, process.execPath, [
+        "-e",
+        "process.on('SIGINT', () => {}); process.stdin.resume(); setTimeout(() => {}, 60000);",
+    ], os.tmpdir());
+
+    let firstExit : number | undefined;
+    first.onExit((code) => {
+        firstExit = code;
+    });
+
+    first.join(socket);
+    first.start();
+    assert.ok(await waitFor(() => first.ptyProcess !== undefined));
+
+    first.leave(socket);
+    const ending = first.end(3000);
+
+    // The dying session is gone from the registry immediately
+    assert.equal(Terminal.getTerminal(name), undefined);
+
+    // So a reconnect during the grace period builds a new session
+    const second = new InteractiveTerminal(server, name, process.execPath, [
+        "-e",
+        "setTimeout(() => {}, 60000);",
+    ], os.tmpdir());
+    second.join(socket);
+    second.start();
+    assert.equal(Terminal.getTerminal(name), second);
+
+    await ending;
+    assert.ok(await waitFor(() => firstExit !== undefined), "the old session still ends");
+
+    // And the late shutdown of the old session did not drop the new one
+    assert.equal(Terminal.getTerminal(name), second);
+
+    second.kill();
+});

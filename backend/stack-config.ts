@@ -1,4 +1,4 @@
-import { promises as fsAsync } from "fs";
+import fs, { promises as fsAsync } from "fs";
 import path from "path";
 import { classifyStackFile, isSafeNameSegment, isSafeStackFileName, pickDefaultComposeFile } from "../common/stack-files";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
@@ -21,6 +21,77 @@ export const STACK_FILES_SETTING_TYPE = "stackFiles";
  * @throws {ValidationError} If the name is not accepted or escapes the directory
  */
 export async function resolveStackFilePath(stackDir : string, fileName : string) : Promise<string> {
+    const resolved = resolveStackFilePathLexically(stackDir, fileName);
+
+    // The directory itself must not be a symlink either, otherwise a write inside it
+    // lands wherever the link points
+    try {
+        const dirStat = await fsAsync.lstat(path.resolve(stackDir));
+        if (dirStat.isSymbolicLink()) {
+            throw new ValidationError("The stack directory is a symbolic link");
+        }
+    } catch (e) {
+        if (e instanceof ValidationError) {
+            throw e;
+        }
+        // A directory that does not exist yet is created by the caller
+    }
+
+    // A symlink could point anywhere, so an existing one is rejected
+    try {
+        const stat = await fsAsync.lstat(resolved);
+        assertRegularFile(stat.isSymbolicLink(), stat.isDirectory(), fileName);
+    } catch (e) {
+        if (e instanceof ValidationError) {
+            throw e;
+        }
+        // Not existing yet is fine, the caller decides whether it has to exist
+    }
+
+    return resolved;
+}
+
+/**
+ * Same barrier as resolveStackFilePath(), for the synchronous read paths.
+ * @param stackDir Directory of the stack
+ * @param fileName Plain file name inside the directory
+ * @returns Absolute path of the file
+ * @throws {ValidationError} If the name is not accepted or a symlink is involved
+ */
+export function resolveStackFilePathSync(stackDir : string, fileName : string) : string {
+    const resolved = resolveStackFilePathLexically(stackDir, fileName);
+
+    try {
+        const dirStat = fs.lstatSync(path.resolve(stackDir));
+        if (dirStat.isSymbolicLink()) {
+            throw new ValidationError("The stack directory is a symbolic link");
+        }
+    } catch (e) {
+        if (e instanceof ValidationError) {
+            throw e;
+        }
+    }
+
+    try {
+        const stat = fs.lstatSync(resolved);
+        assertRegularFile(stat.isSymbolicLink(), stat.isDirectory(), fileName);
+    } catch (e) {
+        if (e instanceof ValidationError) {
+            throw e;
+        }
+    }
+
+    return resolved;
+}
+
+/**
+ * Check the name and build the path without touching the filesystem
+ * @param stackDir Directory of the stack
+ * @param fileName Plain file name inside the directory
+ * @returns Absolute path of the file
+ * @throws {ValidationError} If the name is not accepted or escapes the directory
+ */
+function resolveStackFilePathLexically(stackDir : string, fileName : string) : string {
     if (!isSafeStackFileName(fileName)) {
         throw new ValidationError("Invalid file name: " + fileName);
     }
@@ -33,23 +104,24 @@ export async function resolveStackFilePath(stackDir : string, fileName : string)
         throw new ValidationError("File is outside the stack directory: " + fileName);
     }
 
-    // A symlink could point anywhere, so an existing one is rejected
-    try {
-        const stat = await fsAsync.lstat(resolved);
-        if (stat.isSymbolicLink()) {
-            throw new ValidationError("File is outside the stack directory: " + fileName);
-        }
-        if (stat.isDirectory()) {
-            throw new ValidationError("Expected a file, not a directory: " + fileName);
-        }
-    } catch (e) {
-        if (e instanceof ValidationError) {
-            throw e;
-        }
-        // Not existing yet is fine, the caller decides whether it has to exist
+    return resolved;
+}
+
+/**
+ * Reject anything that is not a regular file
+ * @param isSymbolicLink Whether the entry is a symlink
+ * @param isDirectory Whether the entry is a directory
+ * @param fileName Name used in the error message
+ * @throws {ValidationError} If the entry cannot be used as a stack file
+ */
+function assertRegularFile(isSymbolicLink : boolean, isDirectory : boolean, fileName : string) : void {
+    if (isSymbolicLink) {
+        throw new ValidationError("File is outside the stack directory: " + fileName);
     }
 
-    return resolved;
+    if (isDirectory) {
+        throw new ValidationError("Expected a file, not a directory: " + fileName);
+    }
 }
 
 /**
@@ -88,7 +160,8 @@ export class StackConfig {
             return {};
         }
 
-        return stored as Record<string, StackFileConfig>;
+        // Settings.get() hands out the cached object, so a copy is made before anyone edits it
+        return structuredClone(stored) as Record<string, StackFileConfig>;
     }
 
     /**
@@ -205,6 +278,11 @@ export class StackConfig {
                 throw new ValidationError("Not an env file: " + activeEnvFileName);
             }
             await resolveStackFilePath(stackDir, activeEnvFileName);
+
+            // Editing a file that compose never reads would silently do nothing
+            if (!envFileNames.includes(activeEnvFileName)) {
+                envFileNames.push(activeEnvFileName);
+            }
         }
 
         const secretBindings = [];
@@ -255,6 +333,15 @@ export class StackConfig {
         }
 
         for (const entry of entries) {
+            // A symlink is not a stack file: it could point anywhere
+            try {
+                if ((await fsAsync.lstat(path.join(stackDir, entry))).isSymbolicLink()) {
+                    continue;
+                }
+            } catch (e) {
+                continue;
+            }
+
             switch (classifyStackFile(entry)) {
                 case "compose":
                     composeFileNames.push(entry);
@@ -309,7 +396,8 @@ export class StackConfig {
             let modifiedAt = "";
 
             try {
-                const stat = await fsAsync.stat(path.join(stackDir, fileName));
+                // lstat, so a swapped symlink cannot report the size of its target
+                const stat = await fsAsync.lstat(path.join(stackDir, fileName));
                 size = stat.size;
                 modifiedAt = stat.mtime.toISOString();
             } catch (e) {

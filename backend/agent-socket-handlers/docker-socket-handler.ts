@@ -231,7 +231,8 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Stack name must be a string");
                 }
 
-                const stack = await Stack.getStack(server, stackName, true);
+                // Not skipFSOperations: the selected compose file is needed for `-f`
+                const stack = await Stack.getStack(server, stackName);
                 const detailed = await stack.getDetailedStatus();
                 const serviceStatusList : Record<string, ContainerInstanceStatus[]> = {};
 
@@ -598,6 +599,9 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
 }
 
+/** A stack directory never holds more files than this, so anything above is refused */
+const MAX_FILE_LIST_LENGTH = 64;
+
 /**
  * Read a file selection coming from the browser.
  * Only shapes and types are checked here, the file names themselves are validated
@@ -621,6 +625,11 @@ function parseStackFileConfig(config : unknown) : StackFileConfig {
         throw new ValidationError("envFileNames must be a string array");
     }
 
+    // A stack directory never holds this many files, and every entry costs filesystem calls
+    if (raw.envFileNames.length > MAX_FILE_LIST_LENGTH) {
+        throw new ValidationError("Too many env files");
+    }
+
     if (raw.activeEnvFileName !== undefined && typeof raw.activeEnvFileName !== "string") {
         throw new ValidationError("activeEnvFileName must be a string");
     }
@@ -630,6 +639,10 @@ function parseStackFileConfig(config : unknown) : StackFileConfig {
     if (raw.secretBindings !== undefined) {
         if (!Array.isArray(raw.secretBindings)) {
             throw new ValidationError("secretBindings must be an array");
+        }
+
+        if (raw.secretBindings.length > MAX_FILE_LIST_LENGTH) {
+            throw new ValidationError("Too many secret bindings");
         }
 
         for (const item of raw.secretBindings) {
@@ -642,6 +655,10 @@ function parseStackFileConfig(config : unknown) : StackFileConfig {
             const services = binding.services;
             if (services !== undefined && (!Array.isArray(services) || services.some((service) => typeof service !== "string"))) {
                 throw new ValidationError("Secret binding services must be a string array");
+            }
+
+            if (Array.isArray(services) && services.length > MAX_FILE_LIST_LENGTH) {
+                throw new ValidationError("Too many services for one secret");
             }
 
             bindings.push({

@@ -3,15 +3,15 @@
         v-if="visible"
         ref="menu"
         class="terminal-context-menu shadow-box"
-        :style="{ top: `${position.y}px`, left: `${position.x}px` }"
+        :style="menuStyle"
         role="menu"
         @contextmenu.prevent
     >
-        <button class="menu-item" role="menuitem" @click="emitPaste">
-            <font-awesome-icon icon="copy" class="me-2" />
+        <button ref="pasteButton" type="button" class="menu-item" role="menuitem" @click="emitPaste">
+            <font-awesome-icon icon="paste" class="me-2" />
             {{ $t("paste") }}
         </button>
-        <div v-if="message" class="menu-message">{{ message }}</div>
+        <div v-if="message" class="menu-message" role="status" aria-live="polite">{{ message }}</div>
     </div>
 </template>
 
@@ -34,11 +34,33 @@ export default {
         },
     },
     emits: [ "paste", "close" ],
+    computed: {
+        /**
+         * Keep the menu inside the window, so a right click near an edge stays usable
+         * @returns {object} Inline style
+         */
+        menuStyle() {
+            const width = 180;
+            const height = 90;
+            const maxX = Math.max(0, window.innerWidth - width);
+            const maxY = Math.max(0, window.innerHeight - height);
+
+            return {
+                top: `${Math.min(this.position.y, maxY)}px`,
+                left: `${Math.min(this.position.x, maxX)}px`,
+            };
+        },
+    },
     watch: {
         visible(value) {
             if (value) {
                 document.addEventListener("click", this.onDocumentClick, true);
                 document.addEventListener("keydown", this.onKeydown, true);
+
+                // Focus the action, otherwise the menu cannot be used from the keyboard
+                this.$nextTick(() => {
+                    this.$refs.pasteButton?.focus();
+                });
             } else {
                 this.removeListeners();
             }
@@ -75,6 +97,9 @@ export default {
          */
         onKeydown(event) {
             if (event.key === "Escape") {
+                // Without this the escape also reaches the PTY and confuses the shell
+                event.preventDefault();
+                event.stopPropagation();
                 this.$emit("close");
             }
         },

@@ -4,7 +4,7 @@ import { log } from "./log";
 import yaml, { type Document, isMap, isSeq, parseDocument } from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
 import path from "path";
-import { emptyStackFileConfig, resolveStackFilePath, StackConfig } from "./stack-config";
+import { emptyStackFileConfig, resolveStackFilePath, resolveStackFilePathSync, StackConfig } from "./stack-config";
 import { classifyStackFile, isSafeNameSegment } from "../common/stack-files";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
 import {
@@ -41,6 +41,24 @@ interface ComposeLsEntry {
     Name : string;
     Status : string;
     ConfigFiles? : string;
+}
+
+/**
+ * Write a file without following a symlink.
+ * The path was already checked, but a symlink can appear between the check and the write,
+ * so the open call itself refuses to follow one.
+ * @param filePath Absolute path inside the stack directory
+ * @param content File content
+ * @param mode File mode used when the file is created
+ */
+async function writeFileNoFollow(filePath : string, content : string, mode : number = 0o644) : Promise<void> {
+    const handle = await fsAsync.open(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, mode);
+
+    try {
+        await handle.writeFile(content, "utf-8");
+    } finally {
+        await handle.close();
+    }
 }
 
 export class Stack {
@@ -128,10 +146,23 @@ export class Stack {
     get envFileNames() : string[] {
         // A stack whose config was never loaded keeps the historic behaviour of using .env
         if (!this._inventory && this._fileConfig.envFileNames.length === 0) {
-            return fs.existsSync(path.join(this.path, ".env")) ? [ ".env" ] : [];
+            return this.isUsableStackFile(".env") ? [ ".env" ] : [];
         }
 
-        return this._fileConfig.envFileNames.filter((fileName) => fs.existsSync(path.join(this.path, fileName)));
+        return this._fileConfig.envFileNames.filter((fileName) => this.isUsableStackFile(fileName));
+    }
+
+    /**
+     * Whether a file of this stack exists and is a regular file inside the stack directory
+     * @param fileName File name inside the stack directory
+     * @returns True when the file can be handed to Compose
+     */
+    protected isUsableStackFile(fileName : string) : boolean {
+        try {
+            return fs.existsSync(resolveStackFilePathSync(this.path, fileName));
+        } catch (e) {
+            return false;
+        }
     }
 
     /**
@@ -256,20 +287,6 @@ export class Stack {
         };
     }
 
-    /**
-     * Get the status of the stack from `docker compose ps --format json`
-     */
-    async ps() : Promise<object> {
-        let res = await spawn("docker", this.getComposeOptions("ps", "--format", "json"), {
-            cwd: this.path,
-            encoding: "utf-8",
-        });
-        if (!res.stdout) {
-            return {};
-        }
-        return JSON.parse(res.stdout.toString());
-    }
-
     get isManagedByDockge() : boolean {
         const dir = this.safePath;
         if (!dir) {
@@ -303,7 +320,7 @@ export class Stack {
     get composeYAML() : string {
         if (this._composeYAML === undefined) {
             try {
-                this._composeYAML = fs.readFileSync(path.join(this.path, this._composeFileName), "utf-8");
+                this._composeYAML = fs.readFileSync(resolveStackFilePathSync(this.path, this._composeFileName), "utf-8");
             } catch (e) {
                 this._composeYAML = "";
             }
@@ -314,7 +331,7 @@ export class Stack {
     get composeENV() : string {
         if (this._composeENV === undefined) {
             try {
-                this._composeENV = fs.readFileSync(path.join(this.path, this.activeEnvFileName), "utf-8");
+                this._composeENV = fs.readFileSync(resolveStackFilePathSync(this.path, this.activeEnvFileName), "utf-8");
             } catch (e) {
                 this._composeENV = "";
             }
@@ -379,7 +396,7 @@ export class Stack {
         await this.loadFileConfig();
 
         // Write or overwrite the selected compose file
-        fs.writeFileSync(await resolveStackFilePath(dir, this._composeFileName), this.composeYAML);
+        await writeFileNoFollow(await resolveStackFilePath(dir, this._composeFileName), this.composeYAML);
 
         // Write the active env file, but do not create an empty one for a stack that never had it
         const envPath = await resolveStackFilePath(dir, this.activeEnvFileName);
@@ -388,7 +405,7 @@ export class Stack {
         const shouldWriteEnv = hasEnvFile || envContent.trim() !== "";
 
         if (shouldWriteEnv) {
-            await fsAsync.writeFile(envPath, envContent, "utf-8");
+            await writeFileNoFollow(envPath, envContent);
         }
 
         if (shouldWriteEnv && !this._fileConfig.envFileNames.includes(this.activeEnvFileName)) {
@@ -561,6 +578,8 @@ export class Stack {
         // Get the project list and config paths from docker compose ls
         let res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
             encoding: "utf-8",
+            maxBuffer: 4 * 1024 * 1024,
+            timeoutMs: 30_000,
         });
 
         if (!res.stdout) {
@@ -627,6 +646,8 @@ export class Stack {
 
         let res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
             encoding: "utf-8",
+            maxBuffer: 4 * 1024 * 1024,
+            timeoutMs: 30_000,
         });
 
         if (!res.stdout) {
@@ -966,6 +987,10 @@ export class Stack {
      * @throws {ValidationError} If the service is unknown
      */
     assertServiceExists(serviceName : string) : void {
+        if (serviceName.startsWith("-")) {
+            throw new ValidationError("Unknown service: " + serviceName);
+        }
+
         const services = readComposeServices(this.composeYAML);
 
         if (services.length === 0) {
@@ -1049,7 +1074,7 @@ export class Stack {
         }
 
         const filePath = await resolveStackFilePath(this.path, fileName);
-        await fsAsync.writeFile(filePath, content, "utf-8");
+        await writeFileNoFollow(filePath, content);
 
         if (fileName === this.activeEnvFileName) {
             this._composeENV = content;
@@ -1098,10 +1123,7 @@ export class Stack {
         const filePath = await resolveStackFilePath(this.path, fileName);
 
         // mode is applied on creation, chmod covers an existing file
-        await fsAsync.writeFile(filePath, content, {
-            encoding: "utf-8",
-            mode: 0o600,
-        });
+        await writeFileNoFollow(filePath, content, 0o600);
 
         if (process.platform !== "win32") {
             await fsAsync.chmod(filePath, 0o600);
@@ -1192,7 +1214,7 @@ export class Stack {
         }
 
         const composeYAML = this.serialiseComposeDocument(doc);
-        fs.writeFileSync(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
+        await writeFileNoFollow(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
         this._composeYAML = composeYAML;
 
         const bindings = this._fileConfig.secretBindings.filter((item) => item.name !== secretName);
@@ -1252,7 +1274,7 @@ export class Stack {
 
         if (changed) {
             const composeYAML = this.serialiseComposeDocument(doc);
-            fs.writeFileSync(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
+            await writeFileNoFollow(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
             this._composeYAML = composeYAML;
         }
 
@@ -1264,9 +1286,33 @@ export class Stack {
         this._fileConfig = config;
     }
 
-    async startService(socket: DockgeSocket, serviceName: string) {
+    /**
+     * Run a compose command for one service of this stack.
+     * The service name is checked against the compose file first, because Compose accepts
+     * its own flags in the service position: "--remove-orphans" would act on the whole stack.
+     * @param socket Client socket
+     * @param command Compose sub command
+     * @param serviceName Service of this stack
+     * @param extraOptions Arguments of the sub command
+     * @returns Exit code
+     * @throws {ValidationError} If the service is unknown
+     */
+    protected async execServiceCommand(socket : DockgeSocket, command : string, serviceName : string, ...extraOptions : string[]) : Promise<number> {
+        this.assertServiceExists(serviceName);
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        const exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ "compose", "up", "-d", serviceName ], this.path);
+        return Terminal.exec(
+            this.server,
+            socket,
+            terminalName,
+            "docker",
+            this.getComposeOptions(command, ...extraOptions, serviceName),
+            this.path,
+        );
+    }
+
+    async startService(socket: DockgeSocket, serviceName: string) {
+        const exitCode = await this.execServiceCommand(socket, "up", serviceName, "-d");
         if (exitCode !== 0) {
             throw new Error(`Failed to start service ${serviceName}, please check logs for more information.`);
         }
@@ -1275,8 +1321,7 @@ export class Stack {
     }
 
     async stopService(socket: DockgeSocket, serviceName: string): Promise<number> {
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        const exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ "compose", "stop", serviceName ], this.path);
+        const exitCode = await this.execServiceCommand(socket, "stop", serviceName);
         if (exitCode !== 0) {
             throw new Error(`Failed to stop service ${serviceName}, please check logs for more information.`);
         }
@@ -1285,8 +1330,7 @@ export class Stack {
     }
 
     async restartService(socket: DockgeSocket, serviceName: string): Promise<number> {
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        const exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ "compose", "restart", serviceName ], this.path);
+        const exitCode = await this.execServiceCommand(socket, "restart", serviceName);
         if (exitCode !== 0) {
             throw new Error(`Failed to restart service ${serviceName}, please check logs for more information.`);
         }

@@ -171,11 +171,17 @@ export default {
         this.updateTerminalSize();
     },
 
+    beforeUnmount() {
+        // The template ref is already gone in unmounted(), so the listener is removed here
+        this.$refs.terminal?.removeEventListener("contextmenu", this.handleContextMenu);
+    },
+
     unmounted() {
         window.removeEventListener("resize", this.onResizeEvent); // Remove the resize event listener from the window object.
 
-        // Tell the server this client is gone, so a container shell without clients is closed
-        if (this.mode === "interactive" && this.name) {
+        // Tell the server this client is gone. The server ends a container shell that has
+        // no clients left and only drops the client from the others.
+        if (this.name) {
             this.$root.emitAgent(this.endpoint, "terminalLeave", this.name, () => {});
         }
 
@@ -275,8 +281,6 @@ export default {
                     console.debug("Ctrl + C");
                     this.$root.emitAgent(this.endpoint, "terminalInput", this.name, e.key);
                     this.removeInput();
-                } else if (e.key === "\u0016") {      // Ctrl + V, the paste event does the work
-                    // Nothing to do, the browser pastes into the hidden textarea
                 } else if (e.key === "\u0009" || e.key.startsWith("\u001B")) {      // TAB or other special keys
                     // Do nothing
                 } else {
@@ -313,6 +317,11 @@ export default {
                 window.addEventListener("resize", this.onResizeEvent);
             }
             this.terminalFitAddOn.fit();
+
+            // The PTY was started with default dimensions, so the first fit has to be reported
+            if (this.mode !== "displayOnly" && this.name) {
+                this.$root.emitAgent(this.endpoint, "terminalResize", this.name, this.terminal.rows, this.terminal.cols);
+            }
         },
         /**
          * Handles the resize event of the terminal component.
@@ -336,6 +345,9 @@ export default {
                 if (text) {
                     this.pasteText(text);
                     this.closeContextMenu();
+
+                    // The menu button took the focus, give it back or the next key is lost
+                    this.terminal.focus();
                 } else {
                     this.contextMenuMessage = this.$t("clipboardEmpty");
                 }
@@ -370,6 +382,20 @@ export default {
          * Paste text into the terminal based on current mode
          */
         pasteText(text) {
+            if (this.mode === "mainTerminal") {
+                // The limited console edits a single line, so only the first line is taken.
+                // Otherwise the echo and the buffer drift apart and one Enter would run
+                // every pasted line at once.
+                const normalised = text.replace(/\r\n/g, "\n");
+                const firstLine = normalised.split("\n")[0] ?? "";
+
+                if (firstLine !== normalised) {
+                    this.$root.toastError(this.$t("multilinePasteTruncated"));
+                }
+
+                text = firstLine;
+            }
+
             if (this.mode === "mainTerminal") {
                 // For main terminal, insert text at current cursor position
                 const beforeCursor = this.terminalInputBuffer.slice(0, this.cursorPosition);
