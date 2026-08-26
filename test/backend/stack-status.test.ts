@@ -1,77 +1,115 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { Stack } from "../../backend/stack";
-import { CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
+import type { ComposePsEntry } from "../../common/compose-status";
+import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 
-test("container statuses resolve clean-exit init containers as running", () => {
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "running",
-            Status: "Up 10 seconds" },
-        { State: "exited",
-            Status: "Exited (0) 10 seconds ago" },
-    ]), RUNNING);
+const project = "demo";
 
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "running",
-            Status: "Up 10 seconds" },
-        { State: "exited",
-            Status: "Exited (1) 10 seconds ago" },
-    ]), EXITED);
+/**
+ * Build the host wide container map the way Stack.getInstanceMap() returns it
+ * @param entries Containers of the demo project
+ * @returns Instance map
+ */
+function instanceMap(entries : ComposePsEntry[]) : Map<string, ComposePsEntry[]> {
+    return new Map([[ project, entries ]]);
+}
 
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "exited",
-            Status: "Exited (0) 10 seconds ago" },
-    ]), EXITED);
+test("project status comes from container states, not from the aggregated compose line", () => {
+    // Issue #806: a clean-exit worker next to a running service is not a stopped stack
+    const withWorker = Stack.resolveProjectStatus({ Name: project,
+        Status: "exited(1), running(1)" }, instanceMap([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "running",
+            Status: "Up 5 minutes" },
+        { Service: "init",
+            Name: "demo-init-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 5 minutes ago" },
+    ]));
+    assert.equal(withWorker.status, ATTENTION);
+    assert.equal(withWorker.issues[0]?.reason, "serviceStopped");
 
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "restarting",
-            Status: "Restarting" },
-    ]), EXITED);
+    // Marking the worker as one-shot makes the same stack healthy
+    const markedWorker = Stack.resolveProjectStatus({ Name: project,
+        Status: "exited(1), running(1)" }, instanceMap([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "running",
+            Status: "Up 5 minutes" },
+        { Service: "init",
+            Name: "demo-init-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 5 minutes ago",
+            Labels: "com.docker.compose.project=demo,com.docker.compose.service=init,dockge.lifecycle=one-shot" },
+    ]));
+    assert.equal(markedWorker.status, RUNNING);
+    assert.deepEqual(markedWorker.issues, []);
+
+    // A failed worker is reported with its exit code
+    const failedWorker = Stack.resolveProjectStatus({ Name: project,
+        Status: "exited(1), running(1)" }, instanceMap([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "running",
+            Status: "Up 5 minutes" },
+        { Service: "init",
+            Name: "demo-init-1",
+            State: "exited",
+            ExitCode: 3,
+            Status: "Exited (3) 5 minutes ago",
+            Labels: "com.docker.compose.project=demo,com.docker.compose.service=init,dockge.lifecycle=one-shot" },
+    ]));
+    assert.equal(failedWorker.status, ATTENTION);
+    assert.deepEqual(failedWorker.issues, [
+        { service: "init",
+            name: "demo-init-1",
+            reason: "workerFailed",
+            detail: "3" },
+    ]);
 });
 
-test("container statuses stay fail-closed for malformed and missing data", () => {
-    // No container at all must never be reported as running
-    assert.equal(Stack.resolveContainerStatuses([]), EXITED);
+test("project status stays fail-closed when Docker output is missing", () => {
+    // Docker could not be read at all
+    assert.equal(Stack.resolveProjectStatus({ Name: project,
+        Status: "running(1)" }, null).status, UNKNOWN);
 
-    // Malformed exit status must not be read as a clean exit
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "running",
-            Status: "Up 3 minutes" },
-        { State: "exited",
-            Status: "Exited" },
-    ]), EXITED);
+    // The project has no container, so nothing can be claimed about it
+    assert.equal(Stack.resolveProjectStatus({ Name: project,
+        Status: "running(1)" }, new Map()).status, UNKNOWN);
 
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "running",
-            Status: "Up 3 minutes" },
-        { State: "exited" },
-    ]), EXITED);
-
-    // An unknown state next to a running one is a problem, not a success
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "running",
-            Status: "Up 3 minutes" },
-        { State: "dead",
-            Status: "Dead" },
-    ]), EXITED);
-
-    // Case differences in Docker output are still recognised
-    assert.equal(Stack.resolveContainerStatuses([
-        { State: "running",
-            Status: "Up 1 second" },
-        { State: "exited",
-            Status: "exited (0) 1 second ago" },
-    ]), RUNNING);
+    // An unreadable state is never promoted to running
+    assert.equal(Stack.resolveProjectStatus({ Name: project,
+        Status: "running(1)" }, instanceMap([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "" },
+    ])).status, ATTENTION);
 });
 
-test("compose status only consults containers for mixed exited output", async () => {
-    // Unchanged aggregated statuses keep working without touching Docker
-    assert.equal(await Stack.resolveComposeStatus({ Name: "created-stack",
-        Status: "created(1)" }), CREATED_STACK);
-    assert.equal(await Stack.resolveComposeStatus({ Name: "running-stack",
-        Status: "running(2)" }), RUNNING);
-    assert.equal(await Stack.resolveComposeStatus({ Name: "unknown-stack",
-        Status: "something else" }), UNKNOWN);
-    assert.equal(await Stack.resolveComposeStatus({ Name: "exited-stack",
-        Status: "exited(2)" }), EXITED);
+test("stopped and created projects keep their own status", () => {
+    assert.equal(Stack.resolveProjectStatus({ Name: project,
+        Status: "exited(2)" }, instanceMap([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 1 hour ago" },
+        { Service: "db",
+            Name: "demo-db-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 1 hour ago" },
+    ])).status, EXITED);
+
+    assert.equal(Stack.resolveProjectStatus({ Name: project,
+        Status: "created(1)" }, instanceMap([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "created",
+            Status: "Created" },
+    ])).status, CREATED_STACK);
 });

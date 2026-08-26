@@ -19,6 +19,7 @@ import {
     intHash,
     parseDockerPort,
     sleep,
+    ATTENTION,
     statusColor,
     statusName,
     statusNameShort,
@@ -31,17 +32,20 @@ test("status helpers cover all supported statuses", () => {
         statusName(CREATED_STACK),
         statusName(RUNNING),
         statusName(EXITED),
+        statusName(ATTENTION),
         statusName(99),
-    ], [ "unknown", "draft", "created_stack", "running", "exited", "unknown" ]);
+    ], [ "unknown", "draft", "created_stack", "running", "exited", "attention", "unknown" ]);
 
+    // An unreadable status must never look like a normal inactive stack
     assert.deepEqual([
         statusNameShort(UNKNOWN),
         statusNameShort(CREATED_FILE),
         statusNameShort(CREATED_STACK),
         statusNameShort(RUNNING),
         statusNameShort(EXITED),
+        statusNameShort(ATTENTION),
         statusNameShort(99),
-    ], [ "?", "inactive", "inactive", "active", "exited", "?" ]);
+    ], [ "unknown", "inactive", "inactive", "active", "exited", "attention", "unknown" ]);
 
     assert.deepEqual([
         statusColor(UNKNOWN),
@@ -49,8 +53,9 @@ test("status helpers cover all supported statuses", () => {
         statusColor(CREATED_STACK),
         statusColor(RUNNING),
         statusColor(EXITED),
+        statusColor(ATTENTION),
         statusColor(99),
-    ], [ "secondary", "dark", "dark", "primary", "danger", "secondary" ]);
+    ], [ "secondary", "dark", "dark", "primary", "danger", "warning", "secondary" ]);
 });
 
 test("common naming and hashing helpers are deterministic", () => {
