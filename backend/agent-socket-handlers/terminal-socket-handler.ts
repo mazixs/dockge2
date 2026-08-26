@@ -160,9 +160,10 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                 if (terminal) {
                     terminal.leave(socket);
 
-                    // A container shell without any client left is closed instead of lingering
+                    // A container shell without any client left has to end, otherwise the
+                    // `docker exec` session keeps running inside the container
                     if (terminal.clientCount === 0 && terminalName.startsWith("container-exec-")) {
-                        terminal.close();
+                        await terminal.end();
                     }
                 }
 

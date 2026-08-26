@@ -8,6 +8,16 @@ export type StackFileKind = "compose" | "env" | "secret";
  */
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/**
+ * Check a plain name segment: a file name part, a compose secret name and anything else
+ * that must not carry separators, options or traversal.
+ * @param value Value to check
+ * @returns True when the value is a safe segment
+ */
+export function isSafeNameSegment(value : string) : boolean {
+    return SAFE_SEGMENT.test(value);
+}
+
 const MAX_FILE_NAME_LENGTH = 255;
 
 /**

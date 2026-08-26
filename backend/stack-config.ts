@@ -1,6 +1,6 @@
 import { promises as fsAsync } from "fs";
 import path from "path";
-import { classifyStackFile, isSafeStackFileName, pickDefaultComposeFile } from "../common/stack-files";
+import { classifyStackFile, isSafeNameSegment, isSafeStackFileName, pickDefaultComposeFile } from "../common/stack-files";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
 import { log } from "./log";
 import { Settings } from "./settings";
@@ -215,7 +215,7 @@ export class StackConfig {
             }
             await resolveStackFilePath(stackDir, binding.fileName);
 
-            if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(binding.name)) {
+            if (!isSafeNameSegment(binding.name)) {
                 throw new ValidationError("Invalid secret name: " + binding.name);
             }
 

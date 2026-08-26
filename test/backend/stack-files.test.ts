@@ -263,3 +263,73 @@ test("deleting a secret file removes its binding too", async () => {
         }
     });
 });
+
+test("saving an existing stack writes the selected files, not the historic defaults", async () => {
+    await withDatabase(async () => {
+        const { stacksDir, stackDir } = await makeStack({
+            "compose.yaml": composeYAML,
+            "staging.yml": composeYAML,
+            ".env": "STAGE=base\n",
+            ".env.dev": "STAGE=dev\n",
+        });
+
+        try {
+            const server = { stacksDir,
+                sendStackList: () => undefined } as never;
+
+            const stack = await Stack.getStack(server, "files-stack");
+            await stack.setFileConfig({
+                composeFileName: "staging.yml",
+                envFileNames: [ ".env", ".env.dev" ],
+                activeEnvFileName: ".env.dev",
+                secretBindings: [],
+            });
+
+            // This is the production path: the socket handler builds the stack itself
+            const edited = "services:\n  app:\n    image: nginx:1.27\n";
+            const saved = new Stack(server, "files-stack", edited, "STAGE=dev2\n", false);
+            await saved.save(false);
+
+            // The edit lands in the selected files
+            assert.equal(await readFile(path.join(stackDir, "staging.yml"), "utf8"), edited);
+            assert.equal(await readFile(path.join(stackDir, ".env.dev"), "utf8"), "STAGE=dev2\n");
+
+            // The historic defaults are left alone
+            assert.equal(await readFile(path.join(stackDir, "compose.yaml"), "utf8"), composeYAML);
+            assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "STAGE=base\n");
+
+            // And the deploy commands use the selected files too
+            assert.deepEqual(saved.getComposeOptions("up", "-d"), [
+                "compose", "--env-file", "./.env", "--env-file", "./.env.dev", "-f", "staging.yml", "up", "-d",
+            ]);
+        } finally {
+            await rm(stacksDir, { recursive: true,
+                force: true });
+        }
+    });
+});
+
+test("a compose error never quotes a secret value", async () => {
+    await withDatabase(async () => {
+        const { stacksDir } = await makeStack({
+            "compose.yaml": composeYAML,
+            ".secret.db": "super-secret-token\n",
+        });
+
+        try {
+            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            await stack.bindSecret("db_password", ".secret.db", [ "db" ]);
+
+            // A message that quotes the secret is redacted before it can reach a client
+            const message = await stack.redactSecrets("failed to read super-secret-token from env");
+            assert.equal(message.includes("super-secret-token"), false);
+            assert.match(message, /\[secret\]/);
+
+            // Unrelated text is untouched
+            assert.equal(await stack.redactSecrets("services.app.image is required"), "services.app.image is required");
+        } finally {
+            await rm(stacksDir, { recursive: true,
+                force: true });
+        }
+    });
+});
