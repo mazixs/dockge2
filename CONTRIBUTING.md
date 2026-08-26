@@ -96,6 +96,17 @@ You can use Vue.js devtools Chrome extension for debugging.
 npm run build:frontend
 ```
 
+## Tests
+
+```bash
+npm run check                 # lint + TypeScript + unit tests with coverage
+npm run test:unit             # unit tests only
+npm run test:docker-integration   # opt-in, needs a working Docker Compose
+```
+
+`npm run test` enforces the c8 coverage thresholds. The Docker integration test is skipped unless
+`DOCKGE_DOCKER_INTEGRATION=1` is set, and CI runs it in a dedicated Linux job.
+
 ## Database Migration
 
 TODO

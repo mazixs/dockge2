@@ -458,7 +458,7 @@ git commit -m "fix: preserve octal compose values"
 - Consumes: результаты Tasks 1–4 и существующие требования к Node.js/CI.
 - Produces: воспроизводимое локальное и CI-подтверждение, что четыре issue закрыты без снижения покрытия.
 
-- [ ] **Step 1: Проверить связь каждого исправления с issue**
+- [x] **Step 1: Проверить связь каждого исправления с issue**
 
 Проверить acceptance matrix:
 
@@ -469,7 +469,7 @@ git commit -m "fix: preserve octal compose values"
 | #806 | `exited(0)` + `running` отображается как `RUNNING`; ненулевой exit и неизвестные состояния остаются `EXITED` |
 | #990 | `tmpfs.mode: 01777` сохраняет текст и числовую octal-семантику; Compose-строки не становятся boolean |
 
-- [ ] **Step 2: Выполнить полный набор проверок**
+- [x] **Step 2: Выполнить полный набор проверок**
 
 Run:
 
@@ -484,7 +484,7 @@ git diff --check
 
 Expected: Node соответствует `22.23.2` или `24.19.0`, покрытие остаётся выше 70% для настроенных c8-метрик, TypeScript и ESLint проходят, Docker integration job завершается успешно, high-level audit vulnerabilities отсутствуют.
 
-- [ ] **Step 3: Проверить, что в тестах нет ложных заглушек**
+- [x] **Step 3: Проверить, что в тестах нет ложных заглушек**
 
 Run:
 
@@ -494,7 +494,7 @@ rg -n "Terminal\.exec\s*=|spawn\s*=|mock|stub|sinon|jest\.spyOn" test extra
 
 Expected: отсутствуют подмены, которые позволяют path traversal, `.env` или Docker status тесту завершиться успешно без выполнения проверяемой логики. Допустимы только реальные временные файлы, реальный `process.execPath` и реальный Docker Compose.
 
-- [ ] **Step 4: Зафиксировать итоговый diff и результаты**
+- [x] **Step 4: Зафиксировать итоговый diff и результаты**
 
 Run:
 
