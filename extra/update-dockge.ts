@@ -8,18 +8,31 @@ export interface UpdateCommand {
 export interface UpdateOptions {
     dryRun : boolean;
     forceRecreate : boolean;
+    /** Branch to fast-forward to, must be a plain ref name */
+    branch : string;
 }
+
+/** Default branch of this fork */
+export const DEFAULT_BRANCH = "main";
+
+/** A ref name without options, paths outside the repo or shell metacharacters */
+const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 /**
  * Build the fixed list of commands used to update a Dockge deployment.
  * Every command is an argument array, so nothing is passed through a shell.
  * @param forceRecreate Recreate the container even when the image did not change
+ * @param branch Branch to fast-forward to
  * @returns Commands in execution order
  */
-export function buildUpdateCommands(forceRecreate : boolean) : readonly UpdateCommand[] {
+export function buildUpdateCommands(forceRecreate : boolean, branch : string = DEFAULT_BRANCH) : readonly UpdateCommand[] {
+    if (!SAFE_BRANCH.test(branch)) {
+        throw new Error(`Invalid branch name: ${branch}`);
+    }
+
     return [
         { command: "git",
-            args: [ "pull", "--ff-only", "origin", "master" ] },
+            args: [ "pull", "--ff-only", "origin", branch ] },
         { command: "docker",
             args: [ "compose", "config", "--quiet" ] },
         {
@@ -43,6 +56,7 @@ export function parseUpdateArgs(argv : readonly string[]) : UpdateOptions {
     const options : UpdateOptions = {
         dryRun: false,
         forceRecreate: false,
+        branch: DEFAULT_BRANCH,
     };
 
     for (const arg of argv) {
@@ -50,8 +64,16 @@ export function parseUpdateArgs(argv : readonly string[]) : UpdateOptions {
             options.dryRun = true;
         } else if (arg === "--force-recreate") {
             options.forceRecreate = true;
+        } else if (arg.startsWith("--branch=")) {
+            const branch = arg.slice("--branch=".length);
+
+            if (!SAFE_BRANCH.test(branch)) {
+                throw new Error(`Invalid branch name: ${branch}`);
+            }
+
+            options.branch = branch;
         } else {
-            throw new Error(`Unknown argument: ${arg}. Only --dry-run and --force-recreate are supported.`);
+            throw new Error(`Unknown argument: ${arg}. Only --dry-run, --force-recreate and --branch=<name> are supported.`);
         }
     }
 
@@ -91,7 +113,7 @@ async function assertCleanWorkingCopy() : Promise<void> {
  * @param options Parsed options
  */
 export async function runUpdate(options : UpdateOptions) : Promise<void> {
-    const commands = buildUpdateCommands(options.forceRecreate);
+    const commands = buildUpdateCommands(options.forceRecreate, options.branch);
 
     if (options.dryRun) {
         console.log("Dry run, no command is executed:");

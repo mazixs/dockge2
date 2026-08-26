@@ -2,10 +2,10 @@ name: json-yaml-validate
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
       - 2.0.X
   workflow_dispatch:
 

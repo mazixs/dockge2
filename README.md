@@ -146,6 +146,9 @@ npm run update-docker -- --dry-run
 npm run update-docker
 ```
 
+It fast-forwards `origin/main` by default; a deployment that tracks another branch names it with
+`npm run update-docker -- --branch=release/2.0`.
+
 - `docker compose up` already recreates the container when the image or configuration changed, and it
   keeps attached volumes and bind mounts.
 - `--force-recreate` (`npm run update-docker -- --force-recreate`) forces recreation without deleting

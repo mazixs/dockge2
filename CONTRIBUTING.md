@@ -140,8 +140,8 @@ If for security / bug / other reasons, a library must be updated, breaking chang
 
 Please add **all** the strings which are translatable to `src/lang/en.json` (If translation keys are omitted, they can not be translated).
 
-**Don't include any other languages in your initial Pull-Request** (even if this is your mother tongue), to avoid merge-conflicts between weblate and `master`.  
-The translations can then (after merging a PR into `master`) be translated by awesome people donating their language skills.
+**Don't include any other languages in your initial Pull-Request** (even if this is your mother tongue), to avoid merge-conflicts between weblate and `main`.  
+The translations can then (after merging a PR into `main`) be translated by awesome people donating their language skills.
 
 If you want to help by translating Uptime Kuma into your language, please visit the [instructions on how to translate using weblate](https://github.com/louislam/uptime-kuma/blob/master/src/lang/README.md).
 
