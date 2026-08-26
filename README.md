@@ -134,6 +134,33 @@ cd /opt/dockge
 docker compose pull && docker compose up -d
 ```
 
+### Safe update from a checkout of this fork
+
+When the deployment is a Git checkout of this repository, the bundled command runs a fixed,
+non-destructive sequence (`git pull --ff-only`, `docker compose config --quiet`, then
+`docker compose up -d --pull always --wait --wait-timeout 60`):
+
+```bash
+cd /opt/dockge
+npm run update-docker -- --dry-run
+npm run update-docker
+```
+
+- `docker compose up` already recreates the container when the image or configuration changed, and it
+  keeps attached volumes and bind mounts.
+- `--force-recreate` (`npm run update-docker -- --force-recreate`) forces recreation without deleting
+  attached data.
+- `--pull always` makes sure a new image is actually checked, and `--wait --wait-timeout 60` fails
+  instead of leaving the update in an undefined state.
+- The command refuses to run with a dirty working copy, and it never runs `docker compose down -v`,
+  `docker volume prune`, `git reset --hard` or `git clean -fdx`.
+- Keep `./data` outside the Git checkout in production, for example `/var/lib/dockge/data`, so that even
+  a mistaken `git clean` cannot touch the database.
+- The published Compose file uses a registry image, so `git pull` alone does not update the code inside
+  the container: CI has to build and publish the image first, then the deployment pulls that tag.
+- Updating is a local, administrative action. There is intentionally no Socket.IO event for it, because
+  that would give the browser a remote `git pull` plus Docker control.
+
 ## Screenshots
 
 ![](https://github.com/louislam/dockge/assets/1336778/e7ff0222-af2e-405c-b533-4eab04791b40)

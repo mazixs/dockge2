@@ -522,7 +522,7 @@ Expected: пять небольших тематических коммитов,
 
 **Deployment invariant:** В текущем [`compose.yaml`](../../../compose.yaml) данные подключены bind mount-ами `./data:/app/data` и `/opt/stacks:/opt/stacks`. Поэтому пересоздание контейнера не удаляет содержимое этих каталогов, но удаление файлов с хоста всё равно возможно отдельной командой. `git pull` не обновляет код внутри контейнера: текущий Compose использует опубликованный `image`, а не `build` из рабочей копии.
 
-- [ ] **Step 1: Определить безопасный набор команд и добавить тест построения аргументов**
+- [x] **Step 1: Определить безопасный набор команд и добавить тест построения аргументов**
 
 В `extra/update-dockge.ts` экспортировать:
 
@@ -550,7 +550,7 @@ export function buildUpdateCommands(forceRecreate: boolean): readonly UpdateComm
 
 Добавить в `test/backend/update-dockge.test.ts` точные проверки аргументных массивов для обычного режима и `forceRecreate`. Тестировать построитель как чистую функцию; не подменять `child_process.spawn` и не запускать настоящий deploy из unit-теста.
 
-- [ ] **Step 2: Реализовать запуск только разрешённых команд**
+- [x] **Step 2: Реализовать запуск только разрешённых команд**
 
 Скрипт должен:
 
@@ -563,7 +563,7 @@ export function buildUpdateCommands(forceRecreate: boolean): readonly UpdateComm
 
 Не добавлять Socket.IO-событие для запуска обновления из браузера. Такой механизм фактически даст пользователю удалённый `git pull` и управление Docker; запускать его можно только локально, через systemd timer, CI/CD или административный shell.
 
-- [ ] **Step 3: Зафиксировать правильную семантику пересоздания и хранения данных**
+- [x] **Step 3: Зафиксировать правильную семантику пересоздания и хранения данных**
 
 В README описать команды:
 
@@ -584,7 +584,7 @@ npm run update-docker
 
 Для публикации fork-кода не запускать бездумно `docker compose build`: текущий Compose использует registry image. Сначала CI должен собрать и опубликовать образ с проверенным тегом, после чего deploy делает `git pull` конфигурации и `docker compose up --pull always`.
 
-- [ ] **Step 4: Добавить npm-команду и dry-run-проверку в CI**
+- [x] **Step 4: Добавить npm-команду и dry-run-проверку в CI**
 
 В `package.json` добавить:
 
@@ -600,7 +600,7 @@ npm run update-docker -- --dry-run
 
 Реальный `git pull` и deploy в CI не выполнять: для него нужны отдельные секреты, окружение и политика релиза.
 
-- [ ] **Step 5: Запустить проверку сценария**
+- [x] **Step 5: Запустить проверку сценария**
 
 Run:
 
@@ -613,7 +613,7 @@ git diff --check
 
 Expected: dry-run показывает `git pull --ff-only`, `docker compose config --quiet` и `docker compose up -d --pull always --wait --wait-timeout 60`; ни один процесс не запускается, а unit-тесты подтверждают отсутствие shell-инъекции.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add extra/update-dockge.ts test/backend/update-dockge.test.ts package.json README.md
