@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -148,6 +148,53 @@ test("Stack validates, saves and reads compose files using the real filesystem",
         ]);
     } finally {
         await rm(stacksDir, { recursive: true,
+            force: true });
+    }
+});
+
+test("Stack rejects unsafe names before touching the filesystem", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "dockge-stack-path-"));
+    const stacksDir = path.join(root, "stacks");
+    const outsideDir = path.join(root, "outside");
+    await mkdir(stacksDir);
+    await mkdir(outsideDir);
+    await writeFile(path.join(outsideDir, ".env"), "SECRET=outside\n");
+    await writeFile(path.join(outsideDir, "compose.yaml"), "services: {}\n");
+
+    try {
+        const server = { stacksDir } as never;
+
+        for (const unsafeName of [ "../outside", "..", "/tmp/outside", "..\\outside", "", "with space", "UPPER", "dot.stack" ]) {
+            assert.throws(() => Stack.validateName(unsafeName), ValidationError, `expected ${JSON.stringify(unsafeName)} to be rejected`);
+            assert.throws(() => Stack.getSafePath(server, unsafeName), ValidationError, `expected ${JSON.stringify(unsafeName)} to be rejected`);
+        }
+
+        assert.doesNotThrow(() => Stack.validateName("ok-stack_1"));
+        assert.equal(Stack.getSafePath(server, "ok-stack_1"), path.join(stacksDir, "ok-stack_1"));
+
+        // Traversal must not read or delete anything outside stacksDir
+        await assert.rejects(Stack.getStack(server, "../outside"), ValidationError);
+        assert.equal(await readFile(path.join(outsideDir, ".env"), "utf8"), "SECRET=outside\n");
+
+        const traversalStack = new Stack(server, "../outside", undefined, undefined, true);
+        assert.throws(() => traversalStack.path, ValidationError);
+        assert.equal(traversalStack.isManagedByDockge, false);
+        await assert.rejects(traversalStack.save(false), ValidationError);
+        assert.equal(await readFile(path.join(outsideDir, "compose.yaml"), "utf8"), "services: {}\n");
+
+        // A valid name pointing outside via symlink must be rejected too
+        await symlink(outsideDir, path.join(stacksDir, "linked"), "dir");
+        await assert.rejects(Stack.getStack(server, "linked"), ValidationError);
+        assert.equal(await readFile(path.join(outsideDir, ".env"), "utf8"), "SECRET=outside\n");
+
+        // A real stack inside stacksDir keeps working
+        const okDir = path.join(stacksDir, "ok-stack_1");
+        await mkdir(okDir);
+        await writeFile(path.join(okDir, "compose.yaml"), "services:\n  app:\n    image: nginx\n");
+        const loaded = await Stack.getStack(server, "ok-stack_1");
+        assert.match(loaded.composeYAML, /nginx/);
+    } finally {
+        await rm(root, { recursive: true,
             force: true });
     }
 });
