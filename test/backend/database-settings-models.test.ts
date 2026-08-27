@@ -1,10 +1,8 @@
 import { strict as assert } from "node:assert";
+import { stat } from "node:fs/promises";
 import test from "node:test";
-import jwt from "jsonwebtoken";
 import { Database } from "../../backend/database";
 import { Agent } from "../../backend/models/agent";
-import { User } from "../../backend/models/user";
-import { generatePasswordHash, verifyPassword } from "../../backend/password-hash";
 import { Settings } from "../../backend/settings";
 import { withDatabase } from "../helpers/database";
 
@@ -16,14 +14,14 @@ test("Database creates the SQLite schema, reads configuration and closes cleanly
             .where("type", "table")
             .orderBy("name");
 
-        assert.deepEqual(tables.map((table) => table.name), [
-            "agent",
-            "knex_migrations",
-            "knex_migrations_lock",
-            "setting",
-            "sqlite_sequence",
-            "user",
-        ]);
+        // Our own migrations create these, the auth tables come from better-auth
+        for (const expected of [ "agent", "knex_migrations", "setting" ]) {
+            assert.ok(tables.some((table) => table.name === expected), `${expected} table is missing`);
+        }
+
+        for (const authTable of [ "user", "session", "account", "verification", "twoFactor" ]) {
+            assert.ok(tables.some((table) => table.name === authTable), `${authTable} table is missing`);
+        }
         assert.equal(Database.readDBConfig().type, "sqlite");
         assert.ok(Database.getSize() > 0);
 
@@ -90,58 +88,6 @@ test("Settings persists values, uses the cache and respects setting types", asyn
     });
 });
 
-test("User model supports active filtering, password reset and JWT creation", async () => {
-    await withDatabase(async () => {
-        const db = Database.getKnex();
-        const oldPassword = generatePasswordHash("old-password");
-        await db("user").insert([
-            {
-                username: "active-user",
-                password: oldPassword,
-                active: 1,
-                twofa_status: 0,
-            },
-            {
-                username: "inactive-user",
-                password: generatePasswordHash("inactive-password"),
-                active: 0,
-                twofa_status: 0,
-            },
-        ]);
-
-        const first = await User.findFirst();
-        assert.ok(first);
-        assert.equal(first.username, "active-user");
-
-        const active = await User.findByUsername("active-user");
-        assert.ok(active);
-        assert.equal(active.active, 1);
-        assert.equal(await User.findByUsername("inactive-user"), null);
-
-        const inactive = await User.findByUsername("inactive-user", false);
-        assert.ok(inactive);
-        assert.equal(inactive.active, 0);
-        assert.deepEqual(await User.findById(active.id), active);
-        assert.equal(await User.findById(inactive.id), null);
-
-        const token = User.createJWT(active, "jwt-secret");
-        const decoded = jwt.verify(token, "jwt-secret") as { username: string; h: string };
-        assert.equal(decoded.username, "active-user");
-        assert.equal(typeof decoded.h, "string");
-
-        await active.resetPassword("new-password");
-        const updated = await User.findById(active.id, false);
-        assert.ok(updated);
-        assert.equal(verifyPassword("new-password", updated.password), true);
-        assert.equal(verifyPassword("old-password", updated.password), false);
-
-        await User.resetPassword(active.id, "final-password");
-        const finalUser = await User.findById(active.id, false);
-        assert.ok(finalUser);
-        assert.equal(verifyPassword("final-password", finalUser.password), true);
-    });
-});
-
 test("Agent model creates, serializes, updates, lists and deletes agents", async () => {
     await withDatabase(async () => {
         const created = await Agent.create("https://agent.example.test:8443", "agent-user", "agent-password", "Primary");
@@ -167,5 +113,25 @@ test("Agent model creates, serializes, updates, lists and deletes agents", async
         assert.equal(await Agent.findByUrl(created.url), null);
         assert.equal(await Agent.deleteByUrl(created.url), null);
         assert.equal(await Agent.updateName(created.url, "No-op"), null);
+    });
+});
+
+test("the database file is readable by its owner only", async (t) => {
+    if (process.platform === "win32") {
+        t.skip("POSIX mode bits do not exist on Windows");
+        return;
+    }
+
+    await withDatabase(async () => {
+        // The file carries the password hash and the secret that signs session cookies
+        const mode = (await stat(Database.sqlitePath)).mode & 0o777;
+        assert.equal(mode.toString(8), "600");
+
+        // The write ahead log holds the same pages, so it must not be readable either
+        const wal = await stat(`${Database.sqlitePath}-wal`).catch(() => null);
+
+        if (wal) {
+            assert.equal((wal.mode & 0o777).toString(8), "600");
+        }
     });
 });

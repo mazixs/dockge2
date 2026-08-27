@@ -2,19 +2,19 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "../../backend/child-process";
 import { Database } from "../../backend/database";
-import { generatePasswordHash } from "../../backend/password-hash";
 import { Settings } from "../../backend/settings";
 
-import { E2E_ADMIN_PASSWORD, E2E_ATTENTION_STACK, E2E_FILES_STACK, E2E_STACK_NAME } from "./constants";
+import { countUsers, initAuth } from "../../backend/auth";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, E2E_ATTENTION_STACK, E2E_FILES_STACK, E2E_STACK_NAME } from "./constants";
 
 const dataDir = process.env.DOCKGE_E2E_DATA_DIR ?? "/tmp/dockge-e2e/data";
 const stacksDir = process.env.DOCKGE_E2E_STACKS_DIR ?? "/tmp/dockge-e2e/stacks";
 
 /**
- * Prepare a clean data directory, a logged in session and a running container.
+ * Prepare a clean data directory, the owner account and the running containers.
  *
- * Authentication is disabled for the run instead of typing a password into the UI:
- * the tests are about the terminal, and the admin password never has to be known.
+ * Authentication stays on, so the suite runs against the same code path an installation
+ * uses. The global setup signs in once and hands the session cookie to every spec.
  */
 async function seed() : Promise<void> {
     await rm(dataDir, { recursive: true,
@@ -69,19 +69,33 @@ services:
         },
     } as never);
 
-    const knex = Database.getKnex();
+    // The account is created through the auth endpoints, the same way the UI does it
+    const auth = await initAuth({
+        config: {
+            dataDir,
+            stacksDir,
+            port: 5001,
+        },
+        isSSL: () => undefined,
+        getBaseURL: () => "http://localhost:5001",
+    } as never);
 
-    if (!await knex("user").first()) {
-        await knex("user").insert({
-            username: "e2e-admin",
-            // Known password: revealing a secret is guarded by a password check
-            password: generatePasswordHash(E2E_ADMIN_PASSWORD),
-            active: 1,
-            twofa_status: 0,
+    if (await countUsers() === 0) {
+        const response = await auth.api.signUpEmail({
+            body: {
+                email: E2E_ADMIN_EMAIL,
+                // Known password: revealing a secret is guarded by a password check
+                password: E2E_ADMIN_PASSWORD,
+                name: "E2E owner",
+            },
+            asResponse: true,
         });
+
+        if (!response.ok) {
+            throw new Error(`Could not create the e2e account: ${response.status}`);
+        }
     }
 
-    await Settings.set("disableAuth", true);
     Settings.stopCacheCleaner();
     await Database.close();
 

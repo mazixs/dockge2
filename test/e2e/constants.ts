@@ -13,3 +13,12 @@ export const E2E_FILES_STACK = "e2e-files";
  * and it is needed because revealing a secret is guarded by a password check.
  */
 export const E2E_ADMIN_PASSWORD = "e2e-only-password";
+
+/** Address of the seeded account */
+export const E2E_ADMIN_EMAIL = "e2e-owner@example.com";
+
+/** Origin the UI is served from during the e2e run */
+export const FRONTEND_ORIGIN = "http://localhost:5000";
+
+/** Where the signed in session of the run is kept */
+export const AUTH_STATE_PATH = "test/e2e/.auth/state.json";

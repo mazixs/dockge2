@@ -2,36 +2,32 @@
     <div class="form-container">
         <div class="form">
             <form @submit.prevent="submit">
-                <h1 class="h3 mb-3 fw-normal" />
-
                 <div v-if="!tokenRequired" class="form-floating">
-                    <input id="floatingInput" v-model="username" type="text" class="form-control" placeholder="Username" autocomplete="username" required>
-                    <label for="floatingInput">{{ $t("Username") }}</label>
+                    <input id="floatingInput" v-model="email" type="email" class="form-control" placeholder="you@example.com" autocomplete="username" :disabled="processing" required>
+                    <label for="floatingInput">{{ $t("Email") }}</label>
                 </div>
 
                 <div v-if="!tokenRequired" class="form-floating mt-3">
-                    <input id="floatingPassword" v-model="password" type="password" class="form-control" placeholder="Password" autocomplete="current-password" required>
+                    <input id="floatingPassword" v-model="password" type="password" class="form-control" placeholder="Password" autocomplete="current-password" :disabled="processing" required>
                     <label for="floatingPassword">{{ $t("Password") }}</label>
                 </div>
 
+                <!-- A backup code is longer than a TOTP code, so the field has to take both -->
                 <div v-if="tokenRequired">
                     <div class="form-floating mt-3">
-                        <input id="otp" v-model="token" type="text" maxlength="6" class="form-control" placeholder="123456" autocomplete="one-time-code" required>
+                        <input id="otp" ref="otp" v-model="token" type="text" maxlength="16" class="form-control" placeholder="123456" autocomplete="one-time-code" :disabled="processing" required>
                         <label for="otp">{{ $t("Token") }}</label>
                     </div>
+                    <p class="form-text">{{ $t("twoFactorCodeHint") }}</p>
                 </div>
 
-                <div class="form-check mb-3 mt-3 d-flex justify-content-center pe-4">
-                    <div class="form-check">
-                        <input id="remember" v-model="$root.remember" type="checkbox" value="remember-me" class="form-check-input">
-
-                        <label class="form-check-label" for="remember">
-                            {{ $t("Remember me") }}
-                        </label>
-                    </div>
-                </div>
-                <button class="w-100 btn btn-primary" type="submit" :disabled="processing">
+                <button class="w-100 btn btn-primary mt-3" type="submit" :disabled="processing">
+                    <div v-if="processing" class="spinner-border spinner-border-sm me-1"></div>
                     {{ $t("Login") }}
+                </button>
+
+                <button v-if="tokenRequired" class="w-100 btn btn-link mt-2" type="button" :disabled="processing" @click="restart">
+                    {{ $t("backToLogin") }}
                 </button>
 
                 <div v-if="res && !res.ok" class="alert alert-danger mt-3" role="alert">
@@ -47,7 +43,7 @@ export default {
     data() {
         return {
             processing: false,
-            username: "",
+            email: "",
             password: "",
             token: "",
             res: null,
@@ -68,18 +64,46 @@ export default {
          * Submit the user details and attempt to log in
          * @returns {void}
          */
-        submit() {
+        async submit() {
             this.processing = true;
 
-            this.$root.login(this.username, this.password, this.token, (res) => {
-                this.processing = false;
+            try {
+                // Once the challenge is open, only the code is sent: repeating the
+                // password would start a new challenge and burn the sign-in rate limit
+                const res = this.tokenRequired
+                    ? await this.$root.verifyTwoFactor(this.token)
+                    : await this.$root.signIn(this.email, this.password);
 
-                if (res.tokenRequired) {
+                if (res.twoFactorRequired) {
                     this.tokenRequired = true;
-                } else {
-                    this.res = res;
+                    this.token = "";
+                    this.res = res.msg ? res : null;
+
+                    await this.$nextTick();
+                    this.$refs.otp?.focus();
+                    return;
                 }
-            });
+
+                this.res = res;
+
+                if (res.ok) {
+                    // Let the browser offer to save the password
+                    history.pushState({}, "");
+                }
+            } finally {
+                this.processing = false;
+            }
+        },
+
+        /**
+         * Go back to the email and password step, for a different account or a mistyped address
+         * @returns {void}
+         */
+        restart() {
+            this.tokenRequired = false;
+            this.token = "";
+            this.password = "";
+            this.res = null;
         },
 
     },

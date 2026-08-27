@@ -127,6 +127,31 @@ services:
       - PGID=1000 # Set the stack file/dir ownership to this group
 ```
 
+## Sign in
+
+The first visit asks for an email address and a password, and that account is the only
+one this instance accepts: further sign-ups are refused, so an instance you expose to
+the internet cannot be claimed by somebody else. The session is a server side row behind
+an `httpOnly` cookie, and two factor authentication (TOTP plus backup codes) can be
+switched on under Settings → Security.
+
+Lost the password? Run `npm run reset-account` on the host (or
+`docker compose exec dockge npm run reset-account`). It removes the account and its
+sessions, leaves stacks, settings and agents alone, and the setup screen comes back.
+
+### Behind a reverse proxy
+
+Dockge accepts requests whose origin matches the address the browser asked for, so a LAN
+address, a container name and a domain all work without configuration. Two variables
+matter when a proxy sits in front:
+
+| Variable | What it does |
+|---|---|
+| `DOCKGE_TRUST_PROXY=true` | Believe `X-Forwarded-For`/`X-Forwarded-Host`, so rate limits count per real client and the proxied host counts as its own origin. Only set it when a proxy really is in front, otherwise a caller writes those headers itself. |
+| `DOCKGE_SECURE_COOKIES=true` | Mark the session cookie `Secure` even though Dockge itself speaks plain HTTP behind the proxy. |
+| `DOCKGE_TRUSTED_ORIGINS` | Comma separated extra origins, for a UI served from another host. |
+| `DOCKGE_AUTH_SECRET` | Signs session cookies. Generated and stored in the database on first start, so set it only to share one secret across replicas. |
+
 ## How to Update
 
 ```bash
