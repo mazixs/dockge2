@@ -94,13 +94,13 @@
         <TwoFADialog ref="TwoFADialog" />
 
         <Confirm ref="confirmDisableAuth" btn-style="btn-danger" :yes-text="$t('I understand, please disable')" :no-text="$t('Leave')" @yes="disableAuth">
-            <i18n-t keypath="disableauth.message1" tag="p">
+            <i18n-t scope="global" keypath="disableauth.message1" tag="p">
                 <template #disableAuth>
                     <strong>{{ $t('disableAuth') }}</strong>
                 </template>
             </i18n-t>
 
-            <i18n-t keypath="disableauth.message2" tag="p">
+            <i18n-t scope="global" keypath="disableauth.message2" tag="p">
                 <template #scenarios>
                     <strong>{{ $t('scenarios') }}</strong>
                 </template>

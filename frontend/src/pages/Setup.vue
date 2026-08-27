@@ -15,8 +15,8 @@
 
                 <div class="form-floating">
                     <select id="language" v-model="$root.language" class="form-select">
-                        <option v-for="(lang, i) in $i18n.availableLocales" :key="`Lang${i}`" :value="lang">
-                            {{ $i18n.messages[lang].languageName }}
+                        <option v-for="language in availableLanguages" :key="language.code" :value="language.code">
+                            {{ language.name }}
                         </option>
                     </select>
                     <label for="language" class="form-label">{{ $t("Language") }}</label>
@@ -46,6 +46,8 @@
 </template>
 
 <script>
+import { availableLanguages } from "../i18n";
+
 export default {
     data() {
         return {
@@ -54,6 +56,15 @@ export default {
             password: "",
             repeatPassword: "",
         };
+    },
+    computed: {
+        /**
+         * Languages offered in the selector
+         * @returns {Array<object>} Language code and display name pairs
+         */
+        availableLanguages() {
+            return availableLanguages();
+        },
     },
     watch: {
 

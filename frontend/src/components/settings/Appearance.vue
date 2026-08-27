@@ -6,11 +6,11 @@
             </label>
             <select id="language" v-model="$root.language" class="form-select">
                 <option
-                    v-for="(lang, i) in $i18n.availableLocales"
-                    :key="`Lang${i}`"
-                    :value="lang"
+                    v-for="language in availableLanguages"
+                    :key="language.code"
+                    :value="language.code"
                 >
-                    {{ $i18n.messages[lang].languageName }}
+                    {{ language.name }}
                 </option>
             </select>
         </div>
@@ -67,8 +67,18 @@
 </template>
 
 <script>
-export default {
+import { availableLanguages } from "../../i18n";
 
+export default {
+    computed: {
+        /**
+         * Languages offered in the selector
+         * @returns {Array<object>} Language code and display name pairs
+         */
+        availableLanguages() {
+            return availableLanguages();
+        },
+    },
 };
 </script>
 
