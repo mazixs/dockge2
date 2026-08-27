@@ -7,8 +7,7 @@ import { AgentSocket } from "../../common/agent-socket";
 import { DockerSocketHandler } from "../../backend/agent-socket-handlers/docker-socket-handler";
 import type { DockgeServer } from "../../backend/dockge-server";
 import { Stack } from "../../backend/stack";
-import type { DockgeSocket } from "../../backend/util-server";
-import { withDatabase } from "../helpers/database";
+import { withDatabase, makeAuthenticatedSocket } from "../helpers/database";
 
 /** A compose file using everything a naive rebuild would destroy */
 const trickySource = `# managed by hand, do not reformat
@@ -76,8 +75,7 @@ test("saving a stack writes exactly the text it was given", async () => {
         await mkdir(stackDir);
         await writeFile(path.join(stackDir, "compose.yaml"), trickySource);
 
-        const socket = { userID: 1,
-            endpoint: "" } as DockgeSocket;
+        const socket = makeAuthenticatedSocket();
         const server = { stacksDir,
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();

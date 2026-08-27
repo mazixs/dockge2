@@ -4,11 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { AgentSocket } from "../../common/agent-socket";
 import { DockerSocketHandler } from "../../backend/agent-socket-handlers/docker-socket-handler";
-import { Database } from "../../backend/database";
 import type { DockgeServer } from "../../backend/dockge-server";
-import { generatePasswordHash } from "../../backend/password-hash";
-import type { DockgeSocket } from "../../backend/util-server";
-import { withDatabase } from "../helpers/database";
+import { createTestAccount, makeAuthenticatedSocket, TEST_PASSWORD, withDatabase } from "../helpers/database";
 
 interface CallbackResponse {
     ok? : boolean;
@@ -20,7 +17,7 @@ interface CallbackResponse {
     [key : string] : unknown;
 }
 
-const password = "correct-horse-battery";
+const password = TEST_PASSWORD;
 
 const composeYAML = `services:
   app:
@@ -44,14 +41,8 @@ function call(agentSocket : AgentSocket, eventName : string, ...args : unknown[]
 
 test("stack file and secret events keep secret content behind a password", async () => {
     await withDatabase(async ({ stacksDir }) => {
-        // A real user, so the password check is the real one
-        await Database.getKnex()("user").insert({
-            username: "secret-admin",
-            password: generatePasswordHash(password),
-            active: 1,
-            twofa_status: 0,
-        });
-        const user = await Database.getKnex()("user").where("username", "secret-admin").first();
+        // A real account created through better-auth, so the password check is the real one
+        const cookie = await createTestAccount("secret-admin@example.com");
 
         const stackDir = path.join(stacksDir, "secret-stack");
         await mkdir(stackDir);
@@ -60,8 +51,7 @@ test("stack file and secret events keep secret content behind a password", async
         await writeFile(path.join(stackDir, ".env"), "BASE=1\n");
         await writeFile(path.join(stackDir, ".env.dev"), "STAGE=dev\n");
 
-        const socket = { userID: user.id,
-            endpoint: "" } as DockgeSocket;
+        const socket = makeAuthenticatedSocket({ cookie });
         const server = { stacksDir,
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
@@ -157,8 +147,7 @@ test("stack file events reject wrong types with a type error, not by accident", 
         await writeFile(path.join(stackDir, "compose.yaml"), composeYAML);
         await writeFile(path.join(stackDir, ".env"), "BASE=1\n");
 
-        const socket = { userID: 1,
-            endpoint: "" } as DockgeSocket;
+        const socket = makeAuthenticatedSocket();
         const server = { stacksDir,
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();

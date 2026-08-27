@@ -45,8 +45,8 @@
     "deleteContainer": "Supprimer",
     "addContainer": "Ajouter un conteneur",
     "addNetwork": "Ajouter un réseau",
-    "disableauth.message1": "Voulez-vous vraiment <strong>désactiver l'authentification</strong> ?",
-    "disableauth.message2": "Il est conçu pour les scénarios <strong>dans lesquels vous avez l'intention d'implémenter une authentification tierce</strong> devant Dockge, comme Cloudflare Access, Authelia ou d'autres mécanismes d'authentification.",
+    "disableauth.message1": "Voulez-vous vraiment {disableAuth} ?",
+    "disableauth.message2": "Il est conçu pour les scénarios {scenarios} devant Dockge, comme Cloudflare Access, Authelia ou d'autres mécanismes d'authentification.",
     "passwordNotMatchMsg": "Le mot de passe de confirmation ne correspond pas.",
     "autoGet": "Obtention automatique",
     "add": "Ajouter",
@@ -128,5 +128,7 @@
     "Downed": "Abattu",
     "Lost connection to the socket server. Reconnecting...": "Connexion au serveur socket perdue. Reconnexion...",
     "CurrentHostname": "(Non défini : suivre le nom d'hôte actuel)",
-    "NoNetworksAvailable": "Aucun réseau disponible. Vous devez d'abord ajouter des réseaux internes ou activer les réseaux externes sur le côté droit."
+    "NoNetworksAvailable": "Aucun réseau disponible. Vous devez d'abord ajouter des réseaux internes ou activer les réseaux externes sur le côté droit.",
+    "disableAuth": "désactiver l'authentification",
+    "scenarios": "dans lesquels vous avez l'intention d'implémenter une authentification tierce"
 }

@@ -54,13 +54,7 @@ function rootApp() {
             lang,
             theme,
         ],
-        data() {
-            return {
-                loggedIn: false,
-                allowLoginDialog: false,
-                username: null,
-            };
-        },
+        // The session state lives in the socket mixin, so it is not repeated here
         computed: {
 
         },
