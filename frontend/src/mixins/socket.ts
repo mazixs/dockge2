@@ -56,6 +56,9 @@ export default defineComponent({
 
             /** True when this instance runs with authentication switched off */
             authDisabled: false,
+
+            /** Stack that was just created, so the list can point at it */
+            freshStack: null as string | null,
             username: null as string | null,
             composeTemplate: "",
 
@@ -510,6 +513,24 @@ export default defineComponent({
         },
 
         /**
+         * Point the list at a stack that was just created.
+         * A highlighted row answers "where is it among the twenty seven" better than
+         * a toast that disappears after a few seconds.
+         * @param {string} name Name of the stack
+         * @param {number} durationMs How long the row stays marked
+         * @returns {void}
+         */
+        markStackFresh(name : string, durationMs = 60_000) {
+            this.freshStack = name;
+
+            setTimeout(() => {
+                if (this.freshStack === name) {
+                    this.freshStack = null;
+                }
+            }, durationMs);
+        },
+
+        /**
          * Drop everything that belonged to the session that just ended, so the next
          * user of this browser does not see the previous stack list for a moment
          * @returns {void}
@@ -520,6 +541,7 @@ export default defineComponent({
             this.agentList = {};
             this.agentStatusList = {};
             this.composeTemplate = "";
+            this.freshStack = null;
         },
 
         afterLogin() {
