@@ -110,6 +110,8 @@ The frontend is Vue 3 options-API SFCs with mixins as the state layer: `frontend
 
 ## Conventions
 
+Visual work follows `docs/design-system.md`: the tokens live in `frontend/src/styles/tokens.scss` (light on `:root`, dark on `body.dark`), fonts are self-hosted IBM Plex via `fonts.scss` (the condensed cut is banned — it has no basic Cyrillic), and `vars.scss` mirrors the same values so the legacy `.dark &` rules in `main.scss` cannot drift from new components. `test/frontend/design-tokens.test.ts` fails the build when a token misses its contrast threshold, when blue starts meaning a state, or when target sizes shrink. New components read tokens only and never declare a colour inside a theme block.
+
 Follow `.editorconfig` and ESLint: 4-space indent (2 for YAML), LF, double quotes, semicolons, `array-bracket-spacing: always`, JSDoc on non-obvious methods. Naming: `camelCase` in TS/JS, `snake_case` for SQLite columns, `kebab-case` for CSS/SCSS.
 
 Settings belong in the UI (`Settings` table + settings components), not in new environment variables; env vars are reserved for startup concerns (`DOCKGE_STACKS_DIR`, `DOCKGE_PORT`, `DOCKGE_DATA_DIR`, `DOCKGE_SSL_*`, `DOCKGE_ENABLE_CONSOLE`, `DOCKGE_TRUSTED_ORIGINS`, `DOCKGE_TRUST_PROXY`, `DOCKGE_SECURE_COOKIES`, `DOCKGE_AUTH_SECRET`).

@@ -1,26 +1,50 @@
-$primary: #74c2ff;
-$danger: #dc3545;
-$warning: #f8a306;
-$maintenance: #1747f5;
-$link-color: #111;
-$border-radius: 50rem;
+// Переменные SCSS для Bootstrap и для правил, написанных до перехода на токены.
+//
+// Значения здесь те же, что в tokens.scss: пока часть интерфейса рисуется
+// старыми правилами с `.dark &`, оба набора обязаны совпадать, иначе новые и
+// старые экраны разъезжаются по цвету. Новый код берёт только токены из
+// tokens.scss, эти переменные - для Bootstrap и для остатков старых правил.
 
-$highlight: #9dd1ff;
-$highlight-white: #e7faec;
+// Шрифты Bootstrap: те же, что в токенах, иначе body и всё, что рисуется вне
+// #app (тосты, портированные модальные окна), останутся на системном шрифте.
+$font-family-sans-serif: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+$font-family-monospace: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-$dark-font-color: #b1b8c0;
-$dark-font-color2: #020b05;
-$dark-font-color3: #575c62;
-$dark-bg: #0d1117;
-$dark-bg2: #070a10;
-$dark-border-color: #1d2634;
-$dark-header-bg: #161b22;
+// Акцент: интерактив и ничего больше. Белый текст на нём даёт 4,57:1.
+$primary: #466ee3;
+
+// Состояния. Bootstrap использует их в бейджах и кнопках, поэтому берутся
+// значения, читаемые в обеих темах.
+$danger: #cf4a3f;
+$warning: #e9a13b;
+$maintenance: #2b5be0;
+
+$link-color: #2b5be0;
+
+// Радиусы: приборная панель, а не таблетки. Пилюли остались только у бейджей,
+// им радиус задаётся токеном --radius-pill.
+$border-radius: 0.3125rem;
+
+$highlight: #8fadff;
+$highlight-white: #e7edf3;
+
+// Тёмная тема. Совпадает с body.dark в tokens.scss.
+$dark-font-color: #ccd6e2;
+$dark-font-color2: #0b0e12;
+$dark-font-color3: #778390;
+$dark-bg: #0e1116;
+$dark-bg2: #151a21;
+$dark-border-color: #232b35;
+$dark-header-bg: #151a21;
 
 $easing-in: cubic-bezier(0.54, 0.78, 0.55, 0.97);
 $easing-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
 $easing-in-out: cubic-bezier(0.79, 0.14, 0.15, 0.86);
 
-$dropdown-border-radius: 0.5rem;
+$dropdown-border-radius: 0.4375rem;
 
-$primary-gradient: linear-gradient(135deg, #74c2ff 0%, #74c2ff 75%, #86e6a9);
-$primary-gradient-active: linear-gradient(135deg, #74c2ff 0%, #74c2ff 50%, #86e6a9);
+// Градиента больше нет: акцент - один плотный цвет, чтобы текст на кнопке имел
+// предсказуемый контраст. Имена сохранены, потому что на них ссылаются старые
+// правила в main.scss.
+$primary-gradient: #466ee3;
+$primary-gradient-active: #3a60d4;

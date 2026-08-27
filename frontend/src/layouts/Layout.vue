@@ -290,7 +290,7 @@ main {
         width: 24px;
         height: 24px;
         margin-right: 5px;
-        border-radius: 50rem;
+        border-radius: var(--radius-pill);
         font-weight: bold;
         font-size: 10px;
     }

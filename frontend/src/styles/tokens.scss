@@ -1,0 +1,124 @@
+// Токены дизайн-системы Dockge 2.
+//
+// Единственный источник цвета, плотности и шрифтов для новых компонентов:
+// они читают только эти свойства и никогда не объявляют цвет внутри правила
+// темы. Тёмная тема основная, светлая - тот же набор имён другими значениями.
+//
+// Контраст проверен расчётом WCAG 2.1 (см. docs/design-system.md): текст 11,9,
+// приглушённый 5,6, бледный 4,5, состояния 5,0-9,0, белый на акценте 4,6,
+// граница контрола 3,1. Значения ниже порога в систему не попадают.
+//
+// Тема переключается классом на body (см. frontend/src/mixins/theme.ts):
+// :root несёт светлые значения, body.dark - тёмные.
+
+:root {
+    // --- шрифты ---
+    // Одно семейство в трёх весах: узкого начертания с русской кириллицей у
+    // IBM Plex нет, а пара «два похожих санса» читается хуже одного семейства.
+    --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    // --- шкала кегля ---
+    --text-xs: 12px;    // подписи под полем, единицы измерения
+    --text-sm: 13px;    // таблицы, чипы, второстепенное
+    --text-base: 14px;  // основной текст интерфейса
+    --text-md: 16px;    // заголовок секции
+    --text-lg: 20px;    // имя стека
+    --text-xl: 26px;    // заголовок страницы
+
+    // --- плотность ---
+    --row-height: 40px;          // строка списка стеков
+    --row-height-dense: 34px;    // строка таблицы сервисов
+    --control-height: 32px;      // кнопка, поле, переключатель на настольном
+    --control-height-touch: 44px; // то же на узком экране
+    --gap-xs: 4px;
+    --gap-sm: 8px;
+    --gap-md: 12px;
+    --gap-lg: 20px;
+
+    // --- радиусы ---
+    --radius-chip: 3px;
+    --radius-control: 5px;
+    --radius-panel: 7px;
+    --radius-pill: 999px; // только для настоящих пилюль: бейдж состояния, счётчик
+
+    // --- поверхности, светлая тема ---
+    --surface-base: #eef2f6;
+    --surface-panel: #ffffff;
+    --surface-raised: #e7edf3;
+    --surface-sunken: #dce4ec;
+    --line-hair: #d4dce5;   // разделители таблиц и секций
+    --line-control: #878c92; // граница кнопки и поля: 3,01:1 к фону
+
+    // --- текст, светлая тема ---
+    --text-strong: #16202b; // 15,1:1
+    --text-muted: #4f6070;  // 6,6:1
+    --text-faint: #626f7d;  // 4,56:1, ниже 12px не применять
+    --text-on-accent: #ffffff;
+
+    // --- акцент: только интерактив, никогда не состояние ---
+    --accent: #2b5be0;      // белый текст на нём 5,71:1
+    --accent-text: #2b5be0; // акцент как цвет текста на фоне панели
+    --accent-soft: rgba(43, 91, 224, .1);
+
+    // --- состояния стека и сервиса: одно значение на один смысл ---
+    --state-running: #17864f;
+    --state-attention: #8a5a08;
+    --state-stopped: #5f6d7b;
+    --state-unknown: #6f4fd8;
+    --state-failed: #b83b2f;
+
+    // --- служебное ---
+    --shadow-panel: 0 1px 2px rgba(18, 26, 34, .06), 0 10px 28px rgba(18, 26, 34, .06);
+    --focus-ring: 2px solid var(--accent-text);
+    --focus-offset: 2px;
+}
+
+body.dark {
+    // --- поверхности, тёмная тема ---
+    --surface-base: #0e1116;
+    --surface-panel: #151a21;
+    --surface-raised: #1b2129;
+    --surface-sunken: #222b35;
+    --line-hair: #232b35;
+    --line-control: #59626b; // 3,05:1 к фону
+
+    // --- текст, тёмная тема ---
+    --text-strong: #ccd6e2; // 11,9:1
+    --text-muted: #8493a3;  // 5,56:1
+    --text-faint: #778390;  // 4,52:1, ниже 12px не применять
+    --text-on-accent: #ffffff;
+
+    // --- акцент ---
+    --accent: #466ee3;      // белый текст на нём 4,57:1
+    --accent-text: #8fadff; // как текст на панели: 6,4:1
+    --accent-soft: rgba(70, 110, 227, .16);
+
+    // --- состояния ---
+    --state-running: #46c98b;
+    --state-attention: #e9a13b;
+    --state-stopped: #7d8b9c;
+    --state-unknown: #a78bfa;
+    --state-failed: #e2685e;
+
+    --shadow-panel: 0 1px 2px rgba(0, 0, 0, .5), 0 14px 34px rgba(0, 0, 0, .35);
+}
+
+// Видимый фокус нужен всему, что можно нажать: без него клавиатурная навигация
+// по списку стеков и по докам терминалов невозможна.
+:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+}
+
+// Плотность - свойство настольной раскладки, а не системы: на узком экране
+// цели нажатия обязаны расти.
+@media (max-width: 900px) {
+    :root {
+        --control-height: var(--control-height-touch);
+        --row-height: 60px;
+        --row-height-dense: 48px;
+        --text-sm: 14px;
+        --text-base: 15px;
+    }
+}

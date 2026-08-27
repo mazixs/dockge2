@@ -254,7 +254,7 @@ export default {
 }
 
 .file-name {
-    font-family: monospace;
+    font-family: var(--font-mono);
 }
 
 .meta {
@@ -264,12 +264,12 @@ export default {
 
 .secret-value {
     max-width: 320px;
-    font-family: monospace;
+    font-family: var(--font-mono);
 }
 
 .secret-name {
     max-width: 220px;
-    font-family: monospace;
+    font-family: var(--font-mono);
 }
 
 .secret-services {

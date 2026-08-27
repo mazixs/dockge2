@@ -1,9 +1,17 @@
+@import "fonts.scss";
 @import "vars.scss";
+@import "tokens.scss";
 @import "bootstrap/scss/bootstrap";
 @import "bootstrap-vue-next/dist/bootstrap-vue-next.css";
 
 #app {
-    font-family: BlinkMacSystemFont, segoe ui, Roboto, helvetica neue, Arial, noto sans, sans-serif, apple color emoji, segoe ui emoji, segoe ui symbol, noto color emoji;
+    font-family: var(--font-ui);
+    font-size: var(--text-base);
+}
+
+// Числа в списках и таблицах должны стоять в колонку
+.num, td, th {
+    font-variant-numeric: tabular-nums;
 }
 
 h1 {
@@ -15,7 +23,8 @@ h2 {
 }
 
 textarea.form-control {
-    border-radius: 19px;
+    border-radius: var(--radius-panel);
+    font-family: var(--font-mono);
 }
 
 ::-webkit-scrollbar {

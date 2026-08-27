@@ -238,7 +238,7 @@ export default {
     padding: 0.5rem;
     border-radius: 0.5rem;
     background-color: rgba(127, 127, 127, 0.15);
-    font-family: monospace;
+    font-family: var(--font-mono);
 }
 
 .dark {
