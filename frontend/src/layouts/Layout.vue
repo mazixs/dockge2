@@ -47,7 +47,7 @@
                                 <i18n-t v-if="$root.username != null" scope="global" tag="span" keypath="signedInDisp" class="dropdown-item-text">
                                     <strong>{{ $root.username }}</strong>
                                 </i18n-t>
-                                <span v-if="$root.username == null" class="dropdown-item-text">{{ $t("signedInDispDisabled") }}</span>
+                                <span v-else-if="$root.authDisabled" class="dropdown-item-text">{{ $t("signedInDispDisabled") }}</span>
                             </li>
 
                             <li><hr class="dropdown-divider"></li>
@@ -72,7 +72,8 @@
                                 </router-link>
                             </li>
 
-                            <li>
+                            <!-- Nothing to sign out of when authentication is disabled -->
+                            <li v-if="! $root.authDisabled">
                                 <button class="dropdown-item" @click="$root.logout">
                                     <font-awesome-icon icon="sign-out-alt" />
                                     {{ $t("Logout") }}

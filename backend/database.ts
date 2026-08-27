@@ -129,6 +129,36 @@ export class Database {
         }
 
         await this.initSQLite();
+        this.restrictSQLiteAccess();
+    }
+
+    /**
+     * Keep the database readable by its owner only.
+     *
+     * It holds the password hash and the secret that signs session cookies, so a
+     * world readable file would let any local account forge a session or take the
+     * hash offline. The write ahead log and shared memory file hold page data of
+     * the same database, so they get the same treatment.
+     * @returns {void}
+     */
+    static restrictSQLiteAccess() {
+        // Windows has no POSIX mode bits, and chmod there only toggles the read only flag
+        if (process.platform === "win32") {
+            return;
+        }
+
+        for (const suffix of [ "", "-wal", "-shm" ]) {
+            const file = `${Database.sqlitePath}${suffix}`;
+
+            try {
+                if (fs.existsSync(file)) {
+                    fs.chmodSync(file, 0o600);
+                }
+            } catch (e) {
+                // A read only mount or a foreign owner is not fatal, but has to be visible
+                log.warn("db", `Could not restrict the permissions of ${file}: ${e instanceof Error ? e.message : e}`);
+            }
+        }
     }
 
     /**

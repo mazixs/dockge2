@@ -20,3 +20,12 @@ services:
     environment:
       # Tell Dockge where is your stacks directory
       - DOCKGE_STACKS_DIR=/opt/stacks
+
+      # Behind a reverse proxy that terminates TLS, uncomment both: the first makes
+      # Dockge read the proxy headers, the second marks the session cookie as Secure.
+      # - DOCKGE_TRUST_PROXY=true
+      # - DOCKGE_SECURE_COOKIES=true
+
+      # Only needed when the UI is served from a different origin than the API,
+      # for example a separate frontend host. Comma separated list.
+      # - DOCKGE_TRUSTED_ORIGINS=https://dockge.example.com

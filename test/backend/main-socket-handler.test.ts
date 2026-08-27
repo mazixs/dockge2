@@ -1,161 +1,192 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
-import { mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import type { DockgeServer } from "../../backend/dockge-server";
 import { MainSocketHandler } from "../../backend/socket-handlers/main-socket-handler";
-import type { DockgeSocket } from "../../backend/util-server";
-import { User } from "../../backend/models/user";
-import { verifyPassword } from "../../backend/password-hash";
 import { Settings } from "../../backend/settings";
-import { withDatabase } from "../helpers/database";
+import type { DockgeSocket } from "../../backend/util-server";
+import { createTestAccount, TEST_PASSWORD, withDatabase } from "../helpers/database";
 
 interface CallbackResponse {
-    ok?: boolean;
-    msg?: string;
-    token?: string;
-    tokenRequired?: boolean;
-    composeTemplate?: string;
-    data?: Record<string, unknown>;
-    [key: string]: unknown;
+    ok? : boolean;
+    msg? : string;
+    needsSetup? : boolean;
+    composeTemplate? : string;
+    data? : Record<string, unknown>;
+    [key : string] : unknown;
 }
 
+/**
+ * A socket that records what the handler sends, with an optional session cookie
+ */
 class TestSocket extends EventEmitter {
     id = "test-socket";
-    userID = 0;
+    userID = "";
     endpoint = "";
     connected = true;
     instanceManager = {};
-    emittedAgents: unknown[][] = [];
+    request : { headers : Record<string, string> };
 
-    emitAgent(eventName: string, ...args: unknown[]) {
-        this.emittedAgents.push([ eventName, ...args ]);
+    constructor(cookie? : string) {
+        super();
+        this.request = { headers: cookie ? { cookie } : {} };
+    }
+
+    emitAgent() {
+        // The tests do not look at agent traffic
     }
 }
 
-function createServer(socket: TestSocket, stacksDir: string): DockgeServer {
+/**
+ * Emit an event and wait for its acknowledgement
+ * @param socket Socket the handler listens on
+ * @param eventName Event to emit
+ * @param args Arguments without the callback
+ * @returns Callback response
+ */
+function emitWithCallback(socket : TestSocket, eventName : string, ...args : unknown[]) : Promise<CallbackResponse> {
+    return new Promise((resolve) => {
+        socket.emit(eventName, ...args, (response : CallbackResponse) => resolve(response));
+    });
+}
+
+/**
+ * Build a server stub the handler can work with
+ * @param stacksDir Directory holding the stacks
+ * @returns Server stub
+ */
+function createServer(stacksDir : string) : DockgeServer {
     return {
         needSetup: true,
-        jwtSecret: "test-jwt-secret",
         stacksDir,
         getClientIP: async () => "127.0.0.1",
-        afterLogin: async (currentSocket: DockgeSocket, user: User) => {
-            currentSocket.userID = user.id;
-        },
         disconnectAllSocketClients: () => undefined,
         sendInfo: () => undefined,
         sendStackList: () => undefined,
-        socket,
     } as unknown as DockgeServer;
 }
 
-function emitWithCallback(socket: TestSocket, eventName: string, ...args: unknown[]): Promise<CallbackResponse> {
-    return new Promise((resolve) => {
-        socket.emit(eventName, ...args, (response: CallbackResponse) => resolve(response));
-    });
-}
-
-test("MainSocketHandler executes setup, login, token, settings and composerize flows", async () => {
+test("the setup screen follows the database, not a flag decided at start up", async () => {
     await withDatabase(async ({ stacksDir }) => {
-        const socket = new TestSocket();
-        const server = createServer(socket, stacksDir);
-        const handler = new MainSocketHandler();
+        // The real server object, because this is exactly the decision that used to be
+        // cached and kept sending the owner back to the setup screen after setup
+        const { DockgeServer } = await import("../../backend/dockge-server");
+        const server = Object.create(DockgeServer.prototype) as DockgeServer;
 
-        handler.create(socket as unknown as DockgeSocket, server);
+        assert.equal(await server.shouldShowSetup(), true);
 
-        const weakSetup = await emitWithCallback(socket, "setup", "admin", "weak");
-        assert.equal(weakSetup.ok, false);
-        assert.match(weakSetup.msg ?? "", /too weak/i);
+        await createTestAccount();
 
-        const setup = await emitWithCallback(socket, "setup", "admin", "StrongPassword123");
-        assert.deepEqual(setup, {
-            ok: true,
-            msg: "successAdded",
-            msgi18n: true,
-        });
-        assert.equal(server.needSetup, false);
-
-        const repeatedSetup = await emitWithCallback(socket, "setup", "other", "StrongPassword123");
-        assert.equal(repeatedSetup.ok, false);
-        assert.match(repeatedSetup.msg ?? "", /initialized/i);
-
-        const invalidLogin = await emitWithCallback(socket, "login", {
-            username: "admin",
-            password: "wrong-password",
-        });
-        assert.deepEqual(invalidLogin, {
-            ok: false,
-            msg: "authIncorrectCreds",
-            msgi18n: true,
-        });
-
-        const login = await emitWithCallback(socket, "login", {
-            username: "admin",
-            password: "StrongPassword123",
-        });
-        assert.equal(login.ok, true);
-        assert.equal(typeof login.token, "string");
-        assert.equal(socket.userID, 1);
-
-        const byToken = await emitWithCallback(socket, "loginByToken", login.token);
-        assert.deepEqual(byToken, { ok: true });
-
-        const invalidToken = await emitWithCallback(socket, "loginByToken", "invalid-token");
-        assert.deepEqual(invalidToken, {
-            ok: false,
-            msg: "authInvalidToken",
-            msgi18n: true,
-        });
-
-        const settingsBefore = await emitWithCallback(socket, "getSettings");
-        assert.equal(settingsBefore.ok, true);
-        assert.equal(settingsBefore.data?.globalENV, "# VARIABLE=value #comment");
-
-        const setSettings = await emitWithCallback(socket, "setSettings", {
-            checkUpdate: false,
-            globalENV: "GLOBAL=value\n",
-        }, "StrongPassword123");
-        assert.deepEqual(setSettings, {
-            ok: true,
-            msg: "Saved",
-        });
-        assert.equal(await Settings.get("checkUpdate"), false);
-
-        const settingsAfter = await emitWithCallback(socket, "getSettings");
-        assert.equal(settingsAfter.data?.globalENV, "GLOBAL=value\n");
-
-        const changedPassword = await emitWithCallback(socket, "changePassword", {
-            currentPassword: "StrongPassword123",
-            newPassword: "NewStrongPassword123",
-        });
-        assert.deepEqual(changedPassword, {
-            ok: true,
-            msg: "Password has been updated successfully.",
-        });
-        const updatedUser = await User.findByUsername("admin");
-        assert.ok(updatedUser);
-        assert.equal(verifyPassword("NewStrongPassword123", updatedUser.password), true);
-
-        const composerized = await emitWithCallback(socket, "composerize", "docker run --name web nginx:latest");
-        assert.equal(composerized.ok, true);
-        assert.match(composerized.composeTemplate ?? "", /services:/);
-
-        const invalidComposerize = await emitWithCallback(socket, "composerize", 123);
-        assert.deepEqual(invalidComposerize, {
-            ok: false,
-            type: 1,
-            msg: "dockerRunCommand must be a string",
-            msgi18n: true,
-        });
-
-        await mkdir(`${stacksDir}/unused`, { recursive: true });
+        assert.equal(await server.shouldShowSetup(), false);
+        assert.equal(stacksDir.length > 0, true);
     });
 });
 
-test("MainSocketHandler login validates input before querying the database", async () => {
-    await withDatabase(async () => {
-        const handler = new MainSocketHandler();
-        assert.equal(await handler.login(123 as never, "password"), null);
-        assert.equal(await handler.login("missing", "password"), null);
+test("needsSetup reports whether this instance still has to create an account", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const socket = new TestSocket();
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const before = await emitWithCallback(socket, "needsSetup");
+        assert.equal(before.ok, true);
+        assert.equal(before.needsSetup, true);
+
+        await createTestAccount();
+
+        const after = await emitWithCallback(socket, "needsSetup");
+        assert.equal(after.needsSetup, false);
+    });
+});
+
+test("settings are refused for a client without a session", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const socket = new TestSocket();
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const read = await emitWithCallback(socket, "getSettings");
+        assert.equal(read.ok, false);
+        assert.match(String(read.msg), /not logged in/i);
+
+        const write = await emitWithCallback(socket, "setSettings", { primaryHostname: "evil.example.com" }, "");
+        assert.equal(write.ok, false);
+        assert.equal(await Settings.get("primaryHostname"), undefined);
+    });
+});
+
+test("a signed in client reads and writes the known settings only", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const saved = await emitWithCallback(socket, "setSettings", {
+            primaryHostname: "dockge.example.com",
+            checkUpdate: false,
+            // Not a general setting: it must not reach the database through this event
+            stackFiles: { evil: true },
+        }, TEST_PASSWORD);
+        assert.equal(saved.ok, true);
+
+        assert.equal(await Settings.get("primaryHostname"), "dockge.example.com");
+        assert.equal(await Settings.get("checkUpdate"), false);
+        assert.equal(await Settings.get("stackFiles"), undefined);
+
+        const read = await emitWithCallback(socket, "getSettings");
+        assert.equal(read.ok, true);
+        assert.equal(read.data?.primaryHostname, "dockge.example.com");
+    });
+});
+
+test("disabling authentication requires the current password", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const wrong = await emitWithCallback(socket, "setSettings", { disableAuth: true }, "wrong-password");
+        assert.equal(wrong.ok, false);
+        assert.equal(await Settings.get("disableAuth"), undefined);
+
+        const right = await emitWithCallback(socket, "setSettings", { disableAuth: true }, TEST_PASSWORD);
+        assert.equal(right.ok, true);
+        assert.equal(await Settings.get("disableAuth"), true);
+    });
+});
+
+test("the global env file is written and removed through the settings event", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const written = await emitWithCallback(socket, "setSettings", { globalENV: "GLOBAL=value\n" }, TEST_PASSWORD);
+        assert.equal(written.ok, true);
+        assert.equal(await readFile(path.join(stacksDir, "global.env"), "utf8"), "GLOBAL=value\n");
+
+        const cleared = await emitWithCallback(socket, "setSettings", { globalENV: "" }, TEST_PASSWORD);
+        assert.equal(cleared.ok, true);
+        await assert.rejects(readFile(path.join(stacksDir, "global.env"), "utf8"));
+    });
+});
+
+test("composerize converts a docker run command for a signed in client", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const converted = await emitWithCallback(socket, "composerize", "docker run -p 8080:80 nginx");
+        assert.equal(converted.ok, true);
+        assert.match(String(converted.composeTemplate), /nginx/);
+        assert.match(String(converted.composeTemplate), /8080:80/);
+
+        const refused = await emitWithCallback(socket, "composerize", 42);
+        assert.equal(refused.ok, false);
     });
 });

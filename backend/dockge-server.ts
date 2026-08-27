@@ -17,9 +17,8 @@ import { SocketHandler } from "./socket-handler";
 import { Settings } from "./settings";
 import checkVersion from "./check-version";
 import dayjs from "dayjs";
-import { genSecret, isDev, LooseObject } from "../common/util-common";
-import { generatePasswordHash } from "./password-hash";
-import { Arguments, Config, DockgeSocket } from "./util-server";
+import { isDev, LooseObject } from "../common/util-common";
+import { Arguments, Config, DockgeSocket, dropRevokedSessions } from "./util-server";
 import { DockerSocketHandler } from "./agent-socket-handlers/docker-socket-handler";
 import expressStaticGzip from "express-static-gzip";
 import path from "path";
@@ -27,7 +26,6 @@ import { TerminalSocketHandler } from "./agent-socket-handlers/terminal-socket-h
 import { Stack } from "./stack";
 import { Cron } from "croner";
 import gracefulShutdown from "http-graceful-shutdown";
-import User from "./models/user";
 import { spawn } from "./child-process";
 import { AgentManager } from "./agent-manager";
 import { AgentProxySocketHandler } from "./socket-handlers/agent-proxy-socket-handler";
@@ -35,6 +33,8 @@ import { AgentSocketHandler } from "./agent-socket-handler";
 import { AgentSocket } from "../common/agent-socket";
 import { ManageAgentSocketHandler } from "./socket-handlers/manage-agent-socket-handler";
 import { Terminal } from "./terminal";
+import { toNodeHandler } from "better-auth/node";
+import { AUTH_BASE_PATH, CLIENT_IP_HEADER, countUsers, getAuth, initAuth, resolveSocketIdentity, resolveTrustedOrigins, trustsProxyHeaders } from "./auth";
 
 export class DockgeServer {
     app : Express;
@@ -73,8 +73,6 @@ export class DockgeServer {
      * Show Setup Page
      */
     needSetup = false;
-
-    jwtSecret : string = "";
 
     stacksDir : string = "";
 
@@ -155,7 +153,11 @@ export class DockgeServer {
         this.config.enableConsole = args.enableConsole || process.env.DOCKGE_ENABLE_CONSOLE === "true" || false;
         this.stacksDir = this.config.stacksDir;
 
-        log.debug("server", this.config);
+        // The passphrase of the TLS key must not reach the log, even in development
+        log.debug("server", {
+            ...this.config,
+            sslKeyPassphrase: this.config.sslKeyPassphrase ? "<hidden>" : undefined,
+        });
 
         this.packageJSON = packageJSON as PackageJson;
 
@@ -185,6 +187,52 @@ export class DockgeServer {
             this.httpServer = http.createServer(this.app);
         }
 
+        // The auth handler has to see the raw body, so it is mounted before any parser
+        this.app.all(`${AUTH_BASE_PATH}/*`, (request, response, next) => {
+            // The address the auth layer counts attempts by comes from the connection,
+            // never from a header the caller could have written
+            delete request.headers[CLIENT_IP_HEADER];
+            request.headers[CLIENT_IP_HEADER] = this.resolveClientAddress(request);
+
+            // The UI and the backend do not always share an origin: the Vite dev server
+            // runs on its own port, and a deployment can be proxied under another host.
+            // Such a request carries the session cookie, so it needs an explicit origin
+            // and credentials allowance, and only trusted origins get one.
+            const browserOrigins = new Set(resolveTrustedOrigins(this, {
+                host: request.headers.host,
+                forwardedHost: firstHeaderValue(request.headers["x-forwarded-host"]),
+                forwardedProto: firstHeaderValue(request.headers["x-forwarded-proto"]),
+            }));
+
+            const origin = request.headers.origin;
+            const allowed = Boolean(origin) && browserOrigins.has(origin as string);
+
+            // Always, so a cached answer without CORS headers is not served to an
+            // origin that would have been allowed
+            response.setHeader("Vary", "Origin");
+
+            if (allowed) {
+                response.setHeader("Access-Control-Allow-Origin", origin as string);
+                response.setHeader("Access-Control-Allow-Credentials", "true");
+            }
+
+            // The preflight never reaches the auth handler, which answers it with a 404
+            if (request.method === "OPTIONS") {
+                if (!allowed) {
+                    response.sendStatus(403);
+                    return;
+                }
+
+                response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                response.setHeader("Access-Control-Allow-Headers", "content-type");
+                response.setHeader("Access-Control-Max-Age", "600");
+                response.sendStatus(204);
+                return;
+            }
+
+            toNodeHandler(getAuth())(request, response).catch(next);
+        });
+
         // Binding Routers
         for (const router of this.routerList) {
             this.app.use(router.create(this.app, this));
@@ -200,11 +248,14 @@ export class DockgeServer {
             response.send(this.indexHTML);
         });
 
-        // Allow all CORS origins in development
+        // In development the UI is served from the Vite port, so the socket is cross origin.
+        // The handshake carries the session cookie, and a credentialed request may not use
+        // a wildcard origin, so the trusted origins are listed explicitly.
         let cors : socketIO.ServerOptions["cors"];
         if (isDev) {
             cors = {
-                origin: "*",
+                origin: resolveTrustedOrigins(this),
+                credentials: true,
             };
         }
 
@@ -212,7 +263,7 @@ export class DockgeServer {
         const socketOptions: Partial<socketIO.ServerOptions> = {
             allowRequest: (req, callback) => {
                 let isOriginValid = true;
-                const bypass = isDev || process.env.UPTIME_KUMA_WS_ORIGIN_CHECK === "bypass";
+                const bypass = isDev || process.env.DOCKGE_WS_ORIGIN_CHECK === "bypass";
 
                 if (!bypass) {
                     let host = req.headers.host;
@@ -275,6 +326,11 @@ export class DockgeServer {
 
             this.sendInfo(dockgeSocket, true);
 
+            // Asked per connection, not from a flag decided at start up: the account is
+            // created through the auth endpoints, so the server would otherwise keep
+            // sending every new socket to the setup screen after setup was done
+            this.needSetup = await this.shouldShowSetup();
+
             if (this.needSetup) {
                 log.info("server", "Redirect to setup page");
                 dockgeSocket.emit("setup");
@@ -300,16 +356,23 @@ export class DockgeServer {
             // Better do anything after added all socket handlers here
             // ***************************
 
-            log.debug("auth", "check auto login");
-            if (await Settings.get("disableAuth")) {
-                log.info("auth", "Disabled Auth: auto login to admin");
-                const user = await User.findFirst();
-                if (user) {
-                    this.afterLogin(dockgeSocket, user);
+            // Who this socket is comes from the session cookie of the handshake,
+            // verified by better-auth. There is no login event on the socket any more.
+            const identity = await resolveSocketIdentity(socket.request.headers);
+
+            if (identity.userID) {
+                if (identity.autoLogin) {
+                    log.info("auth", "Disabled Auth: acting as the owner account");
+                }
+
+                await this.afterLogin(dockgeSocket, identity.userID);
+
+                if (identity.autoLogin) {
                     dockgeSocket.emit("autoLogin");
                 }
             } else {
-                log.debug("auth", "need auth");
+                log.debug("auth", "No session, the client has to sign in");
+                dockgeSocket.emit("needAuth");
             }
 
             // Socket disconnect
@@ -331,14 +394,31 @@ export class DockgeServer {
         }
     }
 
-    async afterLogin(socket : DockgeSocket, user : User) {
-        socket.userID = user.id;
-        socket.join(user.id.toString());
+    /**
+     * Whether the UI has to offer the setup screen.
+     *
+     * Read from the database on every question rather than kept in a flag: the account
+     * is created through the auth endpoints, and a stale flag would send the owner back
+     * to the setup screen on every reconnect.
+     * @returns Whether this instance still has no account
+     */
+    async shouldShowSetup() : Promise<boolean> {
+        return await countUsers() === 0;
+    }
+
+    /**
+     * Everything a socket needs once its user is known
+     * @param socket Client socket
+     * @param userID Identifier of the signed in user
+     */
+    async afterLogin(socket : DockgeSocket, userID : string) {
+        socket.userID = userID;
+        socket.join(userID);
 
         this.sendInfo(socket);
 
         try {
-            this.sendStackList();
+            await this.sendStackList();
         } catch (e) {
             log.error("server", e);
         }
@@ -359,6 +439,7 @@ export class DockgeServer {
         // Connect to database
         try {
             await Database.init(this);
+            await initAuth(this);
         } catch (e) {
             if (e instanceof Error) {
                 log.error("server", "Failed to prepare your database: " + e.message);
@@ -366,29 +447,12 @@ export class DockgeServer {
             process.exit(1);
         }
 
-        // First time setup if needed
-        const db = Database.getKnex();
-        let jwtSecretBean = await db("setting").where("key", "jwtSecret").first();
+        // First time setup if needed: the account itself is created through the auth
+        // endpoints, this only decides whether the UI shows the setup screen
+        this.needSetup = await this.shouldShowSetup();
 
-        if (! jwtSecretBean) {
-            log.info("server", "JWT secret is not found, generate one.");
-            jwtSecretBean = await this.initJWTSecret();
-            log.info("server", "Stored JWT secret into database");
-        } else {
-            log.debug("server", "Load JWT secret from database.");
-        }
-
-        this.jwtSecret = jwtSecretBean.value;
-
-        const userCountRow = await db("user").count("id as count").first();
-        const userCount = Number(userCountRow?.count ?? 0);
-
-        log.debug("server", "User count: " + userCount);
-
-        // If there is no record in user table, it is a new Dockge instance, need to setup
-        if (userCount == 0) {
-            log.info("server", "No user, need setup");
-            this.needSetup = true;
+        if (this.needSetup) {
+            log.info("server", "No account yet, the UI will ask to create one");
         }
 
         // Listen
@@ -405,6 +469,11 @@ export class DockgeServer {
             }, () => {
                 //log.debug("server", "Cron job running");
                 this.sendStackList(true);
+
+                // A socket is identified once, during its handshake, so a session that
+                // was signed out or revoked elsewhere has to lose its open sockets here
+                dropRevokedSessions(this.io.sockets.sockets.values() as Iterable<DockgeSocket>)
+                    .catch((e) => log.error("auth", e));
             });
 
             checkVersion.startInterval();
@@ -449,6 +518,29 @@ export class DockgeServer {
     }
 
     /**
+     * Address an HTTP request came from.
+     *
+     * The connection is the source of truth. A proxy header is only read when the
+     * operator declared that there is a proxy in front, because otherwise the caller
+     * writes that header itself and would choose its own rate limit bucket.
+     * @param request Incoming request
+     * @returns Address of the client
+     */
+    resolveClientAddress(request : express.Request) : string {
+        if (trustsProxyHeaders()) {
+            const forwardedFor = firstHeaderValue(request.headers["x-forwarded-for"]);
+            const realIP = firstHeaderValue(request.headers["x-real-ip"]);
+            const forwarded = forwardedFor?.split(",")[0]?.trim() || realIP?.trim();
+
+            if (forwarded) {
+                return forwarded;
+            }
+        }
+
+        return (request.socket.remoteAddress ?? "").replace(/^::ffff:/, "") || "unknown";
+    }
+
+    /**
      * Get the IP of the client connected to the socket
      * @param {Socket} socket Socket to query
      * @returns IP of client
@@ -460,7 +552,7 @@ export class DockgeServer {
             clientIP = "";
         }
 
-        if (await Settings.get("trustProxy")) {
+        if (trustsProxyHeaders() || await Settings.get("trustProxy")) {
             const forwardedFor = socket.client.conn.request.headers["x-forwarded-for"];
 
             if (typeof forwardedFor === "string") {
@@ -564,27 +656,6 @@ export class DockgeServer {
         }
 
         log.info("server", `Data Dir: ${this.config.dataDir}`);
-    }
-
-    /**
-     * Init or reset JWT secret
-     * @returns  JWT secret
-     */
-    async initJWTSecret() : Promise<{ value: string }> {
-        const db = Database.getKnex();
-        const value = generatePasswordHash(genSecret());
-        const setting = await db("setting").where("key", "jwtSecret").first();
-
-        if (setting) {
-            await db("setting").where("id", setting.id).update({ value });
-        } else {
-            await db("setting").insert({
-                key: "jwtSecret",
-                value,
-            });
-        }
-
-        return { value };
     }
 
     /**
@@ -708,7 +779,7 @@ export class DockgeServer {
      * @param {string} userID
      * @param {string?} currentSocketID
      */
-    disconnectAllSocketClients(userID: number | undefined, currentSocketID? : string) {
+    disconnectAllSocketClients(userID: string | undefined, currentSocketID? : string) {
         for (const rawSocket of this.io.sockets.sockets.values()) {
             let socket = rawSocket as DockgeSocket;
             if ((!userID || socket.userID === userID) && socket.id !== currentSocketID) {
@@ -726,10 +797,33 @@ export class DockgeServer {
         return this.config.sslKey && this.config.sslCert;
     }
 
+    /**
+     * Origin the server is reachable at, used as the auth base URL
+     * @returns Base URL without a trailing slash
+     */
+    getBaseURL() {
+        const protocol = this.isSSL() ? "https" : "http";
+        const host = this.config.hostname || "localhost";
+        return `${protocol}://${host}:${this.config.port}`;
+    }
+
     getLocalWebSocketURL() {
         const protocol = this.isSSL() ? "wss" : "ws";
         const host = this.config.hostname || "localhost";
         return `${protocol}://${host}:${this.config.port}`;
     }
 
+}
+
+/**
+ * First value of a header that may arrive several times
+ * @param value Header value as Node reports it
+ * @returns Single value, or undefined when the header is absent
+ */
+function firstHeaderValue(value : string | string[] | undefined) : string | undefined {
+    if (Array.isArray(value)) {
+        return value[0];
+    }
+
+    return value;
 }

@@ -10,6 +10,7 @@ const stacksDir = process.env.DOCKGE_E2E_STACKS_DIR ?? "/tmp/dockge-e2e/stacks";
 
 export default defineConfig({
     testDir: "./test/e2e",
+    globalSetup: "./test/e2e/global-setup.ts",
     globalTeardown: "./test/e2e/global-teardown.ts",
     timeout: 60_000,
     expect: {
@@ -21,6 +22,8 @@ export default defineConfig({
     reporter: process.env.CI ? [[ "list" ], [ "github" ]] : [[ "list" ]],
     use: {
         baseURL: "http://localhost:5000",
+        // Signed in by the global setup: the session is a cookie, so the state carries it
+        storageState: "test/e2e/.auth/state.json",
         trace: "retain-on-failure",
         permissions: [ "clipboard-read", "clipboard-write" ],
         ...devices["Desktop Chrome"],
@@ -36,7 +39,7 @@ export default defineConfig({
     ],
     webServer: [
         {
-            // The seed runs first, so the backend starts with an admin and disabled auth
+            // The seed runs first, so the backend starts with the owner account in place
             command: "cross-env NODE_ENV=development tsx ./test/e2e/seed.ts && cross-env NODE_ENV=development tsx ./backend/index.ts",
             url: "http://localhost:5001",
             reuseExistingServer: !process.env.CI,

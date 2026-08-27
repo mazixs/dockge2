@@ -1,7 +1,8 @@
 import { io } from "socket.io-client";
 import { Socket } from "socket.io-client";
 import { defineComponent } from "vue";
-import { jwtDecode } from "jwt-decode";
+import { authClient } from "../auth-client";
+import { authErrorMessage, isTotpCode } from "../auth-messages";
 import { Terminal } from "@xterm/xterm";
 import { AgentSocket } from "../../../common/agent-socket";
 
@@ -32,22 +33,15 @@ interface SocketInfo {
 
 interface SocketResponse {
     ok?: boolean;
-    tokenRequired?: boolean;
-    token?: string;
     endpoint?: string;
     msg?: string;
     [key: string]: unknown;
-}
-
-interface LoginCallback {
-    (response: SocketResponse): void;
 }
 
 export default defineComponent({
     data() {
         return {
             socketIO: {
-                token: null as string | null,
                 firstConnect: true,
                 connected: false,
                 connectCount: 0,
@@ -57,9 +51,11 @@ export default defineComponent({
                 connecting: false,
             },
             info: {} as SocketInfo,
-            remember: (localStorage.remember !== "0"),
             loggedIn: false,
             allowLoginDialog: false,
+
+            /** True when this instance runs with authentication switched off */
+            authDisabled: false,
             username: null as string | null,
             composeTemplate: "",
 
@@ -146,13 +142,11 @@ export default defineComponent({
             }
         },
 
-        remember() {
-            localStorage.remember = (this.remember) ? "1" : "0";
-        },
-
         // Reload the SPA if the server version is changed.
         "info.version"(to, from) {
-            if (from && from !== to) {
+            // The first info packet of a connection deliberately carries no version, so
+            // a reconnect must not be mistaken for a server that was upgraded
+            if (from && to && from !== to) {
                 window.location.reload();
             }
         },
@@ -161,8 +155,7 @@ export default defineComponent({
         this.initSocketIO();
     },
     mounted() {
-        return;
-
+        // Nothing to do: the socket is created in `created()`
     },
     methods: {
 
@@ -203,7 +196,11 @@ export default defineComponent({
                 this.socketIO.connecting = true;
             }, 1500);
 
-            socket = io(url);
+            // withCredentials sends the session cookie during the handshake, which is how
+            // the server identifies this client. No token is kept in the browser.
+            socket = io(url, {
+                withCredentials: true,
+            });
 
             // Handling events from agents
             let agentSocket = new AgentSocket();
@@ -222,24 +219,10 @@ export default defineComponent({
                 this.socketIO.connectCount++;
                 this.socketIO.connected = true;
                 this.socketIO.showReverseProxyGuide = false;
-                const token = this.storage().token;
 
-                if (token) {
-                    if (token !== "autoLogin") {
-                        console.log("Logging in by token");
-                        this.loginByToken(token);
-                    } else {
-                        // Timeout if it is not actually auto login
-                        setTimeout(() => {
-                            if (! this.loggedIn) {
-                                this.allowLoginDialog = true;
-                                this.storage().removeItem("token");
-                            }
-                        }, 5000);
-                    }
-                } else {
-                    this.allowLoginDialog = true;
-                }
+                // The server tells us through `needAuth` or by acting as a logged in
+                // client, so the UI only has to read the session for its display name
+                this.refreshSession();
 
                 this.socketIO.firstConnect = false;
             });
@@ -266,16 +249,24 @@ export default defineComponent({
             });
 
             socket.on("autoLogin", () => {
+                // Authentication is disabled in the settings
+                this.authDisabled = true;
                 this.loggedIn = true;
-                this.storage().token = "autoLogin";
-                this.socketIO.token = "autoLogin";
                 this.allowLoginDialog = false;
                 this.afterLogin();
             });
 
+            socket.on("needAuth", () => {
+                this.authDisabled = false;
+                this.loggedIn = false;
+                this.username = null;
+                this.allowLoginDialog = true;
+            });
+
             socket.on("setup", () => {
-                console.log("setup");
-                this.$router.push("/setup");
+                if (this.$router.currentRoute.value.path !== "/setup") {
+                    this.$router.push("/setup");
+                }
             });
 
             agentSocket.on("terminalWrite", (...args: unknown[]) => {
@@ -343,14 +334,6 @@ export default defineComponent({
             });
         },
 
-        /**
-         * The storage currently in use
-         * @returns Current storage
-         */
-        storage() : Storage {
-            return (this.remember) ? localStorage : sessionStorage;
-        },
-
         getSocket() : Socket {
             return socket;
         },
@@ -360,71 +343,142 @@ export default defineComponent({
         },
 
         /**
-         * Get payload of JWT cookie
-         * @returns {(object | undefined)} JWT payload
+         * Read the current session from the server and remember who is signed in
+         * @returns {Promise<boolean>} Whether a session exists
          */
-        getJWTPayload() {
-            const jwtToken = this.storage().token;
+        async refreshSession() : Promise<boolean> {
+            const { data, error } = await authClient.getSession();
 
-            if (jwtToken && jwtToken !== "autoLogin") {
-                return jwtDecode<{ username?: string }>(jwtToken);
+            if (data?.user) {
+                this.authDisabled = false;
+                this.loggedIn = true;
+                this.username = data.user.name || data.user.email;
+                this.allowLoginDialog = false;
+                this.afterLogin();
+                return true;
             }
-            return undefined;
+
+            // An instance with authentication switched off has no session by design,
+            // and a failed request must not throw the user out of a working session
+            if (this.authDisabled || error) {
+                return false;
+            }
+
+            this.loggedIn = false;
+            this.username = null;
+            this.allowLoginDialog = true;
+            return false;
         },
 
         /**
-         * Send request to log user in
-         * @param {string} username Username to log in with
-         * @param {string} password Password to log in with
-         * @param {string} token User token
-         * @param {loginCB} callback Callback to call with result
-         * @returns {void}
+         * Sign in with email and password.
+         * The server sets an httpOnly session cookie, then the socket reconnects so the
+         * handshake carries it.
+         * @param {string} email Address of the account
+         * @param {string} password Password of the account
+         * @returns {Promise<object>} Result with `ok`, `msg` and `twoFactorRequired`
          */
-        login(username : string, password : string, token : string, callback: LoginCallback) {
-            this.getSocket().emit("login", {
-                username,
+        async signIn(email : string, password : string) : Promise<SocketResponse> {
+            const { data, error } = await authClient.signIn.email({
+                email,
                 password,
-                token,
-            }, (res: SocketResponse) => {
-                if (res.tokenRequired) {
-                    callback(res);
-                }
-
-                if (res.ok) {
-                    if (typeof res.token !== "string") {
-                        return;
-                    }
-                    this.storage().token = res.token;
-                    this.socketIO.token = res.token;
-                    this.loggedIn = true;
-                    this.username = this.getJWTPayload()?.username ?? null;
-
-                    this.afterLogin();
-
-                    // Trigger Chrome Save Password
-                    history.pushState({}, "");
-                }
-
-                callback(res);
             });
+
+            if (error) {
+                return {
+                    ok: false,
+                    msg: authErrorMessage(error),
+                };
+            }
+
+            // With two factor on, the password alone only opens a challenge
+            if ((data as { twoFactorRedirect? : boolean } | null)?.twoFactorRedirect) {
+                return {
+                    ok: false,
+                    twoFactorRequired: true,
+                };
+            }
+
+            return this.finishSignIn();
         },
 
         /**
-         * Log in using a token
-         * @param {string} token Token to log in with
-         * @returns {void}
+         * Answer the two factor challenge of a sign-in that is already under way.
+         *
+         * A code of six digits is a TOTP code, everything else is treated as a backup
+         * code, which is what the setup dialog hands out for a lost authenticator.
+         * @param {string} code Code the user typed
+         * @returns {Promise<object>} Result with `ok` and `msg`
          */
-        loginByToken(token : string) {
-            socket.emit("loginByToken", token, (res: SocketResponse) => {
-                this.allowLoginDialog = true;
+        async verifyTwoFactor(code : string) : Promise<SocketResponse> {
+            const trimmed = code.trim();
 
-                if (! res.ok) {
-                    this.logout();
-                } else {
-                    this.loggedIn = true;
-                    this.username = this.getJWTPayload()?.username ?? null;
-                    this.afterLogin();
+            const { error } = isTotpCode(trimmed)
+                ? await authClient.twoFactor.verifyTotp({ code: trimmed })
+                : await authClient.twoFactor.verifyBackupCode({ code: trimmed });
+
+            if (error) {
+                return {
+                    ok: false,
+                    twoFactorRequired: true,
+                    msg: authErrorMessage(error),
+                };
+            }
+
+            return this.finishSignIn();
+        },
+
+        /**
+         * Hand the fresh session to the socket and remember who is signed in.
+         * Doing it here rather than in the `connect` handler keeps the login form from
+         * staying on screen while a second request is still in flight.
+         * @returns {Promise<object>} Result with `ok` and `msg`
+         */
+        async finishSignIn() : Promise<SocketResponse> {
+            const connected = await this.reconnectSocket();
+
+            if (!connected) {
+                return {
+                    ok: false,
+                    msg: "reconnectFailed",
+                };
+            }
+
+            await this.refreshSession();
+
+            return { ok: true };
+        },
+
+        /**
+         * Reconnect the socket, so the handshake runs again with the current cookie.
+         * A server that went away must not leave the caller waiting forever, so this
+         * gives up after a few seconds and reports the failure.
+         * @param {number} timeoutMs How long to wait for the connection
+         * @returns {Promise<boolean>} Whether the socket is connected again
+         */
+        reconnectSocket(timeoutMs = 10000) : Promise<boolean> {
+            socket.disconnect();
+            socket.connect();
+
+            return new Promise<boolean>((resolve) => {
+                if (socket.connected) {
+                    resolve(true);
+                    return;
                 }
+
+                const done = (connected : boolean) => {
+                    clearTimeout(timer);
+                    socket.off("connect", onConnect);
+                    socket.off("connect_error", onError);
+                    resolve(connected);
+                };
+
+                const onConnect = () => done(true);
+                const onError = () => done(false);
+                const timer = setTimeout(() => done(socket.connected), timeoutMs);
+
+                socket.once("connect", onConnect);
+                socket.once("connect_error", onError);
             });
         },
 
@@ -432,20 +486,40 @@ export default defineComponent({
          * Log out of the web application
          * @returns {void}
          */
-        logout() {
-            socket.emit("logout", () => { });
-            this.storage().removeItem("token");
-            this.socketIO.token = null;
+        async logout() : Promise<SocketResponse> {
+            const { error } = await authClient.signOut();
+
+            if (error) {
+                // The cookie is still valid, so pretending to be signed out would be a lie
+                return {
+                    ok: false,
+                    msg: authErrorMessage(error),
+                };
+            }
+
+            this.authDisabled = false;
             this.loggedIn = false;
             this.username = null;
+            this.allowLoginDialog = true;
             this.clearData();
+
+            // The socket must lose its session as well
+            await this.reconnectSocket();
+
+            return { ok: true };
         },
 
         /**
+         * Drop everything that belonged to the session that just ended, so the next
+         * user of this browser does not see the previous stack list for a moment
          * @returns {void}
          */
         clearData() {
-
+            this.stackList = {};
+            this.allAgentStackList = {};
+            this.agentList = {};
+            this.agentStatusList = {};
+            this.composeTemplate = "";
         },
 
         afterLogin() {

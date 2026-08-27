@@ -42,7 +42,7 @@ Three test layers, deliberately without stubs for the boundaries they exercise:
 
 - **Unit** (`test/backend`, `test/common`, `test/frontend`) — real temp filesystem, real child processes, real `vue-i18n`.
 - **Docker** (`test/docker/*.integration.test.ts`) — skipped unless `DOCKGE_DOCKER_INTEGRATION=1`; they start real Compose projects, so they must clean up in `finally`.
-- **Browser** (`test/e2e/*.spec.ts`) — Playwright starts its own backend and frontend, `test/e2e/seed.ts` seeds a temp data dir, enables `disableAuth` and runs containers. The clipboard, xterm, Socket.IO and Docker are the real ones.
+- **Browser** (`test/e2e/*.spec.ts`) — Playwright starts its own backend and frontend, `test/e2e/seed.ts` seeds a temp data dir with the owner account and runs containers, and `test/e2e/global-setup.ts` signs in once so every spec inherits the session cookie (`test/e2e/auth.spec.ts` opts out to drive the login form itself). The clipboard, xterm, Socket.IO and Docker are the real ones.
 
 CI (`.github/workflows/ci.yml`) runs lint → check-ts → test → build on Linux/Windows/macOS × Node 22.23.2/24.19.0, plus a Linux job for the Docker tests and one for the browser tests.
 
@@ -52,7 +52,7 @@ CI (`.github/workflows/ci.yml`) runs lint → check-ts → test → build on Lin
 
 There are almost no REST endpoints (`backend/routers/main-router.ts` only serves the SPA and entry HTML). Everything the UI does is a Socket.IO event with an ack callback returning `{ ok, msg?, msgi18n? }`. `DockgeServer` (`backend/dockge-server.ts`) wires, per connection, three kinds of handlers:
 
-- **`socketHandlerList`** — `SocketHandler` subclasses, no agent support: auth/setup/settings (`main-socket-handler.ts`), agent CRUD (`manage-agent-socket-handler.ts`).
+- **`socketHandlerList`** — `SocketHandler` subclasses, no agent support: setup check and settings (`main-socket-handler.ts`), agent CRUD (`manage-agent-socket-handler.ts`).
 - **`agentSocketHandlerList`** — `AgentSocketHandler` subclasses that register on an `AgentSocket`, not the raw socket: stack lifecycle (`docker-socket-handler.ts`) and terminals (`terminal-socket-handler.ts`).
 - **`agentProxySocketHandler`** — the single `"agent"` event router.
 
@@ -90,19 +90,31 @@ Ending a session is not one call: `close()` only sends Ctrl+C, which an idle she
 
 On the frontend, the interactive terminal subscribes to `onData`, not `onKey`: `onData` carries both typed keys and pasted text, which is why native paste works at all. `attachCustomKeyEventHandler` hands Ctrl+V / Ctrl+Shift+V / Cmd+V to the browser, and the limited main console gets paste through the real `paste` event of the hidden xterm textarea. Never log clipboard or selection content.
 
+### Authentication
+
+Better Auth owns people's sessions (`backend/auth.ts`): its handler is mounted at `/api/auth/*` **before** any body parser, because it needs the raw body. Sessions are server rows behind an `httpOnly`, `SameSite=Lax` cookie — nothing lives in browser storage — and `Secure` is added only when the server runs HTTPS. The Socket.IO handshake resolves that cookie into `socket.userID` (`afterLogin`), so there is no login event on the socket; `disableAuth` still short-circuits it for reverse-proxy setups. `doubleCheckPassword` confirms a dangerous action through `auth.api.verifyPassword` with the cookie of that same socket, so a session cannot confirm on behalf of another.
+
+Only one account may exist: a `databaseHooks.user.create.before` hook refuses the second sign-up, and `npm run reset-account` removes the account plus its sessions in one transaction when access is lost. The `twoFactor` plugin provides TOTP and backup codes; both confirming and disabling a second factor rotate the session, which is why `TwoFADialog` and the password form reconnect the socket afterwards — a socket identified with a dead cookie can no longer confirm anything.
+
+Three details are easy to get wrong:
+
+- **Origins.** A self-hosted panel has no fixed address, so `resolveTrustedOrigins(server, requestOrigins(request))` accepts the origin that matches the host the browser itself asked for (plus `DOCKGE_TRUSTED_ORIGINS`, plus the dev server). A fetch-style `Request` carries no `Host` header, so the host is taken from its URL. The same function feeds the hand-rolled CORS layer for `/api/auth/*`; a foreign origin gets 403 on preflight and no credentials header.
+- **Rate limits.** better-auth keys them by IP, and it reads that IP from a header. The Express middleware overwrites `x-dockge-client-ip` (`CLIENT_IP_HEADER`) with the address of the connection, and `advanced.ipAddress.ipAddressHeaders` points at only that header, so a client cannot invent a new bucket per attempt. `X-Forwarded-For` is believed only when `DOCKGE_TRUST_PROXY` is set.
+- **Live sessions.** `checkLogin` looks at `socket.userID`, decided once at handshake time, so `dropRevokedSessions()` runs in the 10-second cron and disconnects clients whose session is gone. `doubleCheckPassword` throttles wrong answers (5 per minute per account) and, when `disableAuth` is on and there is no session at all, verifies against the owner's stored hash through `verifyAccountPassword`.
+
 ### Shared code and frontend
 
 `common/` is the only code imported by both sides: status constants, terminal-name helpers, `envsubst`, YAML comment copying, port parsing. Put anything the UI and server must agree on here.
 
-The frontend is Vue 3 options-API SFCs with mixins as the state layer: `frontend/src/mixins/socket.ts` owns the socket connection, login/JWT, `stackList`/`allAgentStackList`/`agentStatusList`, and `emitAgent`. Pages are in `frontend/src/pages/`, and Bootstrap-Vue-Next components are auto-imported (`frontend/components.d.ts` is generated — don't hand-edit).
+The frontend is Vue 3 options-API SFCs with mixins as the state layer: `frontend/src/mixins/socket.ts` owns the socket connection, the session (via `frontend/src/auth-client.ts`), `stackList`/`allAgentStackList`/`agentStatusList`, and `emitAgent`. Pages are in `frontend/src/pages/`, and Bootstrap-Vue-Next components are auto-imported (`frontend/components.d.ts` is generated — don't hand-edit).
 
 ## Conventions
 
 Follow `.editorconfig` and ESLint: 4-space indent (2 for YAML), LF, double quotes, semicolons, `array-bracket-spacing: always`, JSDoc on non-obvious methods. Naming: `camelCase` in TS/JS, `snake_case` for SQLite columns, `kebab-case` for CSS/SCSS.
 
-Settings belong in the UI (`Settings` table + settings components), not in new environment variables; env vars are reserved for startup concerns (`DOCKGE_STACKS_DIR`, `DOCKGE_PORT`, `DOCKGE_DATA_DIR`, `DOCKGE_SSL_*`, `DOCKGE_ENABLE_CONSOLE`).
+Settings belong in the UI (`Settings` table + settings components), not in new environment variables; env vars are reserved for startup concerns (`DOCKGE_STACKS_DIR`, `DOCKGE_PORT`, `DOCKGE_DATA_DIR`, `DOCKGE_SSL_*`, `DOCKGE_ENABLE_CONSOLE`, `DOCKGE_TRUSTED_ORIGINS`, `DOCKGE_TRUST_PROXY`, `DOCKGE_SECURE_COOKIES`, `DOCKGE_AUTH_SECRET`).
 
-Translations: add new keys to `frontend/src/lang/en.json` only. A CI job (`prevent-file-change.yml`) blocks changes to any other `frontend/src/lang/*.json`.
+Translations: `frontend/src/lang/en.json` is the source of truth for new keys, and `ru.json` is kept complete next to it. The other locales are edited only when a key's markup or meaning changes (upstream's Weblate guard `prevent-file-change.yml` was removed with the fork, because this repository has no translation bot). Never put HTML in a message: `<i18n-t>` with named slots renders markup, and vue-i18n warns about the rest.
 
 Never add a socket event that lets the browser run arbitrary git/shell/Docker commands, and treat compose/env/secret filenames as safe relative names inside the stack directory (reject absolute paths, `..`, and symlinks).
 

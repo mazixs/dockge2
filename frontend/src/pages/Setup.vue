@@ -23,17 +23,18 @@
                 </div>
 
                 <div class="form-floating mt-3">
-                    <input id="floatingInput" v-model="username" type="text" class="form-control" :placeholder="$t('Username')" required data-cy="username-input">
-                    <label for="floatingInput">{{ $t("Username") }}</label>
+                    <input id="floatingInput" v-model="email" type="email" class="form-control" placeholder="you@example.com" autocomplete="username" required data-cy="email-input">
+                    <label for="floatingInput">{{ $t("Email") }}</label>
                 </div>
 
                 <div class="form-floating mt-3">
-                    <input id="floatingPassword" v-model="password" type="password" class="form-control" :placeholder="$t('Password')" required data-cy="password-input">
+                    <input id="floatingPassword" v-model="password" type="password" class="form-control" :placeholder="$t('Password')" autocomplete="new-password" :minlength="minPasswordLength" required data-cy="password-input">
                     <label for="floatingPassword">{{ $t("Password") }}</label>
                 </div>
+                <p class="form-text text-start">{{ $t("passwordMinLengthHint") }}</p>
 
                 <div class="form-floating mt-3">
-                    <input id="repeat" v-model="repeatPassword" type="password" class="form-control" :placeholder="$t('Repeat Password')" required data-cy="password-repeat-input">
+                    <input id="repeat" v-model="repeatPassword" type="password" class="form-control" :placeholder="$t('Repeat Password')" autocomplete="new-password" :minlength="minPasswordLength" required data-cy="password-repeat-input">
                     <label for="repeat">{{ $t("Repeat Password") }}</label>
                 </div>
 
@@ -46,13 +47,15 @@
 </template>
 
 <script>
+import { authClient } from "../auth-client";
+import { authErrorMessage } from "../auth-messages";
 import { availableLanguages } from "../i18n";
 
 export default {
     data() {
         return {
             processing: false,
-            username: "",
+            email: "",
             password: "",
             repeatPassword: "",
         };
@@ -65,6 +68,14 @@ export default {
         availableLanguages() {
             return availableLanguages();
         },
+
+        /**
+         * Shortest password the server accepts, mirrored from `backend/auth.ts`
+         * @returns {number} Minimum length
+         */
+        minPasswordLength() {
+            return 10;
+        },
     },
     watch: {
 
@@ -72,8 +83,8 @@ export default {
     mounted() {
         // TODO: Check if it is a database setup
 
-        this.$root.getSocket().emit("needSetup", (needSetup) => {
-            if (! needSetup) {
+        this.$root.getSocket().emit("needsSetup", (res) => {
+            if (res?.ok && !res.needsSetup) {
                 this.$router.push("/");
             }
         });
@@ -83,7 +94,7 @@ export default {
          * Submit form data for processing
          * @returns {void}
          */
-        submit() {
+        async submit() {
             this.processing = true;
 
             if (this.password !== this.repeatPassword) {
@@ -92,19 +103,33 @@ export default {
                 return;
             }
 
-            this.$root.getSocket().emit("setup", this.username, this.password, (res) => {
+            // Said here as well as by the server, so the answer is immediate
+            if (this.password.length < this.minPasswordLength) {
+                this.$root.toastError("authPasswordTooShort");
                 this.processing = false;
-                this.$root.toastRes(res);
+                return;
+            }
 
-                if (res.ok) {
-                    this.processing = true;
+            try {
+                // The account is created through the auth endpoint, which signs the
+                // browser in and sets the session cookie in the same request
+                const { error } = await authClient.signUp.email({
+                    email: this.email,
+                    password: this.password,
+                    name: this.email,
+                });
 
-                    this.$root.login(this.username, this.password, "", () => {
-                        this.processing = false;
-                        this.$router.push("/");
-                    });
+                if (error) {
+                    this.$root.toastError(authErrorMessage(error));
+                    return;
                 }
-            });
+
+                await this.$root.reconnectSocket();
+                await this.$root.refreshSession();
+                this.$router.push("/");
+            } finally {
+                this.processing = false;
+            }
         },
     },
 };

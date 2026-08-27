@@ -1,5 +1,5 @@
 <template>
-    <form @submit.prevent="submit">
+    <form @submit.prevent="confirmEnableTwoFA">
         <div ref="modal" class="modal fade" tabindex="-1" data-bs-backdrop="static">
             <div class="modal-dialog">
                 <div class="modal-content">
@@ -29,6 +29,7 @@
                                     type="password"
                                     class="form-control"
                                     autocomplete="current-password"
+                                    :disabled="processing"
                                     required
                                 />
                             </div>
@@ -42,18 +43,21 @@
                             </button>
 
                             <div v-if="uri && twoFAStatus == false" class="mt-3">
-                                <label for="basic-url" class="form-label">{{ $t("twoFAVerifyLabel") }}</label>
-                                <div class="input-group">
-                                    <input v-model="token" type="text" maxlength="6" class="form-control" autocomplete="one-time-code" required>
-                                    <button class="btn btn-outline-primary" type="button" @click="verifyToken()">{{ $t("Verify Token") }}</button>
-                                </div>
-                                <p v-show="tokenValid" class="mt-2" style="color: green;">{{ $t("tokenValidSettingsMsg") }}</p>
+                                <label for="totp-code" class="form-label">{{ $t("twoFAVerifyLabel") }}</label>
+                                <input id="totp-code" v-model="token" type="text" maxlength="6" class="form-control" autocomplete="one-time-code" :disabled="processing" required>
+                            </div>
+
+                            <!-- Shown once: these are the only way back in without the authenticator -->
+                            <div v-if="backupCodes.length > 0" class="mt-3">
+                                <label class="form-label">{{ $t("backupCodes") }}</label>
+                                <p class="form-text">{{ $t("backupCodesHint") }}</p>
+                                <pre class="backup-codes">{{ backupCodes.join("\n") }}</pre>
                             </div>
                         </div>
                     </div>
 
                     <div v-if="uri && twoFAStatus == false" class="modal-footer">
-                        <button type="submit" class="btn btn-primary" :disabled="processing || tokenValid == false" @click="confirmEnableTwoFA()">
+                        <button type="submit" class="btn btn-primary" :disabled="processing || !token">
                             <div v-if="processing" class="spinner-border spinner-border-sm me-1"></div>
                             {{ $t("Save") }}
                         </button>
@@ -75,6 +79,8 @@
 <script lang="ts">
 import { Modal } from "bootstrap";
 import Confirm from "./Confirm.vue";
+import { authClient } from "../auth-client";
+import { authErrorMessage } from "../auth-messages";
 import VueQrcode from "vue-qrcode";
 import { toast } from "vue3-toastify";
 
@@ -89,10 +95,11 @@ export default {
             currentPassword: "",
             processing: false,
             uri: null,
-            tokenValid: false,
             twoFAStatus: null,
             token: null,
             showURI: false,
+            /** Codes to use when the authenticator is unavailable */
+            backupCodes: [],
         };
     },
     mounted() {
@@ -115,77 +122,110 @@ export default {
             this.$refs.confirmDisableTwoFA.show();
         },
 
-        /** Prepare 2FA configuration */
-        prepare2FA() {
+        /**
+         * Ask the server for a TOTP URI. Enabling two factor needs the password,
+         * so a stolen session alone cannot change the second factor.
+         * @returns {Promise<void>}
+         */
+        async prepare2FA() {
             this.processing = true;
 
-            this.$root.getSocket().emit("prepare2FA", this.currentPassword, (res) => {
-                this.processing = false;
+            try {
+                const { data, error } = await authClient.twoFactor.enable({
+                    password: this.currentPassword,
+                });
 
-                if (res.ok) {
-                    this.uri = res.uri;
-                } else {
-                    toast.error(res.msg);
+                if (error) {
+                    toast.error(authErrorMessage(error));
+                    return;
                 }
-            });
+
+                this.uri = data?.totpURI ?? null;
+                this.backupCodes = data?.backupCodes ?? [];
+            } finally {
+                this.processing = false;
+            }
         },
 
-        /** Save the current 2FA configuration */
-        save2FA() {
+        /**
+         * Confirm the setup with a generated code, which is what actually turns it on
+         * @returns {Promise<void>}
+         */
+        async save2FA() {
             this.processing = true;
 
-            this.$root.getSocket().emit("save2FA", this.currentPassword, (res) => {
-                this.processing = false;
+            try {
+                const { error } = await authClient.twoFactor.verifyTotp({
+                    code: this.token ?? "",
+                });
 
-                if (res.ok) {
-                    this.$root.toastRes(res);
-                    this.getStatus();
-                    this.currentPassword = "";
-                    this.modal.hide();
-                } else {
-                    toast.error(res.msg);
+                if (error) {
+                    toast.error(authErrorMessage(error));
+                    return;
                 }
-            });
+
+                // Confirming the code replaces the session, so the socket has to shake
+                // hands again with the fresh cookie before it confirms anything else
+                await this.$root.reconnectSocket();
+
+                this.$root.toastSuccess("Saved");
+                await this.getStatus();
+                this.currentPassword = "";
+                this.token = null;
+                this.uri = null;
+                this.backupCodes = [];
+                this.modal.hide();
+            } finally {
+                this.processing = false;
+            }
         },
 
-        /** Disable 2FA for this user */
-        disable2FA() {
+        /**
+         * Turn two factor off, again with the password
+         * @returns {Promise<void>}
+         */
+        async disable2FA() {
             this.processing = true;
 
-            this.$root.getSocket().emit("disable2FA", this.currentPassword, (res) => {
+            try {
+                const { error } = await authClient.twoFactor.disable({
+                    password: this.currentPassword,
+                });
+
+                if (error) {
+                    toast.error(authErrorMessage(error));
+                    return;
+                }
+
+                // Turning it off replaces the session, exactly like turning it on
+                await this.$root.reconnectSocket();
+
+                this.$root.toastSuccess("Saved");
+                await this.getStatus();
+                this.currentPassword = "";
+                this.uri = null;
+                this.backupCodes = [];
+                this.modal.hide();
+            } finally {
                 this.processing = false;
-
-                if (res.ok) {
-                    this.$root.toastRes(res);
-                    this.getStatus();
-                    this.currentPassword = "";
-                    this.modal.hide();
-                } else {
-                    toast.error(res.msg);
-                }
-            });
+            }
         },
 
-        /** Verify the token generated by the user */
-        verifyToken() {
-            this.$root.getSocket().emit("verifyToken", this.token, this.currentPassword, (res) => {
-                if (res.ok) {
-                    this.tokenValid = res.valid;
-                } else {
-                    toast.error(res.msg);
-                }
-            });
-        },
+        /**
+         * Whether two factor is enabled for the account of this session
+         * @returns {Promise<void>}
+         */
+        async getStatus() {
+            const { data, error } = await authClient.getSession();
 
-        /** Get current status of 2FA */
-        getStatus() {
-            this.$root.getSocket().emit("twoFAStatus", (res) => {
-                if (res.ok) {
-                    this.twoFAStatus = res.status;
-                } else {
-                    toast.error(res.msg);
-                }
-            });
+            // A failed request must not claim that two factor is off, because the dialog
+            // would then offer to enable it on an account that already has it
+            if (error || !data?.user) {
+                this.twoFAStatus = null;
+                return;
+            }
+
+            this.twoFAStatus = Boolean((data.user as { twoFactorEnabled? : boolean }).twoFactorEnabled);
         },
     },
 };
@@ -193,6 +233,13 @@ export default {
 
 <style lang="scss" scoped>
 @import "../styles/vars.scss";
+
+.backup-codes {
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    background-color: rgba(127, 127, 127, 0.15);
+    font-family: monospace;
+}
 
 .dark {
     .modal-dialog .form-text, .modal-dialog p {
