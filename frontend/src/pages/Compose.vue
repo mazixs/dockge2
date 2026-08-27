@@ -1127,7 +1127,7 @@ export default {
 }
 
 .editor-box {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 14px;
 }
 

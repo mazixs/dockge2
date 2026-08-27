@@ -98,7 +98,7 @@ export default {
 
         this.terminal = new Terminal({
             fontSize: 14,
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
             cursorBlink,
             cols: this.cols,
             rows: this.rows,

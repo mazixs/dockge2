@@ -88,7 +88,7 @@ export default {
 
 <style scoped lang="scss">
 .editor-box {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 14px;
 
     &.edit-mode {

@@ -383,7 +383,7 @@ table {
 
 .docker-run {
     border: none;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 15px;
 }
 
