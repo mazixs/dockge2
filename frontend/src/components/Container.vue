@@ -11,7 +11,7 @@
                         <font-awesome-icon v-if="needsAttention" icon="triangle-exclamation" class="me-1" />{{ statusLabel }}
                     </span>
 
-                    <a v-for="port in (ports ?? envsubstService.ports)" :key="port" :href="parsePort(port).url" target="_blank">
+                    <a v-for="port in (envsubstService.ports ?? [])" :key="port" :href="parsePort(port).url" target="_blank">
                         <span class="badge me-1 bg-secondary">{{ parsePort(port).display }}</span>
                     </a>
 
@@ -230,6 +230,11 @@ export default defineComponent({
         dockerStats: {
             type: Object,
             default: null
+        },
+        /** True while the page runs a stack operation, disables the action buttons */
+        processing: {
+            type: Boolean,
+            default: false,
         }
     },
     emits: [

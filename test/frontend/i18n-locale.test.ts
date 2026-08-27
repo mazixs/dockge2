@@ -39,3 +39,21 @@ test("locale switching works in Composition API mode", () => {
     assert.equal(i18n.global.locale.value, "ru");
     assert.equal(i18n.global.t("hello"), "Привет");
 });
+
+test("the application i18n instance runs in Composition API mode", async () => {
+    // The app instance is built with legacy: false, because the Legacy API is removed in v12
+    const { i18n, availableLanguages } = await import("../../frontend/src/i18n");
+
+    assert.equal((i18n as unknown as { mode : string }).mode, "composition");
+
+    // Locale is a ref in this mode, and the shared helper still switches it
+    assert.equal(typeof i18n.global.locale, "object");
+    setI18nLocale(i18n, "ru");
+    assert.equal((i18n.global.locale as unknown as { value : string }).value, "ru");
+
+    // The language list does not depend on the i18n internals
+    const languages = availableLanguages();
+    assert.ok(languages.length > 5);
+    assert.ok(languages.every((language) => typeof language.code === "string" && language.name.length > 0));
+    assert.ok(languages.some((language) => language.code === "en"));
+});

@@ -144,6 +144,7 @@
                             :first="name === Object.keys(jsonConfig.services)[0]"
                             :serviceStatus="serviceStatusList[name]"
                             :dockerStats="dockerStats"
+                            :processing="processing"
                             @start-service="startService"
                             @stop-service="stopService"
                             @restart-service="restartService"
@@ -190,9 +191,9 @@
                             v-model="stack.composeYAML"
                             :extensions="extensions"
                             minimal
-                            wrap="true"
-                            dark="true"
-                            tab="true"
+                            wrap
+                            dark
+                            tab
                             :disabled="!isEditMode"
                             :hasFocus="editorFocus"
                             @change="yamlCodeChange"
@@ -240,9 +241,9 @@
                                 v-model="stack.composeENV"
                                 :extensions="extensionsEnv"
                                 minimal
-                                wrap="true"
-                                dark="true"
-                                tab="true"
+                                wrap
+                                dark
+                                tab
                                 :disabled="!isEditMode"
                                 :hasFocus="editorFocus"
                                 @change="yamlCodeChange"

@@ -237,7 +237,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [ ] Выполнить там Task 9: итоговая UX/accessibility/performance-проверка.
 - [ ] Провести отдельный аудит и миграцию Better Auth после стабилизации Stack/Compose/YAML-изменений.
 - [ ] Перевести оставшиеся Vue SFC на строгий TypeScript и добавить frontend-проверку в покрытие там, где это не ухудшает архитектуру. Тестовый каталог test/frontend уже подключён к `npm run test:unit`.
-- [ ] Миграция vue-i18n с Legacy API mode на Composition API mode: `legacy: false`, `globalInjection`, замена `$i18n.messages[lang]`/`$i18n.availableLocales` и проверка компонента `<i18n-t>`. Причина - deprecation в vue-i18n 11 и удаление в 12.
+- [x] Миграция vue-i18n с Legacy API mode на Composition API mode: `legacy: false`, `globalInjection`, замена `$i18n.messages[lang]`/`$i18n.availableLocales` и проверка компонента `<i18n-t>`. Причина - deprecation в vue-i18n 11 и удаление в 12.
 - [ ] Проверить production deployment: bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy и rollback образа.
 
 ## Журнал решений
@@ -391,3 +391,14 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - Контейнеры стека сопоставляются по метке рабочего каталога `com.docker.compose.project.working_dir`, а не только по имени проекта. Это устраняет расхождение, при котором `COMPOSE_PROJECT_NAME` в env-файле давал «активен» в списке и «unknown» с пустым списком сервисов на странице стека. Хостовый обход индексируется и по имени проекта, и по каталогу.
 
 Проверки: 101 unit-тест, 7 Docker-интеграционных, 12 браузерных, lint, tsc и сборка фронтенда - зелёные. Покрытие 79.6% строк при пороге 70%.
+
+### 2026-08-27 — миграция vue-i18n и мелкий техдолг фронтенда
+
+- vue-i18n переведён на Composition API mode (`legacy: false`, `globalInjection: true`), legacy-опции `silentFallbackWarn`/`silentTranslationWarn` заменены на `missingWarn`/`fallbackWarn`. Причина - Legacy API объявлен deprecated в 11 и удаляется в 12; предупреждение об этом печаталось на каждой загрузке страницы.
+- Компоненты больше не читают внутренности i18n: список языков отдаёт `availableLanguages()` из `frontend/src/i18n.ts`, поэтому `$i18n.messages[lang]` и `$i18n.availableLocales` исчезли из шаблонов. В Composition mode `messages` - ref, и прежний код молча сломался бы.
+- `<i18n-t>` получил `scope="global"`: в новом режиме компонент ищет локальный scope и на каждой такой вставке писал `[intlify] Not found parent scope`.
+- `currentLocale()` больше не падает без `localStorage`/`navigator`, поэтому модуль i18n загружается и в тестах; это позволило проверить фактическую конфигурацию приложения unit-тестом, а не только рассуждением.
+- Смена языка покрыта браузерным тестом `test/e2e/language.spec.ts`: выбор языка в настройках переводит интерфейс, значение сохраняется после перезагрузки. Ранее это требование плана закрыто не было.
+- `Container.vue` использовал в шаблоне необъявленные `ports` и `processing`: первое давало предупреждение Vue на каждый рендер, второе означало, что кнопки сервиса не блокировались во время операции. `processing` теперь проп со страницы, `ports` читается из `envsubstService`.
+- CodeMirror получал `dark`/`wrap`/`tab` строками `"true"` вместо boolean - исправлено в `Compose.vue` и `GlobalEnv.vue`.
+- Консоль браузера на главной, странице стека и `/console` теперь чистая: предупреждений Vue и intlify нет.

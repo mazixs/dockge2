@@ -53,21 +53,69 @@ for (let lang in languageList) {
 
 const rtlLangs = [ "fa", "ar-SY", "ur", "ar" ];
 
-export const currentLocale = () => localStorage.locale
-    || languageList[navigator.language] && navigator.language
-    || languageList[navigator.language.substring(0, 2)] && navigator.language.substring(0, 2)
-    || "en";
+/**
+ * Locale to start with: the stored choice, then the browser language, then English.
+ * Storage and navigator are read defensively, because this module is also loaded
+ * outside a browser (tests, tooling) where neither exists.
+ * @returns Locale code
+ */
+export const currentLocale = () => {
+    let stored : string | undefined;
+
+    try {
+        stored = localStorage.locale;
+    } catch (e) {
+        stored = undefined;
+    }
+
+    if (stored) {
+        return stored;
+    }
+
+    const browserLanguage = typeof navigator === "undefined" ? "" : navigator.language ?? "";
+
+    if (languageList[browserLanguage]) {
+        return browserLanguage;
+    }
+
+    const shortLanguage = browserLanguage.substring(0, 2);
+
+    if (languageList[shortLanguage]) {
+        return shortLanguage;
+    }
+
+    return "en";
+};
 
 export const localeDirection = () => {
     return rtlLangs.includes(currentLocale()) ? "rtl" : "ltr";
 };
 
 export const i18n = createI18n({
+    // Composition API mode: the Legacy API is deprecated in vue-i18n 11 and removed in 12.
+    // globalInjection keeps `$t` available in templates and in options-API methods.
+    legacy: false,
+    globalInjection: true,
     locale: currentLocale(),
     fallbackLocale: "en",
-    silentFallbackWarn: true,
-    silentTranslationWarn: true,
+    missingWarn: false,
+    fallbackWarn: false,
     messages: messages,
 });
+
+/**
+ * Languages the UI can switch to, as code and display name.
+ * Read from the local list instead of the i18n instance, so components do not depend
+ * on whether `messages` is a plain object or a ref.
+ * @returns Language code and display name pairs
+ */
+export function availableLanguages() : Array<{ code : string, name : string }> {
+    return Object.keys(messages)
+        .map((code) => ({
+            code,
+            name: (messages[code]?.languageName as string | undefined) ?? code,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 export { setI18nLocale };
