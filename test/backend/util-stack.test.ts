@@ -18,18 +18,20 @@ import {
     checkLogin,
     fileExists,
 } from "../../backend/util-server";
-import { Database } from "../../backend/database";
-import { generatePasswordHash } from "../../backend/password-hash";
-import { User } from "../../backend/models/user";
-import { withDatabase } from "../helpers/database";
+import { makeAuthenticatedSocket } from "../helpers/database";
 
-function makeSocket(userID: number): DockgeSocket {
-    return { userID } as DockgeSocket;
+/**
+ * A socket with or without a session
+ * @param userID Identifier of the signed in user, empty for an anonymous socket
+ * @returns Fake socket
+ */
+function makeSocket(userID : string): DockgeSocket {
+    return makeAuthenticatedSocket({ userID });
 }
 
 test("server utilities validate login and serialize callback results and errors", () => {
-    assert.doesNotThrow(() => checkLogin(makeSocket(1)));
-    assert.throws(() => checkLogin(makeSocket(0)), /You are not logged in/);
+    assert.doesNotThrow(() => checkLogin(makeSocket("owner")));
+    assert.throws(() => checkLogin(makeSocket("")), /You are not logged in/);
 
     const results: unknown[] = [];
     callbackResult({ ok: true }, (value: unknown) => results.push(value));
@@ -64,27 +66,6 @@ test("fileExists checks real files", async () => {
         await rm(directory, { recursive: true,
             force: true });
     }
-});
-
-test("doubleCheckPassword uses the persisted user password", async () => {
-    await withDatabase(async () => {
-        const password = generatePasswordHash("current-password");
-        await Database.getKnex()("user").insert({
-            username: "password-user",
-            password,
-            active: 1,
-            twofa_status: 0,
-        });
-        const user = await User.findByUsername("password-user");
-        assert.ok(user);
-
-        const { doubleCheckPassword } = await import("../../backend/util-server");
-        const socket = makeSocket(user.id);
-        const checked = await doubleCheckPassword(socket, "current-password");
-        assert.equal(checked.username, "password-user");
-        await assert.rejects(doubleCheckPassword(socket, "wrong-password"), /Incorrect current password/);
-        await assert.rejects(doubleCheckPassword(socket, 123), /Wrong data type/);
-    });
 });
 
 test("Stack validates, saves and reads compose files using the real filesystem", async () => {

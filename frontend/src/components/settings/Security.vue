@@ -57,15 +57,15 @@
                     </div>
 
                     <div>
-                        <button class="btn btn-primary" type="submit">
+                        <button class="btn btn-primary" type="submit" :disabled="processing">
+                            <div v-if="processing" class="spinner-border spinner-border-sm me-1"></div>
                             {{ $t("Update Password") }}
                         </button>
                     </div>
                 </form>
             </template>
 
-            <!-- TODO: Hidden for now -->
-            <div v-if="! settings.disableAuth && false" class="mt-5 mb-3">
+            <div v-if="! settings.disableAuth" class="mt-5 mb-3">
                 <h5 class="my-4 settings-subheading">
                     {{ $t("Two Factor Authentication") }}
                 </h5>
@@ -127,6 +127,8 @@
 <script>
 import Confirm from "../../components/Confirm.vue";
 import TwoFADialog from "../../components/TwoFADialog.vue";
+import { authClient } from "../../auth-client";
+import { authErrorMessage } from "../../auth-messages";
 
 export default {
     components: {
@@ -137,6 +139,7 @@ export default {
     data() {
         return {
             invalidPassword: false,
+            processing: false,
             password: {
                 currentPassword: "",
                 newPassword: "",
@@ -165,20 +168,38 @@ export default {
 
     methods: {
         /** Check new passwords match before saving them */
-        savePassword() {
+        async savePassword() {
             if (this.password.newPassword !== this.password.repeatNewPassword) {
                 this.invalidPassword = true;
-            } else {
-                this.$root
-                    .getSocket()
-                    .emit("changePassword", this.password, (res) => {
-                        this.$root.toastRes(res);
-                        if (res.ok) {
-                            this.password.currentPassword = "";
-                            this.password.newPassword = "";
-                            this.password.repeatNewPassword = "";
-                        }
-                    });
+                return;
+            }
+
+            this.processing = true;
+
+            try {
+                // Other sessions are revoked, so a stolen cookie stops working
+                const { error } = await authClient.changePassword({
+                    currentPassword: this.password.currentPassword,
+                    newPassword: this.password.newPassword,
+                    revokeOtherSessions: true,
+                });
+
+                if (error) {
+                    this.$root.toastError(authErrorMessage(error));
+                    return;
+                }
+
+                // Revoking the other sessions replaces this one too, and the socket was
+                // identified with the cookie of the old session, so it has to shake
+                // hands again or every later password confirmation would be refused
+                await this.$root.reconnectSocket();
+
+                this.$root.toastSuccess("Saved");
+                this.password.currentPassword = "";
+                this.password.newPassword = "";
+                this.password.repeatNewPassword = "";
+            } finally {
+                this.processing = false;
             }
         },
 
@@ -186,21 +207,18 @@ export default {
         disableAuth() {
             this.settings.disableAuth = true;
 
-            // Need current password to disable auth
-            // Set it to empty if done
+            // The password is only needed for this direction, and the callback runs on
+            // success only, so a refused confirmation leaves the screen as it was
             this.saveSettings(() => {
                 this.password.currentPassword = "";
-                this.$root.username = null;
-                this.$root.socketIO.token = "autoLogin";
+                location.reload();
             }, this.password.currentPassword);
         },
 
         /** Enable authentication for web app access */
         enableAuth() {
             this.settings.disableAuth = false;
-            this.saveSettings();
-            this.$root.storage().removeItem("token");
-            location.reload();
+            this.saveSettings(() => location.reload());
         },
 
         /** Show confirmation dialog for disable auth */

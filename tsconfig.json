@@ -8,7 +8,10 @@
         "exactOptionalPropertyTypes": true,
         "forceConsistentCasingInFileNames": true,
         "moduleResolution": "bundler",
-        "skipLibCheck": false,
+        // Type checking of our own code stays strict. Declaration files of dependencies are
+        // skipped because better-auth ships .d.ts that do not compile under this config
+        // (a missing Bun `Timer` type and an indexing error inside its organization plugin).
+        "skipLibCheck": true,
         "types": [
             "node",
             "vite/client"

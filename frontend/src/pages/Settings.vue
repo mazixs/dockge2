@@ -18,7 +18,8 @@
                     </router-link>
 
                     <!-- Logout Button -->
-                    <a v-if="$root.isMobile && $root.loggedIn && $root.socket.token !== 'autoLogin'" class="logout" @click.prevent="$root.logout">
+                    <!-- Only on narrow screens: the header dropdown carries it elsewhere -->
+                    <a v-if="$root.loggedIn && !$root.authDisabled" class="logout d-lg-none" @click.prevent="$root.logout">
                         <div class="menu-item">
                             <font-awesome-icon icon="sign-out-alt" />
                             {{ $t("Logout") }}
@@ -145,8 +146,10 @@ export default {
                     this.$root.toastRes(res);
                     this.loadSettings();
 
-                    if (callback) {
-                        callback();
+                    // Only on success: a refused save must not let the caller act as if
+                    // the setting had been stored, for instance by clearing the session
+                    if (callback && res?.ok) {
+                        callback(res);
                     }
                 });
             } else {
