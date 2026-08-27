@@ -320,7 +320,7 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@import "../styles/vars";
+@use "../styles/vars.scss" as *;
 
 .num {
     font-size: 30px;

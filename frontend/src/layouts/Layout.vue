@@ -262,7 +262,7 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@import "../styles/vars.scss";
+@use "../styles/vars.scss" as *;
 
 .nav-link {
     &.status-page {
