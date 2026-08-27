@@ -113,3 +113,31 @@ test("stopped and created projects keep their own status", () => {
             Status: "Created" },
     ])).status, CREATED_STACK);
 });
+
+test("a stack whose compose project was renamed is still matched by its directory", () => {
+    const stackDir = "/opt/stacks/demo";
+
+    // The containers carry a different project name, set through COMPOSE_PROJECT_NAME
+    const entries = [
+        { Service: "app",
+            Name: "renamed-app-1",
+            State: "running",
+            Status: "Up 5 minutes",
+            Labels: `com.docker.compose.project=renamed,com.docker.compose.service=app,com.docker.compose.project.working_dir=${stackDir}` },
+    ];
+
+    const map = new Map([[ "renamed", entries ], [ stackDir, entries ]]);
+    const stack = { isManagedByDockge: true,
+        path: stackDir,
+        composeYAML: "services:\n  app:\n    image: nginx\n" } as unknown as Stack;
+
+    // Looked up by the stack directory, the status is correct
+    const matched = Stack.resolveProjectStatus({ Name: "demo",
+        Status: "running(1)" }, map, stack);
+    assert.equal(matched.status, RUNNING);
+
+    // Without the directory index the project name of the stack finds nothing
+    const nameOnly = Stack.resolveProjectStatus({ Name: "demo",
+        Status: "running(1)" }, new Map([[ "renamed", entries ]]));
+    assert.equal(nameOnly.status, UNKNOWN);
+});

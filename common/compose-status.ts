@@ -67,6 +67,9 @@ export const ONE_SHOT_LABEL = "dockge.lifecycle";
 export const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
 export const COMPOSE_SERVICE_LABEL = "com.docker.compose.service";
 
+/** Directory the compose project was started from, stable even when the project is renamed */
+export const COMPOSE_WORKING_DIR_LABEL = "com.docker.compose.project.working_dir";
+
 const KNOWN_STATES = [ "running", "exited", "created", "restarting", "paused", "dead", "removing" ];
 
 /**
@@ -146,11 +149,12 @@ function normaliseHealth(health : string | undefined) : string {
  * @param raw Entry of `docker ps --all --format json`
  * @returns Compose shaped entry plus the compose project it belongs to
  */
-export function fromDockerPs(raw : DockerPsRaw) : ComposePsEntry & { project : string } {
+export function fromDockerPs(raw : DockerPsRaw) : ComposePsEntry & { project : string, workingDir : string } {
     const labels = parseDockerLabels(raw.Labels);
 
-    const entry : ComposePsEntry & { project : string } = {
+    const entry : ComposePsEntry & { project : string, workingDir : string } = {
         project: labels[COMPOSE_PROJECT_LABEL] ?? "",
+        workingDir: labels[COMPOSE_WORKING_DIR_LABEL] ?? "",
         Service: labels[COMPOSE_SERVICE_LABEL] ?? "",
         Name: raw.Name ?? raw.Names ?? "",
         Labels: raw.Labels ?? "",

@@ -153,3 +153,88 @@ test("an octal value the user actually changed is written as the new value", () 
     assert.match(output, /mode: 493/);
     assert.equal(output.includes("01777"), false);
 });
+
+test("an edit keeps the formatting of the file", () => {
+    // Four space indentation and comments inside a sequence
+    const source = `services:
+    app:
+        image: nginx
+        ports:
+            # web
+            - "8080:80" # http
+            - "8443:443"
+`;
+
+    const analysis = analyseComposeSource(source);
+    const config = analysis.config;
+    const app = (config["services"] as Record<string, Record<string, unknown>>)["app"]!;
+
+    // The user edits the second port only
+    (app["ports"] as string[])[1] = "9443:443";
+
+    const output = applyStructuredEdit(source, config, { sourceHadNetworks: false });
+
+    // The untouched item keeps its comments, the edited one changed
+    assert.match(output, /# web/);
+    assert.match(output, /- "8080:80" # http/);
+    assert.match(output, /9443:443/);
+
+    // And the indentation of the file is not switched to two spaces
+    assert.match(output, /\n {4}app:/);
+});
+
+test("appending and removing sequence items keeps the neighbours", () => {
+    const source = "services:\n  app:\n    image: nginx\n    ports:\n      - \"8080:80\" # keep\n";
+    const analysis = analyseComposeSource(source);
+    const app = (analysis.config["services"] as Record<string, Record<string, unknown>>)["app"]!;
+
+    (app["ports"] as string[]).push("9090:90");
+
+    const added = applyStructuredEdit(source, analysis.config, { sourceHadNetworks: false });
+    assert.match(added, /- "8080:80" # keep/);
+    assert.match(added, /9090:90/);
+
+    const second = analyseComposeSource(added);
+    const secondApp = (second.config["services"] as Record<string, Record<string, unknown>>)["app"]!;
+    (secondApp["ports"] as string[]).pop();
+
+    const removed = applyStructuredEdit(added, second.config, { sourceHadNetworks: false });
+    assert.match(removed, /- "8080:80" # keep/);
+    assert.equal(removed.includes("9090:90"), false);
+});
+
+test("a numeric key is edited in place instead of being duplicated", () => {
+    const source = "x-ports:\n  8080: first\n  9090: second\nservices:\n  app:\n    image: nginx\n";
+    const analysis = analyseComposeSource(source);
+    const config = analysis.config;
+
+    (config["x-ports"] as Record<string, unknown>)["8080"] = "changed";
+
+    const output = applyStructuredEdit(source, config, { sourceHadNetworks: false });
+
+    assert.match(output, /8080: changed/);
+    assert.equal(output.includes("first"), false);
+
+    // Exactly one key, not the old numeric one plus a new string one
+    assert.equal(output.split("8080").length - 1, 1);
+    assert.match(output, /9090: second/);
+
+    // Deleting it removes the key for real
+    const second = analyseComposeSource(output);
+    delete (second.config["x-ports"] as Record<string, unknown>)["8080"];
+    const deleted = applyStructuredEdit(output, second.config, { sourceHadNetworks: false });
+    assert.equal(deleted.includes("8080"), false);
+    assert.match(deleted, /9090: second/);
+});
+
+test("windows line endings survive an edit", () => {
+    const source = "services:\r\n  app:\r\n    image: nginx\r\n";
+    const analysis = analyseComposeSource(source);
+    (analysis.config["services"] as Record<string, Record<string, unknown>>)["app"]!["restart"] = "always";
+
+    const output = applyStructuredEdit(source, analysis.config, { sourceHadNetworks: false });
+
+    assert.match(output, /restart: always/);
+    assert.equal(output.includes("\r\n"), true);
+    assert.equal(/[^\r]\n/.test(output), false, "no bare LF may be left behind");
+});
