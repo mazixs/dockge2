@@ -80,7 +80,7 @@
 <script>
 import Confirm from "../components/Confirm.vue";
 import StackListItem from "../components/StackListItem.vue";
-import { CREATED_FILE, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../../common/util-common";
+import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
 
 export default {
     components: {
@@ -174,29 +174,28 @@ export default {
                     return 1;
                 }
 
-                // sort by status
+                // Sort by status, alert first: a stack that needs attention is the one
+                // the user came to look at, so it goes above the healthy ones
                 if (m1.status !== m2.status) {
-                    if (m2.status === RUNNING) {
-                        return 1;
-                    } else if (m1.status === RUNNING) {
-                        return -1;
-                    } else if (m2.status === EXITED) {
-                        return 1;
-                    } else if (m1.status === EXITED) {
-                        return -1;
-                    } else if (m2.status === CREATED_STACK) {
-                        return 1;
-                    } else if (m1.status === CREATED_STACK) {
-                        return -1;
-                    } else if (m2.status === CREATED_FILE) {
-                        return 1;
-                    } else if (m1.status === CREATED_FILE) {
-                        return -1;
-                    } else if (m2.status === UNKNOWN) {
-                        return 1;
-                    } else if (m1.status === UNKNOWN) {
-                        return -1;
-                    }
+                    const rank = (status) => {
+                        switch (status) {
+                            case ATTENTION:
+                                return 0;
+                            case RUNNING:
+                                return 1;
+                            case EXITED:
+                                return 2;
+                            case CREATED_STACK:
+                                return 3;
+                            case CREATED_FILE:
+                                return 4;
+                            default:
+                                // UNKNOWN and anything unexpected go last
+                                return 5;
+                        }
+                    };
+
+                    return rank(m1.status) - rank(m2.status);
                 }
                 return m1.name.localeCompare(m2.name);
             });

@@ -27,6 +27,11 @@
                                 <h3>{{ $t("inactive") }}</h3>
                                 <span class="num inactive">{{ inactiveNum }}</span>
                             </div>
+                            <!-- Without this an unreachable Docker shows four zeroes and no reason -->
+                            <div v-if="unknownNum > 0" class="col">
+                                <h3>{{ $t("unknown") }}</h3>
+                                <span class="num unknown">{{ unknownNum }}</span>
+                            </div>
                         </div>
                     </div>
 
@@ -352,6 +357,10 @@ export default {
 
     &.attention {
         color: $warning;
+    }
+
+    &.unknown {
+        color: $dark-font-color3;
     }
 }
 

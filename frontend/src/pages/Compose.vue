@@ -455,8 +455,27 @@ export default {
         },
 
         active() {
-            // A partially degraded stack is still up, so stop and restart stay available
-            return this.status === RUNNING || this.status === ATTENTION;
+            if (this.status === RUNNING) {
+                return true;
+            }
+
+            // ATTENTION covers both "degraded but up" and "down and broken". Only the first
+            // one is active: a stack without a single running container needs Start.
+            if (this.status === ATTENTION) {
+                return this.hasRunningInstance;
+            }
+
+            return false;
+        },
+
+        /**
+         * Whether at least one container of this stack is running
+         * @returns {boolean} True when a running instance was reported
+         */
+        hasRunningInstance() {
+            return Object.values(this.serviceStatusList ?? {}).some(
+                instances => Array.isArray(instances) && instances.some(instance => instance.state === "running"),
+            );
         },
 
         /**

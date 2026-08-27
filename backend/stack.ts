@@ -6,11 +6,13 @@ import { DockgeSocket, fileExists, ValidationError } from "./util-server";
 import path from "path";
 import { emptyStackFileConfig, resolveStackFilePath, resolveStackFilePathSync, StackConfig } from "./stack-config";
 import { classifyStackFile, isSafeNameSegment } from "../common/stack-files";
+import { serialiseEditedDocument } from "../common/compose-editor";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
 import {
     ComposePsEntry,
     ContainerInstanceStatus,
     COMPOSE_PROJECT_LABEL,
+    COMPOSE_WORKING_DIR_LABEL,
     DockerPsRaw,
     fromDockerPs,
     normaliseInstance,
@@ -649,7 +651,10 @@ export class Stack {
                 issues: [] };
         }
 
-        const entries = instanceMap.get(composeStack.Name) ?? [];
+        // The directory wins when it is known, because the project name can be overridden
+        const entries = (stack?.isManagedByDockge ? instanceMap.get(stack.path) : undefined)
+            ?? instanceMap.get(composeStack.Name)
+            ?? [];
         const composeYAML = stack?.isManagedByDockge ? stack.composeYAML : "";
 
         return resolveComposePsStatus(entries, readComposeServices(composeYAML), readOneShotServices(composeYAML));
@@ -744,13 +749,18 @@ export class Stack {
                 }
 
                 const entry = fromDockerPs(JSON.parse(line) as DockerPsRaw);
-                if (!entry.project) {
-                    continue;
-                }
 
-                const list = map.get(entry.project) ?? [];
-                list.push(entry);
-                map.set(entry.project, list);
+                // Indexed by project and by working directory: a stack whose `.env` renames
+                // the compose project is still found through its directory
+                for (const key of [ entry.project, entry.workingDir ]) {
+                    if (!key) {
+                        continue;
+                    }
+
+                    const list = map.get(key) ?? [];
+                    list.push(entry);
+                    map.set(key, list);
+                }
             }
 
             return map;
@@ -768,7 +778,17 @@ export class Stack {
      */
     async getInstances() : Promise<ContainerInstanceStatus[] | null> {
         try {
-            const res = await spawn("docker", this.getComposeOptions("ps", "--all", "--format", "json"), {
+            // Filter by the working directory of this stack instead of trusting the project
+            // name: a `.env` with COMPOSE_PROJECT_NAME renames the project, and then a name
+            // based lookup finds nothing while the containers are running.
+            const res = await spawn("docker", [
+                "ps",
+                "--all",
+                "--filter",
+                `label=${COMPOSE_WORKING_DIR_LABEL}=${this.path}`,
+                "--format",
+                "json",
+            ], {
                 cwd: this.path,
                 encoding: "utf-8",
                 maxBuffer: 4 * 1024 * 1024,
@@ -781,18 +801,13 @@ export class Stack {
 
             const entries : ComposePsEntry[] = [];
 
-            // Compose writes either one JSON object per line or a single JSON array
+            // Docker writes one JSON object per line
             for (const line of res.stdout.toString().split("\n")) {
                 if (line.trim() === "") {
                     continue;
                 }
 
-                const parsed = JSON.parse(line);
-                if (Array.isArray(parsed)) {
-                    entries.push(...parsed as ComposePsEntry[]);
-                } else {
-                    entries.push(parsed as ComposePsEntry);
-                }
+                entries.push(fromDockerPs(JSON.parse(line) as DockerPsRaw));
             }
 
             const oneShotServices = readOneShotServices(this.composeYAML);
@@ -1175,7 +1190,7 @@ export class Stack {
      * @returns YAML text
      */
     protected serialiseComposeDocument(doc : Document) : string {
-        return doc.toString({ flowCollectionPadding: false });
+        return serialiseEditedDocument(this.composeYAML, doc);
     }
 
     /**

@@ -274,6 +274,16 @@ test("docker ps output of the whole host is mapped to compose entries", () => {
     // A container outside any compose project has no project label
     assert.equal(fromDockerPs({ State: "running",
         Names: "standalone" }).project, "");
+
+    // The working directory is read as well, because a project can be renamed
+    const renamed = fromDockerPs({
+        State: "running",
+        Status: "Up 1 minute",
+        Names: "renamed-app-1",
+        Labels: "com.docker.compose.project=other-name,com.docker.compose.service=app,com.docker.compose.project.working_dir=/opt/stacks/demo",
+    });
+    assert.equal(renamed.project, "other-name");
+    assert.equal(renamed.workingDir, "/opt/stacks/demo");
 });
 
 test("compose file marking makes a clean worker exit acceptable", () => {

@@ -134,12 +134,57 @@ export function applyStructuredEdit(source : string, config : LooseObject, optio
 
     applyDiff(doc, [], current, next);
 
-    const output = doc.toString({ flowCollectionPadding: false });
+    // Keep the formatting of the file: the indentation the user writes and their line endings
+    const output = withSourceLineEndings(source, doc.toString({
+        flowCollectionPadding: false,
+        indent: detectIndent(source),
+    }));
 
     // YAML 1.2 prints `01777` as `1777`, so the original text is put back.
     // Switching the whole document to YAML 1.1 would fix the octal but quote every
     // `yes`/`no`/`on`/`off` in the file, which are lines the user never touched.
     return restoreLegacyOctal(output, octalByPath);
+}
+
+/**
+ * Serialise an edited document the way applyStructuredEdit() does.
+ * Exported for callers that already hold a document, such as the secret binding.
+ * @param source Original compose text
+ * @param doc Edited document
+ * @returns New compose text
+ */
+export function serialiseEditedDocument(source : string, doc : Document) : string {
+    return withSourceLineEndings(source, doc.toString({
+        flowCollectionPadding: false,
+        indent: detectIndent(source),
+    }));
+}
+
+/**
+ * Read the indentation width of a compose file, so an edit does not reformat it
+ * @param source Compose file content
+ * @returns Indentation width, two spaces when it cannot be determined
+ */
+export function detectIndent(source : string) : number {
+    for (const line of source.split("\n")) {
+        const match = /^( +)\S/.exec(line);
+
+        if (match?.[1]) {
+            return match[1].length;
+        }
+    }
+
+    return 2;
+}
+
+/**
+ * Restore the line endings of the source, because the serialiser always writes LF
+ * @param source Original compose file content
+ * @param output Serialised YAML
+ * @returns Serialised YAML with the original line endings
+ */
+export function withSourceLineEndings(source : string, output : string) : string {
+    return source.includes("\r\n") ? output.replace(/\r?\n/g, "\r\n") : output;
 }
 
 /**
@@ -253,14 +298,17 @@ function isPlainObject(value : unknown) : value is LooseObject {
 function applyDiff(doc : Document, path : readonly unknown[], current : LooseObject, next : LooseObject) : void {
     for (const key of Object.keys(current)) {
         if (!(key in next)) {
-            doc.deleteIn([ ...path, key ]);
+            doc.deleteIn([ ...path, resolveMapKey(doc, path, key) ]);
         }
     }
 
     for (const key of Object.keys(next)) {
         const nextValue = next[key];
         const currentValue = current[key];
-        const childPath = [ ...path, key ];
+
+        // `doc.toJS()` turns every key into a string, but the document may hold a number.
+        // Using the string would add a second key instead of editing the existing one.
+        const childPath = [ ...path, resolveMapKey(doc, path, key) ];
 
         if (!(key in current)) {
             doc.setIn(childPath, nextValue);
@@ -272,11 +320,81 @@ function applyDiff(doc : Document, path : readonly unknown[], current : LooseObj
             continue;
         }
 
-        // Scalars and sequences are replaced as a whole, but only when they differ
+        if (Array.isArray(currentValue) && Array.isArray(nextValue)) {
+            applyArrayDiff(doc, childPath, currentValue, nextValue);
+            continue;
+        }
+
+        // Scalars are replaced, but only when they differ
         if (JSON.stringify(currentValue) !== JSON.stringify(nextValue)) {
             doc.setIn(childPath, nextValue);
         }
     }
+}
+
+/**
+ * Write the difference between two arrays item by item.
+ * Replacing the whole sequence would drop the comments of items nobody edited,
+ * which happens on every keystroke in a ports or volumes field.
+ * @param doc Document to edit in place
+ * @param path Path of the sequence inside the document
+ * @param current Items currently in the document
+ * @param next Items the editor wants
+ */
+function applyArrayDiff(doc : Document, path : readonly unknown[], current : readonly unknown[], next : readonly unknown[]) : void {
+    if (JSON.stringify(current) === JSON.stringify(next)) {
+        return;
+    }
+
+    // Items removed from the end go first, so the remaining indexes stay valid
+    for (let index = current.length - 1; index >= next.length; index--) {
+        doc.deleteIn([ ...path, index ]);
+    }
+
+    for (let index = 0; index < next.length; index++) {
+        const nextItem = next[index];
+        const currentItem = current[index];
+
+        if (index >= current.length) {
+            doc.addIn(path, nextItem);
+            continue;
+        }
+
+        if (JSON.stringify(currentItem) === JSON.stringify(nextItem)) {
+            continue;
+        }
+
+        if (isPlainObject(currentItem) && isPlainObject(nextItem)) {
+            applyDiff(doc, [ ...path, index ], currentItem, nextItem);
+            continue;
+        }
+
+        doc.setIn([ ...path, index ], nextItem);
+    }
+}
+
+/**
+ * Find the key the document really uses for a stringified key.
+ * A compose file may hold numeric keys, for example inside `x-` extensions.
+ * @param doc Document being edited
+ * @param path Path of the map
+ * @param key Key as it appears in the plain object
+ * @returns The key value to use with getIn/setIn/deleteIn
+ */
+function resolveMapKey(doc : Document, path : readonly unknown[], key : string) : string | number {
+    const node = path.length === 0 ? doc.contents : doc.getIn(path, true);
+
+    if (!isMap(node)) {
+        return key;
+    }
+
+    for (const item of node.items) {
+        if (isScalar(item.key) && typeof item.key.value !== "string" && String(item.key.value) === key) {
+            return item.key.value as number;
+        }
+    }
+
+    return key;
 }
 
 /**
