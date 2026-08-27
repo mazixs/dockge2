@@ -242,7 +242,7 @@ export default {
 </script>
 
 <style scoped lang="scss">
-@import "../styles/vars";
+@use "../styles/vars.scss" as *;
 
 .secret {
     padding-bottom: 0.75rem;

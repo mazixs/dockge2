@@ -108,7 +108,7 @@ export default {
 </script>
 
 <style scoped lang="scss">
-@import "../styles/vars";
+@use "../styles/vars.scss" as *;
 
 .terminal-context-menu {
     position: fixed;

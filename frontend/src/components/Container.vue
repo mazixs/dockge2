@@ -470,6 +470,7 @@ export default defineComponent({
 </script>
 
 <style scoped lang="scss">
+@use "../styles/vars.scss" as *;
 .instance-list {
     list-style: none;
     padding: 0;
@@ -484,8 +485,6 @@ export default defineComponent({
         opacity: 0.8;
     }
 }
-
-@import "../styles/vars";
 
 .container {
     .image {

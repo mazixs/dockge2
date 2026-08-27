@@ -1,6 +1,14 @@
-@import "fonts.scss";
+// Свои файлы подключаются через @use: правило @import из Sass убирают, и наш
+// код не должен зависеть от него. Исключений два, и оба вынужденные:
+// vars.scss обязан прийти через @import, потому что Bootstrap читает наши
+// переопределения `!default` только из области видимости самого файла, а сам
+// Bootstrap внутри до сих пор написан на @import и модулем не настраивается.
+// Предупреждения из node_modules гасятся в frontend/vite.config.ts.
+@use "fonts.scss";
+@use "tokens.scss";
+@use "localization.scss";
+
 @import "vars.scss";
-@import "tokens.scss";
 @import "bootstrap/scss/bootstrap";
 @import "bootstrap-vue-next/dist/bootstrap-vue-next.css";
 
@@ -701,6 +709,3 @@ code {
 .cm-focused {
     outline: none !important;
 }
-
-// Localization
-@import "localization.scss";

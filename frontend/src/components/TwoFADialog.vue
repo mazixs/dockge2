@@ -232,7 +232,7 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@import "../styles/vars.scss";
+@use "../styles/vars.scss" as *;
 
 .backup-codes {
     padding: 0.5rem;

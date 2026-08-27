@@ -1120,7 +1120,7 @@ export default {
 </script>
 
 <style scoped lang="scss">
-@import "../styles/vars.scss";
+@use "../styles/vars.scss" as *;
 
 .terminal {
     height: 200px;
