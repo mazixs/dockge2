@@ -253,8 +253,10 @@ function buildAuth(server : DockgeServer, secret : string) {
             max: 60,
             customRules: {
                 // Guessing a password has to stay expensive
+                // Ten a minute per client address: still hopeless for guessing a password
+                // of the required length, and it leaves room for a person who mistypes
                 "/sign-in/email": { window: 60,
-                    max: 5 },
+                    max: 10 },
                 "/sign-up/email": { window: 60,
                     max: 3 },
                 "/two-factor/verify-totp": { window: 60,

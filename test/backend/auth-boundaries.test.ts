@@ -160,12 +160,12 @@ test("guessing a password over the endpoints is rate limited per client address"
 
         const statuses : number[] = [];
 
-        for (let index = 0; index < 8; index += 1) {
+        for (let index = 0; index < 14; index += 1) {
             statuses.push((await attempt("198.51.100.5")).status);
         }
 
         assert.ok(statuses.includes(429), `expected a refused attempt, got ${statuses.join(",")}`);
-        assert.ok(statuses.filter((status) => status === 401).length <= 5, `too many attempts were allowed: ${statuses.join(",")}`);
+        assert.ok(statuses.filter((status) => status === 401).length <= 10, `too many attempts were allowed: ${statuses.join(",")}`);
 
         // The address comes from our own middleware, so a header cannot buy a new budget
         const forged = await getAuth().handler(new Request("http://localhost:5001/api/auth/sign-in/email", {
@@ -185,6 +185,10 @@ test("guessing a password over the endpoints is rate limited per client address"
 
         // Another client still gets its own attempts
         assert.notEqual((await attempt("198.51.100.6")).status, 429);
+
+        // Signing in has to keep working for a person who mistyped a few times, so the
+        // browser tests and a real owner do not run into the limit
+        assert.ok(statuses.filter((status) => status === 401).length >= 5, `the limit is too tight: ${statuses.join(",")}`);
     });
 });
 
