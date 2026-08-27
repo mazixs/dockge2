@@ -99,16 +99,21 @@ test("enabling two factor needs the password and returns a working TOTP secret",
     await withDatabase(async () => {
         const cookie = await createTestAccount();
 
-        // A stolen session alone must not be able to change the second factor
-        await assert.rejects(getAuth().api.enableTwoFactor({
+        // A stolen session alone must not be able to change the second factor, and the
+        // refusal has to be the clean answer the UI shows as "wrong password"
+        const refused = await getAuth().api.enableTwoFactor({
             body: { password: "not-the-password" },
             headers: { cookie } as never,
-        }));
+            asResponse: true,
+        });
+        assert.equal(refused.status, 400);
+        assert.match(await refused.text(), /password/i);
 
         const enabled = await startTwoFactor(cookie);
 
         assert.match(enabled.totpURI, /^otpauth:\/\/totp\/Dockge/);
-        assert.ok(enabled.backupCodes.length > 0, "backup codes are the way back in without the app");
+        assert.equal(enabled.backupCodes.length, 10, "ten codes are what makes a lost authenticator recoverable");
+        assert.equal(new Set(enabled.backupCodes).size, 10, "duplicate codes would silently reduce that number");
 
         // Two factor only turns on once a generated code is confirmed
         const secret = secretFromUri(enabled.totpURI);
@@ -157,10 +162,12 @@ test("with two factor on, the password alone does not open a session", async () 
         assert.equal(await getAuth().api.getSession({ headers: { cookie: pending } as never }), null);
 
         // A wrong code keeps it that way
-        await assert.rejects(getAuth().api.verifyTOTP({
+        const wrongCode = await getAuth().api.verifyTOTP({
             body: { code: "000000" },
             headers: { cookie: pending } as never,
-        }));
+            asResponse: true,
+        });
+        assert.equal(wrongCode.status, 401);
         assert.equal(await getAuth().api.getSession({ headers: { cookie: pending } as never }), null);
 
         const verified = await getAuth().api.verifyTOTP({
@@ -211,10 +218,13 @@ test("a backup code signs in once when the authenticator is gone", async () => {
             },
             asResponse: true,
         });
-        await assert.rejects(getAuth().api.verifyBackupCode({
+        const reused = await getAuth().api.verifyBackupCode({
             body: { code: backupCode },
             headers: { cookie: cookieOf(again) } as never,
-        }));
+            asResponse: true,
+        });
+        assert.equal(reused.ok, false);
+        assert.ok(reused.status === 400 || reused.status === 401, `expected a clean refusal, got ${reused.status}`);
     });
 });
 
@@ -229,10 +239,13 @@ test("disabling two factor needs the password and brings back the plain sign-in"
         });
         const rotated = cookieOf(confirmed);
 
-        await assert.rejects(getAuth().api.disableTwoFactor({
+        const refusedDisable = await getAuth().api.disableTwoFactor({
             body: { password: "not-the-password" },
             headers: { cookie: rotated } as never,
-        }));
+            asResponse: true,
+        });
+        assert.equal(refusedDisable.status, 400);
+        assert.match(await refusedDisable.text(), /password/i);
 
         const disabled = await getAuth().api.disableTwoFactor({
             body: { password: TEST_PASSWORD },

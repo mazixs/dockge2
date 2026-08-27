@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { authErrorMessage, isTotpCode } from "../../frontend/src/auth-messages";
+import { authErrorMessage, isTotpCode, passwordChangeRequest } from "../../frontend/src/auth-messages";
 
 test("a code from the authenticator app is told apart from a backup code", () => {
     // Six digits go to the TOTP endpoint
@@ -27,4 +27,14 @@ test("errors of the auth library are shown as translated messages", () => {
         message: "Something new happened" }), "Something new happened");
     assert.equal(authErrorMessage({}), "authUnknownError");
     assert.equal(authErrorMessage(null), "authUnknownError");
+});
+
+test("changing the password always revokes the other sessions", () => {
+    const request = passwordChangeRequest("old-password", "new-password");
+
+    // A password is changed exactly when somebody else may hold a cookie, so a session
+    // that survives the change would defeat the purpose
+    assert.equal(request.revokeOtherSessions, true);
+    assert.equal(request.currentPassword, "old-password");
+    assert.equal(request.newPassword, "new-password");
 });

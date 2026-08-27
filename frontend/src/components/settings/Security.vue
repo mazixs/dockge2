@@ -128,7 +128,7 @@
 import Confirm from "../../components/Confirm.vue";
 import TwoFADialog from "../../components/TwoFADialog.vue";
 import { authClient } from "../../auth-client";
-import { authErrorMessage } from "../../auth-messages";
+import { authErrorMessage, passwordChangeRequest } from "../../auth-messages";
 
 export default {
     components: {
@@ -178,11 +178,9 @@ export default {
 
             try {
                 // Other sessions are revoked, so a stolen cookie stops working
-                const { error } = await authClient.changePassword({
-                    currentPassword: this.password.currentPassword,
-                    newPassword: this.password.newPassword,
-                    revokeOtherSessions: true,
-                });
+                const { error } = await authClient.changePassword(
+                    passwordChangeRequest(this.password.currentPassword, this.password.newPassword),
+                );
 
                 if (error) {
                     this.$root.toastError(authErrorMessage(error));

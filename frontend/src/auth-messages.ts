@@ -56,3 +56,29 @@ export function authErrorMessage(error : AuthClientError | null | undefined) : s
 export function isTotpCode(code : string) : boolean {
     return /^[0-9]{6}$/.test(code.trim());
 }
+
+/** What a password change sends to the server */
+export interface PasswordChangeRequest {
+    currentPassword : string;
+    newPassword : string;
+    revokeOtherSessions : boolean;
+}
+
+/**
+ * Build the body of a password change.
+ *
+ * Other sessions are always revoked, because a password is usually changed exactly when
+ * somebody else may be holding a cookie, and a session that survives the change would
+ * defeat the point. Kept here so the decision is one line in one place, and so a test
+ * notices if it ever stops being sent.
+ * @param currentPassword Password of the account today
+ * @param newPassword Password to set
+ * @returns Body for `authClient.changePassword`
+ */
+export function passwordChangeRequest(currentPassword : string, newPassword : string) : PasswordChangeRequest {
+    return {
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: true,
+    };
+}
