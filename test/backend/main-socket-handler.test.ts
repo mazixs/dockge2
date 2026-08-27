@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import type { DockgeServer } from "../../backend/dockge-server";
-import { MainSocketHandler } from "../../backend/socket-handlers/main-socket-handler";
+import { MainSocketHandler, stripGeneratedProjectName } from "../../backend/socket-handlers/main-socket-handler";
 import { Settings } from "../../backend/settings";
 import type { DockgeSocket } from "../../backend/util-server";
 import { createTestAccount, TEST_PASSWORD, withDatabase } from "../helpers/database";
@@ -188,5 +188,38 @@ test("composerize converts a docker run command for a signed in client", async (
 
         const refused = await emitWithCallback(socket, "composerize", 42);
         assert.equal(refused.ok, false);
+    });
+});
+
+test("преобразование снимает только сгенерированное имя проекта", async () => {
+    // Конвертер сообщает о неподдержанном флаге комментарием над строкой name,
+    // и прежняя обрезка первой строки убирала сообщение, оставляя в файле
+    // пользователя «name: <your project name>»
+    const withComment = "# -P\nname: <your project name>\nservices:\n    nginx:\n        image: nginx\n";
+    const stripped = stripGeneratedProjectName(withComment);
+
+    assert.equal(stripped.includes("name: <your project name>"), false);
+    assert.ok(stripped.startsWith("# -P"), "сообщение конвертера должно остаться");
+    assert.ok(stripped.includes("services:"));
+
+    // Файл без сгенерированного имени не меняется вообще
+    const plain = "services:\n    nginx:\n        image: nginx\n";
+    assert.equal(stripGeneratedProjectName(plain), plain);
+});
+
+test("composerize отдаёт компоуз без служебного имени проекта", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const converted = await emitWithCallback(socket, "composerize", "docker run -d -P nginx");
+        assert.equal(converted.ok, true);
+
+        const template = String(converted.composeTemplate);
+        assert.equal(template.includes("<your project name>"), false, template);
+        assert.match(template, /services:/);
+        assert.match(template, /# -P/);
     });
 });

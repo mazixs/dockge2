@@ -1,9 +1,11 @@
 <template>
-    <router-link :to="url" :class="{ 'dim' : !stack.isManagedByDockge }" class="item">
+    <router-link :to="url" :class="{ 'dim' : !stack.isManagedByDockge, 'fresh': isFresh }" class="item">
         <Uptime :stack="stack" :fixed-width="true" class="me-2" />
         <div class="title">
             <span>{{ stackName }}</span>
         </div>
+        <!-- Стек, только что созданный: подсветка отвечает на «где он в списке» -->
+        <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
     </router-link>
 </template>
 
@@ -69,6 +71,11 @@ export default {
         },
         stackName() {
             return this.stack.name;
+        },
+
+        /** Только что созданный стек, на который надо показать в списке */
+        isFresh() {
+            return this.$root.freshStack === this.stack.name;
         }
     },
     watch: {
@@ -153,6 +160,21 @@ export default {
         font-size: 12px;
         color: $dark-font-color3;
     }
+
+    &.fresh {
+        box-shadow: inset 3px 0 0 var(--state-running);
+        background-color: color-mix(in srgb, var(--state-running) 10%, transparent);
+    }
+}
+
+.fresh-badge {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--state-running);
+    border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
+    border-radius: var(--radius-chip);
+    padding: 1px 6px;
 }
 
 .collapsed {

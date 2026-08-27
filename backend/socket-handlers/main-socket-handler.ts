@@ -118,10 +118,7 @@ export class MainSocketHandler extends SocketHandler {
                 }
 
                 // Option: 'latest' | 'v2x' | 'v3x'
-                let composeTemplate = composerize(dockerRunCommand, "", "latest");
-
-                // Remove the first line "name: <your project name>"
-                composeTemplate = composeTemplate.split("\n").slice(1).join("\n");
+                const composeTemplate = stripGeneratedProjectName(composerize(dockerRunCommand, "", "latest"));
 
                 callback({
                     ok: true,
@@ -133,6 +130,27 @@ export class MainSocketHandler extends SocketHandler {
         });
     }
 
+}
+
+/**
+ * Remove the project name the converter generates, and nothing else.
+ *
+ * Cutting the first line blindly is wrong: when a flag is not supported the
+ * converter reports it as a comment above the name, so the cut used to remove
+ * the report and leave `name: <your project name>` inside the file of the user.
+ * @param composeTemplate Output of the converter
+ * @returns Compose file without the generated name line
+ */
+export function stripGeneratedProjectName(composeTemplate : string) : string {
+    const lines = composeTemplate.split("\n");
+    const index = lines.findIndex((line) => /^name:\s*<[^>]*>\s*$/.test(line));
+
+    if (index === -1) {
+        return composeTemplate;
+    }
+
+    lines.splice(index, 1);
+    return lines.join("\n");
 }
 
 /** Settings the general settings screen is allowed to write */

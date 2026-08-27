@@ -16,6 +16,10 @@
                 <span class="fs-4 title">Dockge</span>
             </router-link>
 
+            <button v-if="$root.loggedIn" class="btn btn-primary me-3 create-stack-btn" type="button" @click="openCreateSheet()">
+                <font-awesome-icon icon="plus" /> {{ $t("deployStackAction") }}
+            </button>
+
             <a v-if="hasNewVersion" target="_blank" href="https://github.com/louislam/dockge/releases" class="btn btn-warning me-3">
                 <font-awesome-icon icon="arrow-alt-circle-up" /> {{ $t("newUpdate") }}
             </a>
@@ -92,18 +96,24 @@
 
             <router-view v-if="$root.loggedIn" />
             <Login v-if="! $root.loggedIn && $root.allowLoginDialog" />
+            <CreateStackSheet v-if="$root.loggedIn" ref="createSheet" />
         </main>
     </div>
 </template>
 
 <script>
 import Login from "../components/Login.vue";
+import CreateStackSheet from "../components/CreateStackSheet.vue";
 import { compareVersions } from "compare-versions";
 import { ALL_ENDPOINTS } from "../../../common/util-common";
+
+/** Имена файлов, которые имеет смысл принимать перетаскиванием */
+const DROPPABLE = /^(compose|docker-compose)\.(ya?ml)$|^\.env/i;
 
 export default {
 
     components: {
+        CreateStackSheet,
         Login,
     },
 
@@ -138,14 +148,109 @@ export default {
     },
 
     mounted() {
+        // Слой один на приложение, поэтому способ открыть его живёт в корне
+        this.$root.openCreateStack = this.openCreateSheet;
 
+        // Вставка в любом месте списка открывает слой уже заполненным
+        document.addEventListener("paste", this.onPaste);
+        window.addEventListener("dragover", this.onDragOver);
+        window.addEventListener("drop", this.onDrop);
     },
 
     beforeUnmount() {
-
+        this.$root.openCreateStack = null;
+        document.removeEventListener("paste", this.onPaste);
+        window.removeEventListener("dragover", this.onDragOver);
+        window.removeEventListener("drop", this.onDrop);
     },
 
     methods: {
+        /**
+         * Открыть слой создания стека
+         * @param {string} prefill Вставленный текст, если он уже есть
+         * @returns {void}
+         */
+        openCreateSheet(prefill = "") {
+            this.$refs.createSheet?.open(prefill);
+        },
+
+        /**
+         * Вставка вне поля ввода: пользователь принёс compose или команду.
+         * Пока фокус в поле, вставка принадлежит полю, а не слою.
+         * @param {ClipboardEvent} event Событие вставки
+         * @returns {void}
+         */
+        onPaste(event) {
+            if (!this.$root.loggedIn || this.isEditableTarget(event.target)) {
+                return;
+            }
+
+            const text = event.clipboardData?.getData("text") ?? "";
+
+            if (!this.looksLikeStack(text)) {
+                return;
+            }
+
+            event.preventDefault();
+            this.openCreateSheet(text);
+        },
+
+        /**
+         * Разрешить бросить файл в окно
+         * @param {DragEvent} event Событие перетаскивания
+         * @returns {void}
+         */
+        onDragOver(event) {
+            if (this.$root.loggedIn && event.dataTransfer?.types?.includes("Files")) {
+                event.preventDefault();
+            }
+        },
+
+        /**
+         * Файл compose, брошенный в окно, открывает слой с его содержимым
+         * @param {DragEvent} event Событие сброса
+         * @returns {Promise<void>}
+         */
+        async onDrop(event) {
+            if (!this.$root.loggedIn) {
+                return;
+            }
+
+            const file = event.dataTransfer?.files?.[0];
+
+            if (!file || !DROPPABLE.test(file.name)) {
+                return;
+            }
+
+            event.preventDefault();
+            this.openCreateSheet(await file.text());
+        },
+
+        /**
+         * Находится ли фокус в поле, которому вставка нужнее
+         * @param {EventTarget} target Цель события
+         * @returns {boolean} Признак поля ввода
+         */
+        isEditableTarget(target) {
+            const element = target instanceof HTMLElement ? target : null;
+
+            if (!element) {
+                return false;
+            }
+
+            return element.isContentEditable
+                || [ "INPUT", "TEXTAREA", "SELECT" ].includes(element.tagName);
+        },
+
+        /**
+         * Похоже ли вставленное на стек: только тогда стоит перехватывать вставку
+         * @param {string} text Вставленный текст
+         * @returns {boolean} Признак compose или команды docker run
+         */
+        looksLikeStack(text) {
+            return /^\s*(sudo\s+)?docker\s+run\b/.test(text) || /^\s*services\s*:/m.test(text);
+        },
+
         scanFolder() {
             this.$root.emitAgent(ALL_ENDPOINTS, "requestStackList", (res) => {
                 this.$root.toastRes(res);

@@ -35,13 +35,12 @@
                         </div>
                     </div>
 
-                    <!-- Docker Run -->
-                    <h2 class="mb-3">{{ $t("Docker Run") }}</h2>
-                    <div class="mb-3">
-                        <textarea id="name" v-model="dockerRunCommand" type="text" class="form-control docker-run shadow-box" required placeholder="docker run ..."></textarea>
-                    </div>
-
-                    <button class="btn-normal btn mb-4" @click="convertDockerRun">{{ $t("Convert to Compose") }}</button>
+                    <!-- Развертывание живет в слое поверх списка: одно поле принимает
+                         и compose, и docker run, поэтому отдельного блока здесь нет -->
+                    <button class="btn btn-primary mb-4" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
+                        {{ $t("deployStackAction") }}
+                    </button>
+                    <p class="text-muted">{{ $t("pasteAnywhereHint") }}</p>
                 </div>
                 <!-- Right -->
                 <div class="col-md-5">
@@ -144,7 +143,6 @@ export default {
             },
             importantHeartBeatListLength: 0,
             displayedRecords: [],
-            dockerRunCommand: "",
             showAgentForm: false,
             showRemoveAgentDialog: {},
             showEditAgentNameDialog: {},
@@ -257,23 +255,6 @@ export default {
                 }
             }
             return num;
-        },
-
-        convertDockerRun() {
-            if (this.dockerRunCommand.trim() === "docker run") {
-                throw new Error("Please enter a docker run command");
-            }
-
-            // composerize is working in dev, but after "vite build", it is not working
-            // So pass to backend to do the conversion
-            this.$root.getSocket().emit("composerize", this.dockerRunCommand, (res) => {
-                if (res.ok) {
-                    this.$root.composeTemplate = res.composeTemplate;
-                    this.$router.push("/compose");
-                } else {
-                    this.$root.toastRes(res);
-                }
-            });
         },
 
         /**
