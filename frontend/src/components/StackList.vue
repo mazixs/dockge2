@@ -1,71 +1,62 @@
 <template>
-    <div class="shadow-box mb-3" :style="boxStyle">
+    <div class="shadow-box list-box" :style="boxStyle">
         <div class="list-header">
             <div class="header-top">
-                <!-- TODO -->
-                <button
-                    v-if="false" class="btn btn-outline-normal ms-2" :class="{ 'active': selectMode }" type="button"
-                    @click="selectMode = !selectMode"
-                >
-                    {{ $t("Select") }}
-                </button>
-
-                <div class="placeholder"></div>
                 <div class="search-wrapper">
-                    <a v-if="searchText == ''" class="search-icon">
+                    <a v-if="searchText === ''" class="search-icon">
                         <font-awesome-icon icon="search" />
                     </a>
-                    <a v-if="searchText != ''" class="search-icon" style="cursor: pointer" @click="clearSearchText">
+                    <a v-else class="search-icon" style="cursor: pointer" @click="clearSearchText">
                         <font-awesome-icon icon="times" />
                     </a>
-                    <form>
-                        <input v-model="searchText" class="form-control search-input" autocomplete="off" />
+                    <form @submit.prevent>
+                        <input v-model="searchText" class="form-control search-input" autocomplete="off" :placeholder="$t('searchStacksPlaceholder')" />
                     </form>
+                </div>
+
+                <!-- Фильтры - кнопки с aria-pressed, а не вкладки и не метки -->
+                <div class="filters">
+                    <button
+                        v-for="filter in filters" :key="filter.key"
+                        class="filter" type="button"
+                        :aria-pressed="String(activeFilter === filter.key)"
+                        :class="{ on: activeFilter === filter.key }"
+                        @click="toggleFilter(filter.key)"
+                    >
+                        {{ filter.label }} <span class="count">{{ filter.count }}</span>
+                    </button>
                 </div>
             </div>
 
-            <!-- TODO -->
-            <div v-if="false" class="header-filter">
-                <!--<StackListFilter :filterState="filterState" @update-filter="updateFilter" />-->
-            </div>
-
-            <!-- TODO: Selection Controls -->
-            <div v-if="selectMode && false" class="selection-controls px-2 pt-2">
-                <input v-model="selectAll" class="form-check-input select-input" type="checkbox" />
-
-                <button class="btn-outline-normal" @click="pauseDialog">
-                    <font-awesome-icon icon="pause" size="sm" /> {{
-                        $t("Pause") }}
-                </button>
-                <button class="btn-outline-normal" @click="resumeSelected">
-                    <font-awesome-icon icon="play" size="sm" />
-                    {{ $t("Resume") }}
-                </button>
-
-                <span v-if="selectedStackCount > 0">
-                    {{ $t("selectedStackCount", [selectedStackCount]) }}
-                </span>
+            <!-- Заголовок колонок: что означает каждая часть строки -->
+            <div class="columns" aria-hidden="true">
+                <span>{{ $t("columnStack") }}</span>
+                <span>{{ $t("columnServices") }}</span>
+                <span class="right">{{ $t("columnUpdates") }}</span>
             </div>
         </div>
+
         <div ref="stackList" class="stack-list" :class="{ scrollbar: scrollbar }" :style="stackListStyle">
-            <div v-if="agentStackList[0] && agentStackList[0].stacks.length === 0" class="text-center mt-3">
-                <button class="btn btn-link" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
+            <div v-if="visibleCount === 0" class="empty-list">
+                <p v-if="searchText !== '' || activeFilter">{{ $t("nothingMatchesFilter") }}</p>
+                <button v-else class="btn btn-primary" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
                     {{ $t("addFirstStackMsg") }}
                 </button>
             </div>
+
             <div v-for="(agent, agentIndex) in agentStackList" :key="agentIndex" class="stack-list-inner">
                 <button
-                    v-if="$root.agentCount > 1" class="p-2 agent-select" type="button"
-                    :aria-expanded="!closedAgents.get(agent.endpoint)"
+                    v-if="$root.agentCount > 1"
+                    class="agent-select" type="button"
+                    :aria-expanded="String(!closedAgents.get(agent.endpoint))"
                     @click="closedAgents.set(agent.endpoint, !closedAgents.get(agent.endpoint))"
                 >
-                    <span class="me-1">
-                        <font-awesome-icon v-show="closedAgents.get(agent.endpoint)" icon="chevron-circle-right" />
-                        <font-awesome-icon v-show="!closedAgents.get(agent.endpoint)" icon="chevron-circle-down" />
-                    </span>
+                    <font-awesome-icon :icon="closedAgents.get(agent.endpoint) ? 'chevron-circle-right' : 'chevron-circle-down'" class="me-1" />
                     <span v-if="agent.endpoint === 'current'">{{ $t("currentEndpoint") }}</span>
                     <span v-else>{{ agent.endpoint }}</span>
+                    <span class="count">{{ agent.stacks.length }}</span>
                 </button>
+
                 <StackListItem
                     v-for="(item, index) in agent.stacks"
                     v-show="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)" :key="index" :stack="item" :isSelectMode="selectMode"
@@ -104,11 +95,9 @@ export default {
             disableSelectAllWatcher: false,
             selectedStacks: {},
             windowTop: 0,
-            filterState: {
-                status: null,
-                active: null,
-                tags: null,
-            },
+            /** Нажатый фильтр: attention, stopped, updates или пусто. Живёт в адресе,
+             *  поэтому счётчик в шапке может привести сразу к нужному срезу */
+            activeFilter: this.$route.query.filter ?? "",
             closedAgents: new Map(),
         };
     },
@@ -139,34 +128,7 @@ export default {
         agentStackList() {
             let result = Object.values(this.$root.completeStackList);
 
-            result = result.filter(stack => {
-                // filter by search text
-                // finds stack name, tag name or tag value
-                let searchTextMatch = true;
-                if (this.searchText !== "") {
-                    const loweredSearchText = this.searchText.toLowerCase();
-                    searchTextMatch =
-                        stack.name.toLowerCase().includes(loweredSearchText)
-                        || stack.tags.find(tag => tag.name.toLowerCase().includes(loweredSearchText)
-                            || tag.value?.toLowerCase().includes(loweredSearchText));
-                }
-
-                // filter by active
-                let activeMatch = true;
-                if (this.filterState.active != null && this.filterState.active.length > 0) {
-                    activeMatch = this.filterState.active.includes(stack.active);
-                }
-
-                // filter by tags
-                let tagsMatch = true;
-                if (this.filterState.tags != null && this.filterState.tags.length > 0) {
-                    tagsMatch = stack.tags.map(tag => tag.tag_id) // convert to array of tag IDs
-                        .filter(stackTagId => this.filterState.tags.includes(stackTagId)) // perform Array Intersaction between filter and stack's tags
-                        .length > 0;
-                }
-
-                return searchTextMatch && activeMatch && tagsMatch;
-            });
+            result = result.filter(stack => this.matchesSearch(stack) && this.matchesFilter(stack));
 
             result.sort((m1, m2) => {
 
@@ -234,60 +196,41 @@ export default {
         },
 
         stackListStyle() {
-            //let listHeaderHeight = 107;
-            let listHeaderHeight = 60;
-
-            if (this.selectMode) {
-                listHeaderHeight += 42;
-            }
-
+            // Шапка списка: поиск с фильтрами плюс строка заголовков колонок
             return {
-                "height": `calc(100% - ${listHeaderHeight}px)`
+                "height": "calc(100% - 96px)"
             };
         },
 
-        selectedStackCount() {
-            return Object.keys(this.selectedStacks).length;
+        /** Сколько строк осталось после поиска и фильтра */
+        visibleCount() {
+            return this.agentStackList.reduce((sum, agent) => sum + agent.stacks.length, 0);
         },
 
         /**
-         * Determines if any filters are active.
-         * @returns {boolean} True if any filter is active, false otherwise.
+         * Фильтры со своими счётчиками. Счётчик считается по всему списку, а не по
+         * отфильтрованному, иначе кнопка меняла бы своё число от собственного нажатия.
+         * @returns {Array<object>} Ключ, подпись и счётчик
          */
-        filtersActive() {
-            return this.filterState.status != null || this.filterState.active != null || this.filterState.tags != null || this.searchText !== "";
-        }
+        filters() {
+            const all = Object.values(this.$root.completeStackList);
+
+            return [
+                { key: "attention",
+                    label: this.$t("filterAttention"),
+                    count: all.filter((stack) => stack.status === ATTENTION).length },
+                { key: "stopped",
+                    label: this.$t("filterStopped"),
+                    count: all.filter((stack) => stack.status === EXITED || stack.status === CREATED_FILE || stack.status === CREATED_STACK).length },
+                { key: "updates",
+                    label: this.$t("filterUpdates"),
+                    count: all.filter((stack) => (stack.source?.behind ?? 0) > 0).length },
+            ];
+        },
     },
     watch: {
-        searchText() {
-            for (let stack of this.agentStackList) {
-                if (!this.selectedStacks[stack.id]) {
-                    if (this.selectAll) {
-                        this.disableSelectAllWatcher = true;
-                        this.selectAll = false;
-                    }
-                    break;
-                }
-            }
-        },
-        selectAll() {
-            if (!this.disableSelectAllWatcher) {
-                this.selectedStacks = {};
-
-                if (this.selectAll) {
-                    this.agentStackList.forEach((item) => {
-                        this.selectedStacks[item.id] = true;
-                    });
-                }
-            } else {
-                this.disableSelectAllWatcher = false;
-            }
-        },
-        selectMode() {
-            if (!this.selectMode) {
-                this.selectAll = false;
-                this.selectedStacks = {};
-            }
+        "$route.query.filter"(value) {
+            this.activeFilter = value ?? "";
         },
     },
     mounted() {
@@ -316,13 +259,65 @@ export default {
         clearSearchText() {
             this.searchText = "";
         },
+
         /**
-         * Update the StackList Filter
-         * @param {object} newFilter Object with new filter
+         * Совпадает ли стек с поиском. Ищем по имени и по именам сервисов: владелец
+         * помнит «gotenberg», а не то, в каком стеке он лежит.
+         * @param {object} stack Стек из списка
+         * @returns {boolean} Показывать ли строку
+         */
+        matchesSearch(stack) {
+            if (this.searchText === "") {
+                return true;
+            }
+
+            const needle = this.searchText.toLowerCase();
+
+            if (stack.name.toLowerCase().includes(needle)) {
+                return true;
+            }
+
+            return (stack.services ?? []).some((service) => service.name.toLowerCase().includes(needle));
+        },
+
+        /**
+         * Совпадает ли стек с нажатым фильтром
+         * @param {object} stack Стек из списка
+         * @returns {boolean} Показывать ли строку
+         */
+        matchesFilter(stack) {
+            switch (this.activeFilter) {
+                case "attention":
+                    return stack.status === ATTENTION;
+                case "stopped":
+                    return stack.status === EXITED || stack.status === CREATED_FILE || stack.status === CREATED_STACK;
+                case "updates":
+                    return (stack.source?.behind ?? 0) > 0;
+                default:
+                    return true;
+            }
+        },
+
+        /**
+         * Нажатие на фильтр включает его или снимает: фильтр - переключатель, а не вкладка.
+         * Значение уходит в адрес, чтобы срез можно было открыть ссылкой.
+         * @param {string} key Ключ фильтра
          * @returns {void}
          */
-        updateFilter(newFilter) {
-            this.filterState = newFilter;
+        toggleFilter(key) {
+            const next = this.activeFilter === key ? "" : key;
+            this.activeFilter = next;
+
+            const query = { ...this.$route.query };
+
+            if (next) {
+                query.filter = next;
+            } else {
+                delete query.filter;
+            }
+
+            this.$router.replace({ path: this.$route.path,
+                query });
         },
         /**
          * Deselect a stack
@@ -390,15 +385,10 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.shadow-box {
-    height: calc(100vh - 150px);
+.list-box {
     position: sticky;
     top: 10px;
-}
-
-.small-padding {
-    padding-left: 5px !important;
-    padding-right: 5px !important;
+    padding: 10px;
 }
 
 // Цвет берётся токеном, а не правилом внутри темы: иначе одна из тем получит
@@ -407,93 +397,130 @@ export default {
     background-color: var(--surface-panel);
     border-bottom: 1px solid var(--line-hair);
     border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-    margin: -10px;
-    margin-bottom: 10px;
-    padding: 10px;
+    margin: -10px -10px 8px;
+    padding: 8px 10px;
 }
 
 .header-top {
     display: flex;
     justify-content: space-between;
     align-items: center;
-}
-
-.header-filter {
-    display: flex;
-    align-items: center;
-}
-
-@media (max-width: 770px) {
-    .list-header {
-        margin: -20px;
-        margin-bottom: 10px;
-        padding: 5px;
-    }
+    gap: var(--gap-md);
+    flex-wrap: wrap;
 }
 
 .search-wrapper {
     display: flex;
     align-items: center;
+    flex: 1 1 220px;
+    min-width: 0;
+
+    form {
+        flex: 1;
+        min-width: 0;
+    }
 }
 
 .search-icon {
-    padding: 10px;
-    color: var(--text-muted);
+    padding: 0 var(--gap-sm) 0 0;
+    color: var(--text-faint);
 
-    // Clear filter button (X)
     svg[data-icon="times"] {
         cursor: pointer;
-        transition: all ease-in-out 0.1s;
 
         &:hover {
-            opacity: 0.5;
+            color: var(--state-failed);
         }
     }
 }
 
 .search-input {
-    max-width: 15em;
-}
-
-.stack-item {
     width: 100%;
 }
 
-.tags {
-    margin-top: 4px;
-    padding-left: 67px;
+// Фильтр - переключатель: нажатое состояние видно рамкой и фоном, а не только цветом
+.filters {
     display: flex;
+    gap: var(--gap-xs);
     flex-wrap: wrap;
-    gap: 0;
 }
 
-.bottom-style {
-    padding-left: 67px;
-    margin-top: 5px;
+.filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--control-height);
+    padding: 0 var(--gap-sm);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-control);
+    background: none;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+
+    &:hover {
+        background-color: var(--surface-raised);
+        color: var(--text-strong);
+    }
+
+    &.on {
+        border-color: var(--accent);
+        background-color: var(--accent-soft);
+        color: var(--text-strong);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+
+    .count {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        border-radius: var(--radius-pill);
+        padding: 0 5px;
+        background-color: var(--surface-sunken);
+    }
 }
 
-.selection-controls {
-    margin-top: 5px;
+// Заголовок колонок повторяет сетку строки, поэтому подписи стоят над своими данными
+.columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(90px, max-content);
+    gap: var(--gap-md);
+    padding: 6px var(--gap-md) 0;
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+
+    .right {
+        justify-self: end;
+    }
+}
+
+.stack-list {
+    &.scrollbar {
+        overflow-y: auto;
+    }
+}
+
+.empty-list {
+    padding: var(--gap-lg);
+    text-align: center;
+    color: var(--text-faint);
+}
+
+// Группа агента: кнопка, потому что она сворачивает список
+.agent-select {
     display: flex;
     align-items: center;
-    gap: 10px;
-}
-
-// Группа агента нажимается, поэтому это button: у div нет ни фокуса, ни роли.
-.agent-select {
-    cursor: pointer;
-    font-size: var(--text-base);
-    font-weight: 500;
-    color: var(--text-muted);
-    background: none;
-    border: 0;
+    gap: var(--gap-xs);
     width: 100%;
     min-height: var(--control-height);
-    padding-left: 10px;
-    padding-right: 10px;
-    display: flex;
-    align-items: center;
-    user-select: none;
+    padding: 0 var(--gap-md);
+    background: none;
+    border: 0;
+    color: var(--text-faint);
+    font-size: var(--text-sm);
+    font-weight: 500;
 
     &:hover {
         color: var(--text-strong);
@@ -502,6 +529,26 @@ export default {
     &:focus-visible {
         outline: var(--focus-ring);
         outline-offset: var(--focus-offset);
+    }
+
+    .count {
+        margin-left: auto;
+        font-family: var(--font-mono);
+    }
+}
+
+@media (max-width: 1100px) {
+    .list-box {
+        position: static;
+        height: auto;
+    }
+
+    .columns {
+        grid-template-columns: minmax(0, 1fr) minmax(90px, max-content);
+
+        span:nth-child(2) {
+            display: none;
+        }
     }
 }
 </style>

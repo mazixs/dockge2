@@ -16,6 +16,15 @@
                 <span class="title">Dockge</span>
             </router-link>
 
+            <!-- Счётчики состояний: с шапки видно, есть ли повод куда-то идти -->
+            <div v-if="$root.loggedIn" class="tally me-3">
+                <span class="tally-item tally-running"><i class="dot" aria-hidden="true"></i>{{ $t("tallyRunning", runningNum) }}</span>
+                <router-link to="/?filter=attention" class="tally-item tally-attention" :class="{ zero: attentionNum === 0 }">
+                    <i class="dot" aria-hidden="true"></i>{{ $t("tallyAttention", attentionNum) }}
+                </router-link>
+                <span class="tally-item tally-stopped"><i class="dot" aria-hidden="true"></i>{{ $t("tallyStopped", stoppedNum) }}</span>
+            </div>
+
             <button v-if="$root.loggedIn" class="btn btn-primary me-3 create-stack-btn" type="button" @click="openCreateSheet()">
                 <font-awesome-icon icon="plus" /> {{ $t("deployStackAction") }}
             </button>
@@ -107,7 +116,7 @@ import Login from "../components/Login.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
 import TerminalDock from "../components/TerminalDock.vue";
 import { compareVersions } from "compare-versions";
-import { ALL_ENDPOINTS } from "../../../common/util-common";
+import { ALL_ENDPOINTS, ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
 
 /** Имена файлов, которые имеет смысл принимать перетаскиванием */
 const DROPPABLE = /^(compose|docker-compose)\.(ya?ml)$|^\.env/i;
@@ -134,6 +143,23 @@ export default {
             classes[this.$root.theme] = true;
             classes["mobile"] = this.$root.isMobile;
             return classes;
+        },
+
+        /** Стеки всех агентов одним списком: счётчики считаются по всему хозяйству */
+        allStacks() {
+            return Object.values(this.$root.completeStackList);
+        },
+
+        runningNum() {
+            return this.allStacks.filter((stack) => stack.status === RUNNING).length;
+        },
+
+        attentionNum() {
+            return this.allStacks.filter((stack) => stack.status === ATTENTION).length;
+        },
+
+        stoppedNum() {
+            return this.allStacks.filter((stack) => [ EXITED, CREATED_FILE, CREATED_STACK ].includes(stack.status)).length;
         },
 
         hasNewVersion() {
@@ -273,6 +299,60 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+
+// Счётчики в шапке: точка плюс число со словом, ничего лишнего
+.tally {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
+    font-size: var(--text-sm);
+}
+
+.tally-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    text-decoration: none;
+
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-pill);
+        flex: none;
+    }
+
+    &.tally-attention {
+        color: var(--text-strong);
+
+        .dot {
+            background-color: var(--state-attention);
+        }
+
+        &.zero {
+            color: var(--text-muted);
+        }
+    }
+
+    &.tally-running .dot {
+        background-color: var(--state-running);
+    }
+
+    &.tally-stopped .dot {
+        background-color: var(--state-stopped);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+}
+
+@media (max-width: 1200px) {
+    .tally-item.tally-stopped {
+        display: none;
+    }
+}
 // Оболочка читает только токены: тема меняется вместе с ними, поэтому блока
 // `.dark` здесь больше нет.
 
