@@ -15,21 +15,19 @@ test.describe("stack status in the UI", () => {
         await expect(attentionRow.locator(".badge")).not.toHaveText(/inactive/i);
     });
 
-    test("the stack page explains why a stack needs attention", async ({ page }) => {
-        await page.goto(`/compose/${E2E_ATTENTION_STACK}`);
+    test("инспектор называет причину и не выдаёт работающий сервис за мёртвый", async ({ page }) => {
+        await page.goto(`/stack/${E2E_ATTENTION_STACK}`);
 
-        // The reason names the service and what is wrong with it
-        const panel = page.locator(".alert-warning", { hasText: "Needs attention" });
-        await expect(panel).toBeVisible();
-        await expect(panel).toContainText("init");
-        await expect(panel).toContainText("service stopped");
+        // Причина названа одной строкой: сервис и что с ним не так
+        const attention = page.locator(".attention").first();
+        await expect(attention).toBeVisible();
+        await expect(attention).toContainText("init");
+        await expect(attention).toContainText("service stopped");
 
-        // The running service is not presented as dead
-        const runningService = page.locator(".container", { hasText: "app" }).first();
-        await expect(runningService.locator(".badge").first()).toHaveText(/running/i);
-
-        // The stopped one-shot container is marked, with its own instance line
-        const stoppedService = page.locator(".container", { hasText: "init" }).first();
-        await expect(stoppedService.locator(".instance-list")).toContainText("service stopped");
+        // Таблица сервисов: работающий помечен running, остановленный - нет
+        const services = page.locator("table.services");
+        await expect(services).toBeVisible();
+        await expect(services.locator("tbody tr", { hasText: "app" }).locator(".badge")).toHaveText(/running/i);
+        await expect(services.locator("tbody tr", { hasText: "init" }).locator(".badge")).not.toHaveText(/running/i);
     });
 });

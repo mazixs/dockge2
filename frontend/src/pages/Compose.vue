@@ -3,69 +3,32 @@
         <div>
             <h1 v-if="isAdd" class="mb-3">{{ $t("compose") }}</h1>
             <h1 v-else class="mb-3">
-                <Uptime :stack="globalStack" :pill="true" /> {{ stack.name }}
+                <!-- Инспектор остаётся тем, откуда пришли: имя стека ведёт назад -->
+                <router-link :to="url" class="back">{{ stack.name }}</router-link>
+                <span class="file-name">/ {{ stack.composeFileName }}</span>
                 <span v-if="$root.agentCount > 1 && endpoint !== ''" class="agent-name">
                     ({{ endpointDisplay }})
                 </span>
             </h1>
 
             <div v-if="stack.isManagedByDockge" class="mb-3">
-                <div class="btn-group me-2" role="group">
-                    <button v-if="isEditMode" class="btn btn-primary" :disabled="processing" @click="deployStack">
-                        <font-awesome-icon icon="rocket" class="me-1" />
-                        {{ $t("deployStack") }}
-                    </button>
+                <!-- Здесь только правка файла: остановить, обновить и удалить можно из инспектора -->
+                <button v-if="isEditMode" class="btn btn-primary me-2" :disabled="processing" @click="deployStack">
+                    <font-awesome-icon icon="rocket" class="me-1" />
+                    {{ $t("deployStack") }}
+                </button>
 
-                    <button v-if="isEditMode" class="btn btn-normal" :disabled="processing" @click="saveStack">
-                        <font-awesome-icon icon="save" class="me-1" />
-                        {{ $t("saveStackDraft") }}
-                    </button>
+                <button v-if="isEditMode" class="btn btn-normal me-2" :disabled="processing" @click="saveStack">
+                    <font-awesome-icon icon="save" class="me-1" />
+                    {{ $t("saveStackDraft") }}
+                </button>
 
-                    <button v-if="!isEditMode" class="btn btn-secondary" :disabled="processing" @click="enableEditMode">
-                        <font-awesome-icon icon="pen" class="me-1" />
-                        {{ $t("editStack") }}
-                    </button>
-
-                    <button v-if="!isEditMode && !active" class="btn btn-primary" :disabled="processing" @click="startStack">
-                        <font-awesome-icon icon="play" class="me-1" />
-                        {{ $t("startStack") }}
-                    </button>
-
-                    <button v-if="!isEditMode && active" class="btn btn-normal " :disabled="processing" @click="restartStack">
-                        <font-awesome-icon icon="rotate" class="me-1" />
-                        {{ $t("restartStack") }}
-                    </button>
-
-                    <button v-if="!isEditMode" class="btn btn-normal" :disabled="processing" @click="updateStack">
-                        <font-awesome-icon icon="cloud-arrow-down" class="me-1" />
-                        {{ $t("updateStack") }}
-                    </button>
-
-                    <button v-if="!isEditMode && active" class="btn btn-normal" :disabled="processing" @click="stopStack">
-                        <font-awesome-icon icon="stop" class="me-1" />
-                        {{ $t("stopStack") }}
-                    </button>
-
-                    <BDropdown right text="" variant="normal">
-                        <BDropdownItem @click="downStack">
-                            <font-awesome-icon icon="stop" class="me-1" />
-                            {{ $t("downStack") }}
-                        </BDropdownItem>
-                    </BDropdown>
-                </div>
+                <button v-if="!isEditMode" class="btn btn-primary me-2" :disabled="processing" @click="enableEditMode">
+                    <font-awesome-icon icon="pen" class="me-1" />
+                    {{ $t("editStack") }}
+                </button>
 
                 <button v-if="isEditMode && !isAdd" class="btn btn-normal" :disabled="processing" @click="discardStack">{{ $t("discardStack") }}</button>
-                <button v-if="!isEditMode" class="btn btn-danger" :disabled="processing" @click="showDeleteDialog = !showDeleteDialog">
-                    <font-awesome-icon icon="trash" class="me-1" />
-                    {{ $t("deleteStack") }}
-                </button>
-            </div>
-
-            <!-- URLs -->
-            <div v-if="urls.length > 0" class="mb-3">
-                <a v-for="(urlItem, index) in urls" :key="index" target="_blank" :href="urlItem.url">
-                    <span class="badge bg-secondary me-2">{{ urlItem.display }}</span>
-                </a>
             </div>
 
             <!-- Progress Terminal -->
@@ -106,22 +69,54 @@
                         </div>
                     </div>
 
-                    <!-- Problems that explain an attention status -->
-                    <div v-if="!isEditMode && stackIssues.length > 0" class="alert alert-warning" role="alert">
-                        <div class="mb-1">
-                            <font-awesome-icon icon="triangle-exclamation" class="me-1" />
-                            {{ $t("stackIssues") }}
+                    <h4 class="mb-3">{{ stack.composeFileName }}</h4>
+
+                    <!-- YAML editor -->
+                    <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
+                        <code-mirror
+                            ref="editor"
+                            v-model="stack.composeYAML"
+                            :extensions="extensions"
+                            minimal
+                            wrap
+                            dark
+                            tab
+                            :disabled="!isEditMode"
+                            :hasFocus="editorFocus"
+                            @change="yamlCodeChange"
+                        />
+                    </div>
+                    <div v-if="isEditMode" class="mb-3">
+                        {{ yamlError }}
+                    </div>
+
+                    <!-- A file the structured editor cannot rebuild stays in text mode -->
+                    <div v-if="isEditMode && composeAnalysis && !structuredEditsEnabled && unsupportedConstructs.length > 0" class="alert alert-warning" role="alert">
+                        <font-awesome-icon icon="triangle-exclamation" class="me-1" />
+                        {{ $t("textModeOnly", [ unsupportedConstructs.join(", ") ]) }}
+                    </div>
+
+                    <!-- ENV editor -->
+                    <div v-if="isEditMode">
+                        <h4 class="mb-3">{{ activeEnvFileName }}</h4>
+                        <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
+                            <code-mirror
+                                ref="editor"
+                                v-model="stack.composeENV"
+                                :extensions="extensionsEnv"
+                                minimal
+                                wrap
+                                dark
+                                tab
+                                :disabled="!isEditMode"
+                                :hasFocus="editorFocus"
+                                @change="yamlCodeChange"
+                            />
                         </div>
-                        <ul class="mb-0">
-                            <li v-for="issue in stackIssues" :key="`${issue.service}-${issue.name}-${issue.reason}`">
-                                {{ issue.service }}<span v-if="issue.name"> / {{ issue.name }}</span>:
-                                {{ $t(issue.reason) }}<span v-if="issue.detail"> ({{ issue.detail }})</span>
-                            </li>
-                        </ul>
                     </div>
 
                     <!-- Containers -->
-                    <h4 class="mb-3">{{ $t("container", 2) }}</h4>
+                    <h4 v-if="isEditMode" class="mb-3">{{ $t("container", 2) }}</h4>
 
                     <div v-if="isEditMode && structuredEditsEnabled" class="input-group mb-3">
                         <input
@@ -135,7 +130,7 @@
                         </button>
                     </div>
 
-                    <div ref="containerList">
+                    <div v-if="isEditMode" ref="containerList">
                         <Container
                             v-for="(service, name) in jsonConfig.services"
                             :key="name"
@@ -166,49 +161,8 @@
                             </div>
                         </div>
                     </div>
-
-                    <!-- Combined Terminal Output -->
-                    <div v-show="!isEditMode">
-                        <h4 class="mb-3">{{ $t("terminal") }}</h4>
-                        <Terminal
-                            ref="combinedTerminal"
-                            class="mb-3 terminal"
-                            :name="combinedTerminalName"
-                            :endpoint="endpoint"
-                            :rows="combinedTerminalRows"
-                            :cols="combinedTerminalCols"
-                            style="height: 315px;"
-                        ></Terminal>
-                    </div>
                 </div>
                 <div class="col-lg-6">
-                    <h4 class="mb-3">{{ stack.composeFileName }}</h4>
-
-                    <!-- YAML editor -->
-                    <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
-                        <code-mirror
-                            ref="editor"
-                            v-model="stack.composeYAML"
-                            :extensions="extensions"
-                            minimal
-                            wrap
-                            dark
-                            tab
-                            :disabled="!isEditMode"
-                            :hasFocus="editorFocus"
-                            @change="yamlCodeChange"
-                        />
-                    </div>
-                    <div v-if="isEditMode" class="mb-3">
-                        {{ yamlError }}
-                    </div>
-
-                    <!-- A file the structured editor cannot rebuild stays in text mode -->
-                    <div v-if="isEditMode && composeAnalysis && !structuredEditsEnabled && unsupportedConstructs.length > 0" class="alert alert-warning" role="alert">
-                        <font-awesome-icon icon="triangle-exclamation" class="me-1" />
-                        {{ $t("textModeOnly", [ unsupportedConstructs.join(", ") ]) }}
-                    </div>
-
                     <!-- Files of the stack directory -->
                     <div v-if="!isAdd && stack.isManagedByDockge && fileInventory">
                         <h4 class="mb-3">{{ $t("stackFiles") }}</h4>
@@ -230,25 +184,6 @@
                             :disabled="processing"
                             @updated="onSecretsUpdated"
                         />
-                    </div>
-
-                    <!-- ENV editor -->
-                    <div v-if="isEditMode">
-                        <h4 class="mb-3">{{ activeEnvFileName }}</h4>
-                        <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
-                            <code-mirror
-                                ref="editor"
-                                v-model="stack.composeENV"
-                                :extensions="extensionsEnv"
-                                minimal
-                                wrap
-                                dark
-                                tab
-                                :disabled="!isEditMode"
-                                :hasFocus="editorFocus"
-                                @change="yamlCodeChange"
-                            />
-                        </div>
                     </div>
 
                     <div v-if="isEditMode && structuredEditsEnabled">
@@ -277,14 +212,24 @@
                 </div>
             </div>
 
+            <!-- Вывод стека: пока нет общего нижнего дока, он идёт во всю ширину под файлом -->
+            <!-- Combined Terminal Output -->
+            <div v-show="!isEditMode">
+                <h4 class="mb-3">{{ $t("terminal") }}</h4>
+                <Terminal
+                    ref="combinedTerminal"
+                    class="mb-3 terminal"
+                    :name="combinedTerminalName"
+                    :endpoint="endpoint"
+                    :rows="combinedTerminalRows"
+                    :cols="combinedTerminalCols"
+                    style="height: 315px;"
+                ></Terminal>
+            </div>
+
             <div v-if="!stack.isManagedByDockge && !processing">
                 {{ $t("stackNotManagedByDockgeMsg") }}
             </div>
-
-            <!-- Delete Dialog -->
-            <BModal v-model="showDeleteDialog" :cancelTitle="$t('cancel')" :okTitle="$t('deleteStack')" okVariant="danger" @ok="deleteDialog">
-                {{ $t("deleteStackMsg") }}
-            </BModal>
         </div>
     </transition>
 </template>
@@ -304,12 +249,9 @@ import {
     envsubstYAML,
     getCombinedTerminalName,
     getComposeTerminalName,
-    PROGRESS_TERMINAL_ROWS,
-    RUNNING,
-    ATTENTION
+    PROGRESS_TERMINAL_ROWS
 } from "../../../common/util-common";
 import { analyseComposeSource, applyStructuredEdit, canEditStructurally } from "../../../common/compose-editor";
-import { BModal } from "bootstrap-vue-next";
 import NetworkInput from "../components/NetworkInput.vue";
 import StackFilesEditor from "../components/StackFilesEditor.vue";
 import SecretEditor from "../components/SecretEditor.vue";
@@ -338,7 +280,6 @@ export default {
         CodeMirror,
         StackFilesEditor,
         SecretEditor,
-        BModal,
     },
     beforeRouteUpdate(to, from, next) {
         this.exitConfirm(next);
@@ -387,7 +328,6 @@ export default {
 
             },
             serviceStatusList: {},
-            serviceIssues: [],
             fileInventory: null,
             composeAnalysis: null,
             /** Text the current model and analysis were built from */
@@ -401,7 +341,6 @@ export default {
             dockerStats: {},
             isEditMode: false,
             submitted: false,
-            showDeleteDialog: false,
             newContainerName: "",
             stopServiceStatusTimeout: false,
             stopDockerStatsTimeout: false,
@@ -451,34 +390,6 @@ export default {
             return this.$root.completeStackList[this.stack.name + "_" + this.endpoint];
         },
 
-        status() {
-            return this.globalStack?.status;
-        },
-
-        active() {
-            if (this.status === RUNNING) {
-                return true;
-            }
-
-            // ATTENTION covers both "degraded but up" and "down and broken". Only the first
-            // one is active: a stack without a single running container needs Start.
-            if (this.status === ATTENTION) {
-                return this.hasRunningInstance;
-            }
-
-            return false;
-        },
-
-        /**
-         * Whether at least one container of this stack is running
-         * @returns {boolean} True when a running instance was reported
-         */
-        hasRunningInstance() {
-            return Object.values(this.serviceStatusList ?? {}).some(
-                instances => Array.isArray(instances) && instances.some(instance => instance.state === "running"),
-            );
-        },
-
         /**
          * Whether the structured editor may write the compose file back.
          * Files with include, custom tags, anchors or merge keys stay in text mode.
@@ -519,17 +430,6 @@ export default {
             return Object.keys(this.jsonConfig?.services ?? {});
         },
 
-        /**
-         * Problems reported by the backend for this stack
-         * @returns {Array<object>} Issue list
-         */
-        stackIssues() {
-            if (Array.isArray(this.serviceIssues) && this.serviceIssues.length > 0) {
-                return this.serviceIssues;
-            }
-            return this.globalStack?.issues ?? [];
-        },
-
         terminalName() {
             if (!this.stack.name) {
                 return "";
@@ -552,11 +452,12 @@ export default {
             return this.stack.endpoint || this.$route.params.endpoint || "";
         },
 
+        /** Куда возвращаться после сохранения: инспектор стека, а не редактор */
         url() {
             if (this.stack.endpoint) {
-                return `/compose/${this.stack.name}/${this.stack.endpoint}`;
+                return `/stack/${this.stack.name}/${this.stack.endpoint}`;
             } else {
-                return `/compose/${this.stack.name}`;
+                return `/stack/${this.stack.name}`;
             }
         },
     },
@@ -736,7 +637,6 @@ export default {
             this.$root.emitAgent(this.endpoint, "serviceStatusList", this.stack.name, (res) => {
                 if (res.ok) {
                     this.serviceStatusList = res.serviceStatusList;
-                    this.serviceIssues = res.issues ?? [];
                 }
                 if (!this.stopServiceStatusTimeout) {
                     this.startServiceStatusTimeout();
@@ -856,60 +756,6 @@ export default {
                 if (res.ok) {
                     this.isEditMode = false;
                     this.$router.push(this.url);
-                }
-            });
-        },
-
-        startStack() {
-            this.processing = true;
-
-            this.$root.emitAgent(this.endpoint, "startStack", this.stack.name, (res) => {
-                this.processing = false;
-                this.$root.toastRes(res);
-            });
-        },
-
-        stopStack() {
-            this.processing = true;
-
-            this.$root.emitAgent(this.endpoint, "stopStack", this.stack.name, (res) => {
-                this.processing = false;
-                this.$root.toastRes(res);
-            });
-        },
-
-        downStack() {
-            this.processing = true;
-
-            this.$root.emitAgent(this.endpoint, "downStack", this.stack.name, (res) => {
-                this.processing = false;
-                this.$root.toastRes(res);
-            });
-        },
-
-        restartStack() {
-            this.processing = true;
-
-            this.$root.emitAgent(this.endpoint, "restartStack", this.stack.name, (res) => {
-                this.processing = false;
-                this.$root.toastRes(res);
-            });
-        },
-
-        updateStack() {
-            this.processing = true;
-
-            this.$root.emitAgent(this.endpoint, "updateStack", this.stack.name, (res) => {
-                this.processing = false;
-                this.$root.toastRes(res);
-            });
-        },
-
-        deleteDialog() {
-            this.$root.emitAgent(this.endpoint, "deleteStack", this.stack.name, (res) => {
-                this.$root.toastRes(res);
-                if (res.ok) {
-                    this.$router.push("/");
                 }
             });
         },
@@ -1121,6 +967,19 @@ export default {
 
 <style scoped lang="scss">
 @use "../styles/vars.scss" as *;
+
+h1 {
+    .back {
+        text-decoration: none;
+    }
+
+    .file-name {
+        margin-left: 8px;
+        font-family: var(--font-mono);
+        font-size: var(--text-md);
+        color: var(--text-faint);
+    }
+}
 
 .terminal {
     height: 200px;

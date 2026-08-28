@@ -429,7 +429,7 @@ export default {
                 this.visible = false;
                 this.reset();
                 this.$root.toastRes(res);
-                this.$router.push(`/compose/${name}`);
+                this.$router.push(this.endpoint ? `/stack/${name}/${this.endpoint}` : `/stack/${name}`);
             });
         },
 

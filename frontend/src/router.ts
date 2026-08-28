@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard.vue";
 import DashboardHome from "./pages/DashboardHome.vue";
 import Console from "./pages/Console.vue";
 import Compose from "./pages/Compose.vue";
+import StackInspector from "./pages/StackInspector.vue";
 import ContainerTerminal from "./pages/ContainerTerminal.vue";
 
 const Settings = () => import("./pages/Settings.vue");
@@ -31,6 +32,16 @@ const routes = [
                         path: "/",
                         component: DashboardHome,
                         children: [
+                            {
+                                path: "/stack/:stackName",
+                                component: StackInspector,
+                                name: "stackInspector",
+                            },
+                            {
+                                path: "/stack/:stackName/:endpoint",
+                                component: StackInspector,
+                                name: "stackInspectorEndpoint",
+                            },
                             {
                                 path: "/compose",
                                 component: Compose,
