@@ -67,8 +67,8 @@ test.describe("строка списка стеков", () => {
         await expect(attention.getByRole("button", { name: /logs of init|логи init/i })).toBeVisible();
         await expect(attention.getByRole("button", { name: /restart init|перезапустить init/i })).toBeVisible();
 
-        // Подпись таблицы честно говорит, насколько свежие числа
-        await expect(page.locator(".inspector .services caption")).toHaveText(/state as of|состояние на/i);
+        // Подпись раздела честно говорит, насколько свежие числа
+        await expect(page.locator(".inspector .services-title")).toHaveText(/state as of|состояние на/i);
     });
 });
 

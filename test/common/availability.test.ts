@@ -22,8 +22,8 @@ test("окно без наблюдений не становится зелён�
     assert.equal(nothing.coveredMs, 0);
 
     // Наблюдения идут одиннадцать секунд: процента быть не может
-    const fresh = computeAvailability([ { status: RUNNING,
-        at: NOW - 11_000 } ], DAY, NOW);
+    const fresh = computeAvailability([{ status: RUNNING,
+        at: NOW - 11_000 }], DAY, NOW);
     assert.equal(fresh.verdict, "noData");
     assert.equal(fresh.ratio, null);
     assert.equal(fresh.coveredMs, 11_000);
@@ -31,8 +31,8 @@ test("окно без наблюдений не становится зелён�
 });
 
 test("полное окно без сбоев не превращается в «100%»", () => {
-    const clean = computeAvailability([ { status: RUNNING,
-        at: NOW - 2 * DAY } ], DAY, NOW);
+    const clean = computeAvailability([{ status: RUNNING,
+        at: NOW - 2 * DAY }], DAY, NOW);
 
     assert.equal(clean.verdict, "clean");
     assert.equal(clean.ratio, 1);
@@ -128,11 +128,11 @@ test("записи из будущего игнорируются, а поряд
 });
 
 test("порог покрытия объявлен, а не спрятан в вычислении", () => {
-    const justUnder = computeAvailability([ { status: RUNNING,
-        at: NOW - MIN_COVERAGE_MS + 1000 } ], DAY, NOW);
+    const justUnder = computeAvailability([{ status: RUNNING,
+        at: NOW - MIN_COVERAGE_MS + 1000 }], DAY, NOW);
     assert.equal(justUnder.verdict, "noData");
 
-    const justOver = computeAvailability([ { status: RUNNING,
-        at: NOW - MIN_COVERAGE_MS - 1000 } ], DAY, NOW);
+    const justOver = computeAvailability([{ status: RUNNING,
+        at: NOW - MIN_COVERAGE_MS - 1000 }], DAY, NOW);
     assert.equal(justOver.verdict, "clean");
 });

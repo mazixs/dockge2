@@ -4,6 +4,8 @@
         :label="statusName"
         :attention="needsAttention"
         :fixed-width="fixedWidth"
+        :compact="compact"
+        :dot-only="dotOnly"
         :title="issueText"
     />
 </template>
@@ -23,6 +25,16 @@ export default {
         },
         /** Ровная ширина чипа: в списке имена стеков должны начинаться на одной вертикали */
         fixedWidth: {
+            type: Boolean,
+            default: false,
+        },
+        /** Тихий вид для строки списка */
+        compact: {
+            type: Boolean,
+            default: false,
+        },
+        /** Только точка: слово уходит в скрытый текст */
+        dotOnly: {
             type: Boolean,
             default: false,
         },

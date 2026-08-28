@@ -4,22 +4,16 @@
         class="item"
         :class="{ 'dim': !stack.isManagedByDockge, 'fresh': isFresh }"
     >
-        <!-- Стек, агент и источник: одна колонка, потому что читаются вместе -->
+        <!-- Стек, агент и источник: одна строка, как в таблице -->
         <div class="who">
-            <Uptime :stack="stack" :fixed-width="true" />
-            <div class="naming">
-                <div class="title">
-                    <span class="name">{{ stackName }}</span>
-                    <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
-                </div>
-                <div class="origin">
-                    <span class="agent">{{ agentLabel }}</span>
-                    <span class="source" :class="`source-${sourceKind}`" :title="sourceTitle">{{ sourceLabel }}</span>
-                </div>
-            </div>
+            <Uptime :stack="stack" :compact="true" :dot-only="true" />
+            <span class="name">{{ stackName }}</span>
+            <span class="agent">{{ agentLabel }}</span>
+            <span class="source" :class="`source-${sourceKind}`" :title="sourceTitle">{{ sourceLabel }}</span>
+            <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
         </div>
 
-        <!-- Сервисы: чип на каждый, лишние сворачиваются в «+N», но не исчезают -->
+        <!-- Сервисы: точка и имя, лишние сворачиваются в «+N», но не исчезают -->
         <div class="services">
             <span
                 v-for="service in shownServices" :key="service.name"
@@ -28,8 +22,8 @@
             >
                 <i class="dot" aria-hidden="true"></i>{{ service.name }}
             </span>
-            <span v-if="hiddenServices > 0" class="service more" :title="hiddenServiceNames">+{{ hiddenServices }}</span>
-            <span v-if="services.length === 0" class="service empty">{{ $t("noServicesYet") }}</span>
+            <span v-if="hiddenServices > 0" class="more" :title="hiddenServiceNames">+{{ hiddenServices }}</span>
+            <span v-if="services.length === 0" class="more">{{ $t("noServicesYet") }}</span>
         </div>
 
         <!-- Доступность: процент только там, где наблюдений хватает на вывод -->
@@ -274,16 +268,15 @@ export default {
 // независимо от порядка подключения файлов
 a.item {
     display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(120px, max-content) minmax(90px, max-content);
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(130px, max-content) minmax(80px, max-content);
     align-items: center;
     gap: var(--gap-md);
     min-height: var(--row-height);
-    padding: var(--gap-sm) var(--gap-md);
-    border-radius: var(--radius-control);
-    border-left: 3px solid transparent;
+    padding: 0 var(--gap-md);
+    border-bottom: 1px solid var(--line-hair);
+    border-left: 2px solid transparent;
     text-decoration: none;
     color: var(--text-strong);
-    transition: background-color ease-in-out 0.12s;
 
     &:hover {
         background-color: var(--surface-raised);
@@ -297,7 +290,7 @@ a.item {
 
     &:focus-visible {
         outline: var(--focus-ring);
-        outline-offset: var(--focus-offset);
+        outline-offset: calc(var(--focus-offset) * -1);
     }
 
     &.dim {
@@ -318,45 +311,36 @@ a.item {
     min-width: 0;
 }
 
-.naming {
-    min-width: 0;
-}
-
-.title {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-sm);
-}
-
 .name {
     font-weight: 600;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.origin {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-sm);
+.agent {
     font-size: var(--text-xs);
     color: var(--text-faint);
+    white-space: nowrap;
 }
 
+// Технические значения набираются моношрифтом: их читают, а не проглядывают
 .source {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
     border: 1px solid var(--line-hair);
     border-radius: var(--radius-chip);
-    padding: 0 4px;
+    padding: 0 5px;
     white-space: nowrap;
-
-    &.source-git {
-        color: var(--text-muted);
-    }
 }
 
 .services {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--gap-xs);
+    align-items: center;
+    gap: var(--gap-sm);
     min-width: 0;
+    overflow: hidden;
 }
 
 .service {
@@ -364,16 +348,11 @@ a.item {
 
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    max-width: 100%;
-    padding: 0 6px;
-    border: 1px solid color-mix(in srgb, var(--chip-state) 40%, transparent);
-    border-radius: var(--radius-chip);
+    gap: 5px;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-muted);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 
     .dot {
         width: 6px;
@@ -398,11 +377,12 @@ a.item {
     &.state-unknown {
         --chip-state: var(--state-unknown);
     }
+}
 
-    &.more, &.empty {
-        border-color: var(--line-hair);
-        color: var(--text-faint);
-    }
+.more {
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+    white-space: nowrap;
 }
 
 // Доступность: сбой заметен, «мало данных» не притворяется зелёным
@@ -413,20 +393,17 @@ a.item {
     white-space: nowrap;
 
     &.verdict-clean {
-        color: var(--state-running);
+        color: var(--text-muted);
     }
 
     &.verdict-degraded {
         color: var(--state-attention);
     }
-
-    &.verdict-stopped {
-        color: var(--text-muted);
-    }
 }
 
 .updates {
     justify-self: end;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-faint);
     white-space: nowrap;
@@ -434,6 +411,9 @@ a.item {
     // Отставание - повод нажать «Обновить», поэтому оно заметнее остального
     &.pending {
         color: var(--state-attention);
+        border: 1px solid color-mix(in srgb, var(--state-attention) 40%, transparent);
+        border-radius: var(--radius-chip);
+        padding: 0 5px;
     }
 }
 
@@ -443,13 +423,14 @@ a.item {
     color: var(--state-running);
     border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
     border-radius: var(--radius-chip);
-    padding: 0 6px;
+    padding: 0 5px;
 }
 
-// Узкий экран: строка складывается в две, обновления уходят под сервисы
+// Узкий экран: строка складывается в две, доступность уходит под имя
 @media (max-width: 1100px) {
     a.item {
-        grid-template-columns: minmax(0, 1fr) minmax(90px, max-content);
+        grid-template-columns: minmax(0, 1fr) minmax(80px, max-content);
+        padding: var(--gap-sm) var(--gap-md);
     }
 
     .services {

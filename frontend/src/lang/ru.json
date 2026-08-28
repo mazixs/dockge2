@@ -355,5 +355,14 @@
     "availabilityCoverage": "наблюдалось {0} окна",
     "availabilityAgentOnly": "Историю ведёт агент, у этой панели её нет",
     "availabilityCleanWindow": "без сбоев · {0}",
-    "agoSuffix": "{0} назад"
+    "agoSuffix": "{0} назад",
+    "attentionBadge": "Внимание",
+    "showAttention": "Показать",
+    "stacksTab": "Стеки",
+    "dockEmpty": "Открытых сессий нет",
+    "dockNewSession": "+ сессия",
+    "logsOf": "Логи {0}",
+    "noStacksYet": "Стеков пока нет",
+    "updateFromGit": "Обновить из Git",
+    "listUpdatedAgo": "обновлено {0} с назад"
 }

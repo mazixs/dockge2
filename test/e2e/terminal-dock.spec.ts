@@ -5,8 +5,10 @@ test.describe("нижний док вывода", () => {
     test("логи открываются доком и переживают переход к другому стеку", async ({ page }) => {
         await page.goto(`/stack/${E2E_STACK_NAME}`);
 
-        // Дока нет, пока его не позвали
-        await expect(page.locator(".dock")).toHaveCount(0);
+        // Док - общий уровень: полоса видна всегда, но сессий в ней пока нет
+        await expect(page.locator(".dock")).toBeVisible();
+        await expect(page.locator(".dock .tab")).toHaveCount(0);
+        await expect(page.locator(".dock .dock-empty")).toBeVisible();
 
         await page.getByRole("button", { name: /^(more|ещё)$/i }).click();
         await page.getByRole("menuitem", { name: /^(logs|логи)$/i }).click();
@@ -53,9 +55,11 @@ test.describe("нижний док вывода", () => {
         const restored = await dock.evaluate((node) => node.getBoundingClientRect().height);
         expect(Math.round(restored)).toBe(Math.round(taller));
 
-        // Закрытие сессии убирает вкладку, а последнее закрытие - весь док
+        // После перезагрузки сессия одна: её закрытие убирает вкладку,
+        // а полоса дока остаётся на месте - док общий уровень, а не всплывашка
         await dock.locator(".tab.active .close").click();
         await expect(dock.locator(".tab")).toHaveCount(0);
-        await expect(page.locator(".dock")).toHaveCount(0);
+        await expect(page.locator(".dock")).toBeVisible();
+        await expect(page.locator(".dock .dock-empty")).toBeVisible();
     });
 });

@@ -1,5 +1,5 @@
 <template>
-    <div class="shadow-box list-box" :style="boxStyle">
+    <div class="list-box" :style="boxStyle">
         <div class="list-header">
             <div class="header-top">
                 <div class="search-wrapper">
@@ -386,20 +386,19 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// Список - плоская область с разделителями, а не карточка: так строки читаются
+// как таблица, а не как набор плиток
 .list-box {
     position: sticky;
     top: 10px;
-    padding: 10px;
+    border-right: 1px solid var(--line-hair);
 }
 
 // Цвет берётся токеном, а не правилом внутри темы: иначе одна из тем получит
 // чужой фон под своим текстом.
 .list-header {
-    background-color: var(--surface-panel);
     border-bottom: 1px solid var(--line-hair);
-    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-    margin: -10px -10px 8px;
-    padding: 8px 10px;
+    padding: 0 var(--gap-md) var(--gap-sm);
 }
 
 .header-top {
@@ -486,9 +485,9 @@ export default {
 // Заголовок колонок повторяет сетку строки, поэтому подписи стоят над своими данными
 .columns {
     display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(120px, max-content) minmax(90px, max-content);
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(130px, max-content) minmax(80px, max-content);
     gap: var(--gap-md);
-    padding: 6px var(--gap-md) 0;
+    padding: var(--gap-sm) var(--gap-md) 0;
     font-size: var(--text-xs);
     color: var(--text-faint);
 
@@ -542,10 +541,12 @@ export default {
     .list-box {
         position: static;
         height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line-hair);
     }
 
     .columns {
-        grid-template-columns: minmax(0, 1fr) minmax(90px, max-content);
+        grid-template-columns: minmax(0, 1fr) minmax(80px, max-content);
 
         span:nth-child(2), span:nth-child(3) {
             display: none;
