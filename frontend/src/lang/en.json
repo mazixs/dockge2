@@ -277,5 +277,22 @@
     "flagNotNeeded": "not needed in compose",
     "flagUnknown": "unknown flag: check whether it survived",
     "Close": "Close",
-    "pasteAnywhereHint": "You can also paste a compose file or a docker run command anywhere on this page, or drop a compose.yaml into the window."
+    "pasteAnywhereHint": "You can also paste a compose file or a docker run command anywhere on this page, or drop a compose.yaml into the window.",
+    "moreActions": "More",
+    "openComposeFile": "Compose file",
+    "moreIssues": "{0} more",
+    "servicesSection": "Services",
+    "serviceColumn": "Service",
+    "stateColumn": "State",
+    "imageColumn": "Image",
+    "portsColumn": "Ports",
+    "actionsColumn": "Actions",
+    "openShell": "Shell",
+    "noServicesInFile": "The compose file declares no services",
+    "linksAndNetworks": "Links and networks",
+    "serviceCount": "{count} service | {count} services",
+    "networkCount": "{count} network | {count} networks",
+    "exposedPortsShort": "outside: {0}",
+    "nothingExposed": "nothing exposed",
+    "defaultNetworkOnly": "default network only"
 }

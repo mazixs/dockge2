@@ -91,6 +91,33 @@ export const localeDirection = () => {
     return rtlLangs.includes(currentLocale()) ? "rtl" : "ltr";
 };
 
+/**
+ * Выбор формы множественного числа для русского языка.
+ *
+ * По умолчанию vue-i18n считает по английскому правилу, и «2 сервиса» превращается
+ * в «2 сервисов». Формы у русских сообщений бывают и две, и три, поэтому индекс
+ * ограничивается тем, сколько форм есть у самого сообщения.
+ * @param choice Число, о котором идёт речь
+ * @param choicesLength Сколько форм есть у сообщения
+ * @returns Индекс формы
+ */
+export function russianPluralRule(choice : number, choicesLength : number) : number {
+    const n = Math.abs(Math.floor(choice));
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+
+    let index;
+    if (mod10 === 1 && mod100 !== 11) {
+        index = 0;
+    } else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+        index = 1;
+    } else {
+        index = 2;
+    }
+
+    return Math.min(index, Math.max(choicesLength - 1, 0));
+}
+
 export const i18n = createI18n({
     // Composition API mode: the Legacy API is deprecated in vue-i18n 11 and removed in 12.
     // globalInjection keeps `$t` available in templates and in options-API methods.
@@ -101,6 +128,9 @@ export const i18n = createI18n({
     missingWarn: false,
     fallbackWarn: false,
     messages: messages,
+    pluralRules: {
+        ru: russianPluralRule,
+    },
 });
 
 /**

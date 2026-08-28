@@ -277,5 +277,22 @@
     "flagNotNeeded": "в compose не нужен",
     "flagUnknown": "неизвестный флаг: проверьте, перенесся ли он",
     "Close": "Закрыть",
-    "pasteAnywhereHint": "Можно просто вставить compose или команду docker run в любом месте страницы, либо перетащить compose.yaml в окно."
+    "pasteAnywhereHint": "Можно просто вставить compose или команду docker run в любом месте страницы, либо перетащить compose.yaml в окно.",
+    "moreActions": "Ещё",
+    "openComposeFile": "Compose-файл",
+    "moreIssues": "Ещё {0}",
+    "servicesSection": "Сервисы",
+    "serviceColumn": "Сервис",
+    "stateColumn": "Состояние",
+    "imageColumn": "Образ",
+    "portsColumn": "Порты",
+    "actionsColumn": "Действия",
+    "openShell": "Shell",
+    "noServicesInFile": "В compose-файле нет сервисов",
+    "linksAndNetworks": "Связи и сети",
+    "serviceCount": "{count} сервис | {count} сервиса | {count} сервисов",
+    "networkCount": "{count} сеть | {count} сети | {count} сетей",
+    "exposedPortsShort": "наружу: {0}",
+    "nothingExposed": "наружу ничего",
+    "defaultNetworkOnly": "только сеть по умолчанию"
 }

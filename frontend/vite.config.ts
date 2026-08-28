@@ -26,7 +26,7 @@ export default defineConfig({
                 // Sass; исправить это можно только его обновлением, поэтому
                 // предупреждения из node_modules гасятся здесь, чтобы в выводе
                 // сборки оставались только наши собственные.
-                silenceDeprecations: [ "import", "global-builtin", "color-functions", "if-function", "mixed-decls" ],
+                silenceDeprecations: [ "import", "global-builtin", "color-functions", "if-function" ],
             },
         },
     },
