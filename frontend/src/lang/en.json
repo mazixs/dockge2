@@ -355,5 +355,14 @@
     "availabilityCoverage": "observed {0} of the window",
     "availabilityAgentOnly": "The agent keeps its own history, this panel has none",
     "availabilityCleanWindow": "no incidents · {0}",
-    "agoSuffix": "{0} ago"
+    "agoSuffix": "{0} ago",
+    "attentionBadge": "Attention",
+    "showAttention": "Show",
+    "stacksTab": "Stacks",
+    "dockEmpty": "No output sessions",
+    "dockNewSession": "+ session",
+    "logsOf": "Logs of {0}",
+    "noStacksYet": "No stacks yet",
+    "updateFromGit": "Update from Git",
+    "listUpdatedAgo": "updated {0} s ago"
 }

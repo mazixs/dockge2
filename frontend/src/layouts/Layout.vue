@@ -10,42 +10,52 @@
         </div>
 
         <!-- Desktop header -->
-        <header v-if="! $root.isMobile" class="app-header d-flex flex-wrap justify-content-center py-3 mb-3">
-            <router-link to="/" class="brand d-flex align-items-center mb-3 mb-md-0 me-md-auto text-decoration-none">
-                <object class="bi me-2 ms-4" width="40" height="40" data="/icon.svg" />
-                <span class="title">Dockge</span>
+        <header v-if="! $root.isMobile" class="app-header">
+            <router-link to="/" class="brand d-flex align-items-center text-decoration-none">
+                <object class="bi me-2 ms-4" width="28" height="28" data="/icon.svg" />
+                <span class="title">Dockge 2</span>
             </router-link>
 
-            <!-- Счётчики состояний: с шапки видно, есть ли повод куда-то идти -->
-            <div v-if="$root.loggedIn" class="tally me-3">
-                <span class="tally-item tally-running"><i class="dot" aria-hidden="true"></i>{{ $t("tallyRunning", runningNum) }}</span>
-                <router-link to="/?filter=attention" class="tally-item tally-attention" :class="{ zero: attentionNum === 0 }">
-                    <i class="dot" aria-hidden="true"></i>{{ $t("tallyAttention", attentionNum) }}
-                </router-link>
-                <span class="tally-item tally-stopped"><i class="dot" aria-hidden="true"></i>{{ $t("tallyStopped", stoppedNum) }}</span>
-            </div>
-
-            <button v-if="$root.loggedIn" class="btn btn-primary me-3 create-stack-btn" type="button" @click="openCreateSheet()">
+            <button v-if="$root.loggedIn" class="btn btn-primary btn-sm ms-3 create-stack-btn" type="button" @click="openCreateSheet()">
                 <font-awesome-icon icon="plus" /> {{ $t("deployStackAction") }}
             </button>
 
-            <a v-if="hasNewVersion" target="_blank" href="https://github.com/louislam/dockge/releases" class="btn btn-warning me-3">
-                <font-awesome-icon icon="arrow-alt-circle-up" /> {{ $t("newUpdate") }}
-            </a>
-
-            <ul class="nav app-nav">
+            <ul class="nav app-nav ms-3">
                 <li v-if="$root.loggedIn" class="nav-item">
-                    <router-link to="/" class="tab">
-                        <font-awesome-icon icon="home" /> {{ $t("home") }}
-                    </router-link>
+                    <!-- Вкладка «Стеки» остаётся выбранной и на стеке, и в редакторе -->
+                    <router-link to="/" class="tab" :class="{ 'tab-current': onStacks }" :aria-current="onStacks ? 'page' : undefined">{{ $t("stacksTab") }}</router-link>
                 </li>
 
                 <li v-if="$root.loggedIn" class="nav-item">
-                    <router-link to="/console" class="tab">
-                        <font-awesome-icon icon="terminal" /> {{ $t("console") }}
-                    </router-link>
+                    <router-link to="/console" class="tab">{{ $t("console") }}</router-link>
                 </li>
 
+                <li v-if="$root.loggedIn" class="nav-item">
+                    <router-link to="/settings/general" class="tab">{{ $t("Settings") }}</router-link>
+                </li>
+            </ul>
+
+            <div class="header-right">
+                <!-- Что происходит в хозяйстве: одна строка справа, как в макете -->
+                <router-link
+                    v-if="$root.loggedIn" class="tally-attention"
+                    :class="{ zero: attentionNum === 0 }"
+                    :to="{ path: '/', query: { filter: 'attention' } }"
+                >
+                    <i class="dot" aria-hidden="true"></i>{{ $t("tallyAttention", attentionNum) }}
+                </router-link>
+
+                <span v-if="$root.loggedIn" class="tally-quiet">{{ $t("tallyRunning", runningNum) }} · {{ $t("tallyStopped", stoppedNum) }}</span>
+
+                <!-- Насколько свежий список: он обновляется сам, и это видно -->
+                <span v-if="$root.loggedIn && listAgeSeconds !== null" class="tally-quiet">{{ $t("listUpdatedAgo", [ listAgeSeconds ]) }}</span>
+
+                <a v-if="hasNewVersion" target="_blank" href="https://github.com/louislam/dockge/releases" class="btn btn-sm btn-normal">
+                    <font-awesome-icon icon="arrow-alt-circle-up" /> {{ $t("newUpdate") }}
+                </a>
+            </div>
+
+            <ul class="nav">
                 <li v-if="$root.loggedIn" class="nav-item">
                     <div class="dropdown dropdown-profile-pic">
                         <button class="profile-trigger" type="button" data-bs-toggle="dropdown" :aria-label="$t('accountMenu')">
@@ -131,7 +141,8 @@ export default {
 
     data() {
         return {
-
+            /** Тик раз в секунду, чтобы «обновлено N с назад» действительно шло */
+            tick: 1,
         };
     },
 
@@ -143,6 +154,20 @@ export default {
             classes[this.$root.theme] = true;
             classes["mobile"] = this.$root.isMobile;
             return classes;
+        },
+
+        /** Сколько секунд назад приходил список, null пока он не приходил вовсе */
+        listAgeSeconds() {
+            if (!this.$root.stackListAt) {
+                return null;
+            }
+            return this.tick && Math.max(Math.round((Date.now() - this.$root.stackListAt) / 1000), 0);
+        },
+
+        /** Находимся ли мы на стеках: список, инспектор и редактор - одна вкладка */
+        onStacks() {
+            const path = this.$route.path;
+            return path === "/" || path.startsWith("/stack") || path.startsWith("/compose") || path.startsWith("/terminal");
         },
 
         /** Стеки всех агентов одним списком: счётчики считаются по всему хозяйству */
@@ -177,6 +202,10 @@ export default {
     },
 
     mounted() {
+        this.ageTimer = setInterval(() => {
+            this.tick += 1;
+        }, 1000);
+
         // Слой один на приложение, поэтому способ открыть его живёт в корне
         this.$root.openCreateStack = this.openCreateSheet;
 
@@ -192,6 +221,7 @@ export default {
     },
 
     beforeUnmount() {
+        clearInterval(this.ageTimer);
         this.$root.openCreateStack = null;
         this.$root.openStackLogs = null;
         this.$root.openContainerShell = null;
@@ -301,45 +331,41 @@ export default {
 <style lang="scss" scoped>
 
 // Счётчики в шапке: точка плюс число со словом, ничего лишнего
-.tally {
+// Правый край шапки: сначала то, что требует внимания, потом спокойные числа
+.header-right {
     display: flex;
     align-items: center;
     gap: var(--gap-md);
+    margin-left: auto;
+    margin-right: var(--gap-md);
     font-size: var(--text-sm);
 }
 
-.tally-item {
+.tally-attention {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    color: var(--text-muted);
+    color: var(--text-strong);
+    font-weight: 500;
     text-decoration: none;
+    white-space: nowrap;
 
     .dot {
         width: 8px;
         height: 8px;
         border-radius: var(--radius-pill);
+        background-color: var(--state-attention);
         flex: none;
     }
 
-    &.tally-attention {
-        color: var(--text-strong);
+    // Когда внимания не требует ничего, строка не должна кричать
+    &.zero {
+        color: var(--text-faint);
+        font-weight: 400;
 
         .dot {
-            background-color: var(--state-attention);
+            background-color: var(--state-stopped);
         }
-
-        &.zero {
-            color: var(--text-muted);
-        }
-    }
-
-    &.tally-running .dot {
-        background-color: var(--state-running);
-    }
-
-    &.tally-stopped .dot {
-        background-color: var(--state-stopped);
     }
 
     &:focus-visible {
@@ -348,17 +374,37 @@ export default {
     }
 }
 
+.tally-quiet {
+    color: var(--text-faint);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
 @media (max-width: 1200px) {
-    .tally-item.tally-stopped {
+    .tally-quiet {
         display: none;
     }
 }
 // Оболочка читает только токены: тема меняется вместе с ними, поэтому блока
 // `.dark` здесь больше нет.
 
+// Шапка плотная: одна линия с логотипом, кнопкой, вкладками и правым краем
 .app-header {
+    display: flex;
+    align-items: center;
     background-color: var(--surface-panel);
     border-bottom: 1px solid var(--line-hair);
+    padding: var(--gap-sm) 0;
+    margin-bottom: var(--gap-md);
+
+    .title {
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+}
+
+.app-nav {
+    gap: var(--gap-xs);
 }
 
 .brand {
@@ -397,7 +443,7 @@ main {
         color: var(--text-strong);
     }
 
-    &.router-link-exact-active {
+    &.router-link-exact-active, &.tab-current {
         color: var(--text-strong);
         border-bottom-color: var(--accent);
         font-weight: 500;

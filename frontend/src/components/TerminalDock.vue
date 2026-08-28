@@ -1,8 +1,9 @@
 <template>
     <!-- Общий уровень для вывода: он живёт под любым экраном и не пропадает при переходах -->
-    <div v-if="sessions.length > 0" class="dock" :class="{ collapsed }" :style="dockStyle">
+    <div class="dock" :class="{ collapsed, empty: sessions.length === 0 }" :style="dockStyle">
         <div class="bar">
             <button
+                v-if="sessions.length > 0"
                 class="toggle" type="button" :aria-expanded="String(!collapsed)"
                 :title="collapsed ? $t('dockExpand') : $t('dockCollapse')"
                 @click="collapsed = !collapsed"
@@ -32,7 +33,17 @@
                 </div>
             </div>
 
-            <button class="close-all" type="button" :title="$t('dockCloseAll')" @click="closeAll">
+            <span v-if="sessions.length === 0" class="dock-empty">{{ $t("dockEmpty") }}</span>
+
+            <!-- Кнопка сессии есть всегда: док - общий уровень, а не всплывающая панель -->
+            <BDropdown right :text="$t('dockNewSession')" variant="normal" size="sm" class="new-session" dropup>
+                <BDropdownItem v-for="stack in openableStacks" :key="stack.key" @click="openLogs(stack.name, stack.endpoint)">
+                    <font-awesome-icon icon="stream" class="me-1" />{{ $t("logsOf", [ stack.name ]) }}
+                </BDropdownItem>
+                <BDropdownItem v-if="openableStacks.length === 0" disabled>{{ $t("noStacksYet") }}</BDropdownItem>
+            </BDropdown>
+
+            <button v-if="sessions.length > 0" class="close-all" type="button" :title="$t('dockCloseAll')" @click="closeAll">
                 <font-awesome-icon icon="times" />
             </button>
         </div>
@@ -87,12 +98,30 @@ export default {
     },
     computed: {
         dockStyle() {
-            return { height: this.collapsed ? "auto" : `${this.height}px` };
+            if (this.sessions.length === 0 || this.collapsed) {
+                return { height: "auto" };
+            }
+            return { height: `${this.height}px` };
+        },
+
+        /** Стеки, чей вывод можно открыть: список тот же, что на экране */
+        openableStacks() {
+            return Object.values(this.$root.completeStackList)
+                .filter((stack) => stack.isManagedByDockge)
+                .sort((first, second) => first.name.localeCompare(second.name))
+                .map((stack) => ({
+                    key: `${stack.endpoint ?? ""}//${stack.name}`,
+                    name: stack.name,
+                    endpoint: stack.endpoint ?? "",
+                }));
         },
     },
     watch: {
         // Свёрнутый док занимает только полосу: место под страницей меняется вместе с ним
         collapsed() {
+            this.applyBodyPadding();
+        },
+        "sessions.length"() {
             this.applyBodyPadding();
         },
     },
@@ -265,8 +294,9 @@ export default {
 
         /** Страница не должна прятать свои кнопки под доком */
         applyBodyPadding() {
+            // Пустой док - только полоса: страница получает место под неё
             if (this.sessions.length === 0) {
-                document.body.style.paddingBottom = "";
+                document.body.style.paddingBottom = "48px";
                 return;
             }
 
@@ -418,6 +448,15 @@ export default {
     flex: 1;
     min-height: 0;
     padding: var(--gap-sm);
+}
+
+.dock-empty {
+    color: var(--text-faint);
+    font-size: var(--text-sm);
+}
+
+.new-session {
+    margin-left: auto;
 }
 
 // Консоль в доке - оформленная панель, а не вырезанный прямоугольник

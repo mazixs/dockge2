@@ -1,24 +1,31 @@
 <template>
-    <div class="dashboard" :class="{ full: fullWidth }">
-        <!-- Список широкий, инспектор узкий: в строке списка четыре колонки данных,
-             а инспектор держит действия и три коротких секции -->
-        <div v-if="!$root.isMobile && !fullWidth" class="list-column">
-            <StackList :scrollbar="true" />
-        </div>
+    <div class="dashboard-wrap">
+        <!-- Полоса внимания стоит над обеими колонками: она про всё хозяйство -->
+        <AttentionStrip v-if="!fullWidth" />
 
-        <div ref="container" class="work-column">
-            <!-- Add :key to disable vue router re-use the same component -->
-            <router-view :key="$route.fullPath" :calculatedHeight="height" />
+        <div class="dashboard" :class="{ full: fullWidth }">
+            <!-- Список широкий, инспектор узкий: в строке списка четыре колонки данных,
+                 а инспектор держит действия и три коротких секции -->
+            <div v-if="!$root.isMobile && !fullWidth" class="list-column">
+                <StackList :scrollbar="true" />
+            </div>
+
+            <div ref="container" class="work-column">
+                <!-- Add :key to disable vue router re-use the same component -->
+                <router-view :key="$route.fullPath" :calculatedHeight="height" />
+            </div>
         </div>
     </div>
 </template>
 
 <script>
 
+import AttentionStrip from "../components/AttentionStrip.vue";
 import StackList from "../components/StackList.vue";
 
 export default {
     components: {
+        AttentionStrip,
         StackList,
     },
     data() {
@@ -43,12 +50,15 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.dashboard-wrap {
+    width: 98%;
+    margin: 0 auto;
+}
+
 .dashboard {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 400px;
     gap: var(--gap-lg);
-    width: 98%;
-    margin: 0 auto;
     padding-bottom: var(--gap-lg);
 
     // Редактор и терминал забирают экран целиком

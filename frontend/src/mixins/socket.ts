@@ -59,6 +59,8 @@ export default defineComponent({
 
             /** Stack that was just created, so the list can point at it */
             freshStack: null as string | null,
+            /** Когда последний раз приходил список стеков */
+            stackListAt: 0,
             username: null as string | null,
             composeTemplate: "",
 
@@ -290,6 +292,8 @@ export default defineComponent({
                 const res = args[0] as SocketResponse | undefined;
                 if (res?.ok && res.stackList && typeof res.stackList === "object") {
                     const stackList = res.stackList as StackList;
+                    // Когда список пришёл: шапка честно говорит, насколько он свежий
+                    this.stackListAt = Date.now();
                     if (!res.endpoint) {
                         this.stackList = stackList;
                     } else {

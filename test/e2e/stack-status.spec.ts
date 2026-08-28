@@ -24,10 +24,11 @@ test.describe("stack status in the UI", () => {
         await expect(attention).toContainText("init");
         await expect(attention).toContainText("service stopped");
 
-        // Таблица сервисов: работающий помечен running, остановленный - нет
-        const services = page.locator("table.services");
+        // Сервисы: у работающего расход и аптайм, у остановленного - его состояние словом
+        const services = page.locator(".inspector .services");
         await expect(services).toBeVisible();
-        await expect(services.locator("tbody tr", { hasText: "app" }).locator(".state-chip")).toHaveText(/running/i);
-        await expect(services.locator("tbody tr", { hasText: "init" }).locator(".state-chip")).not.toHaveText(/running/i);
+        await expect(services.locator(".service-row", { hasText: "app" }).locator(".service-name .dot")).toHaveClass(/state-running/);
+        await expect(services.locator(".service-row", { hasText: "init" }).locator(".service-name .dot")).not.toHaveClass(/state-running/);
+        await expect(services.locator(".service-row", { hasText: "init" }).locator(".service-usage")).not.toHaveText("");
     });
 });

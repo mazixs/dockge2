@@ -16,20 +16,15 @@
                 </div>
 
                 <div v-if="stack.isManagedByDockge" class="actions">
-                    <button v-if="!active" class="btn btn-primary" :disabled="processing" @click="run('startStack')">
-                        <font-awesome-icon icon="play" class="me-1" />{{ $t("startStack") }}
-                    </button>
-                    <button v-else class="btn btn-normal" :disabled="processing" @click="run('stopStack')">
-                        <font-awesome-icon icon="stop" class="me-1" />{{ $t("stopStack") }}
-                    </button>
-                    <button class="btn btn-normal" :disabled="processing" @click="run('restartStack')">
-                        <font-awesome-icon icon="rotate" class="me-1" />{{ $t("restartStack") }}
-                    </button>
-                    <button class="btn btn-normal" :disabled="processing" @click="run('updateStack')">
-                        <font-awesome-icon icon="cloud-arrow-down" class="me-1" />{{ $t("updateStack") }}
-                    </button>
+                    <!-- Без значков: подписи и так называют результат, а группа
+                         обязана уместиться в одну строку узкой колонки -->
+                    <button v-if="!active" class="btn btn-sm btn-normal" :disabled="processing" @click="run('startStack')">{{ $t("startStack") }}</button>
+                    <button v-else class="btn btn-sm btn-normal" :disabled="processing" @click="run('stopStack')">{{ $t("stopStack") }}</button>
+                    <button class="btn btn-sm btn-normal" :disabled="processing" @click="run('restartStack')">{{ $t("restartStack") }}</button>
+                    <!-- Обновление - главное действие открытого стека, поэтому акцент на нём -->
+                    <button class="btn btn-sm btn-primary" :disabled="processing" @click="run('updateStack')">{{ updateLabel }}</button>
 
-                    <BDropdown right :text="$t('moreActions')" variant="normal">
+                    <BDropdown right :text="$t('moreActions')" variant="normal" size="sm">
                         <BDropdownItem @click="openLogs">
                             <font-awesome-icon icon="stream" class="me-1" />{{ $t("openLogs") }}
                         </BDropdownItem>
@@ -79,51 +74,50 @@
                 {{ $t("stackNotManagedByDockgeMsg") }}
             </div>
 
-            <!-- Сервисы: имя, состояние и расход, действия по строке.
-                 Колонка узкая, поэтому образ и порты живут в разделе связей -->
-            <table v-if="services.length > 0" class="services">
-                <caption>{{ $t("servicesCaption", [ statusAge ]) }}</caption>
-                <tbody>
-                    <tr v-for="service in services" :key="service.name">
-                        <th scope="row" class="name">
-                            {{ service.name }}
-                            <span v-if="service.isOneShot" class="one-shot">{{ $t("oneShotService") }}</span>
-                        </th>
-                        <td class="state">
-                            <StateChip :state="serviceState(service)" :label="stateLabel(service)" :attention="service.attention" />
-                        </td>
-                        <td class="usage">{{ usageLabel(service) }}</td>
-                        <td class="row-actions">
-                            <button
-                                class="row-action" type="button" :title="$t('openLogs')"
-                                :aria-label="`${$t('openLogs')}: ${service.name}`" @click="openLogs"
-                            >
-                                <font-awesome-icon icon="stream" />
-                            </button>
-                            <button
-                                v-if="service.running" class="row-action" type="button" :title="$t('openShell')"
-                                :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)"
-                            >
-                                <font-awesome-icon icon="terminal" />
-                            </button>
-                            <button
-                                v-if="!service.running" class="row-action" type="button" :title="$t('startStack')"
-                                :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`"
-                                @click="runService('startService', service.name)"
-                            >
-                                <font-awesome-icon icon="play" />
-                            </button>
-                            <button
-                                v-else class="row-action" type="button" :title="$t('restartStack')"
-                                :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`"
-                                @click="runService('restartService', service.name)"
-                            >
-                                <font-awesome-icon icon="rotate" />
-                            </button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <!-- Сервисы: имя слева, расход справа. Действия появляются при наведении
+                 и по фокусу с клавиатуры, чтобы строка оставалась спокойной -->
+            <div v-if="services.length > 0" class="services">
+                <div class="services-title">{{ $t("servicesCaption", [ statusAge ]) }}</div>
+
+                <div v-for="service in services" :key="service.name" class="service-row">
+                    <span class="service-name">
+                        <i class="dot" :class="`state-${serviceState(service)}`" aria-hidden="true"></i>
+                        {{ service.name }}
+                        <span v-if="service.isOneShot" class="one-shot">{{ $t("oneShotService") }}</span>
+                    </span>
+
+                    <span class="service-usage">{{ usageLabel(service) || stateLabel(service) }}</span>
+
+                    <span class="service-actions">
+                        <button
+                            class="row-action" type="button" :title="$t('openLogs')"
+                            :aria-label="`${$t('openLogs')}: ${service.name}`" @click="openLogs"
+                        >
+                            <font-awesome-icon icon="stream" />
+                        </button>
+                        <button
+                            v-if="service.running" class="row-action" type="button" :title="$t('openShell')"
+                            :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)"
+                        >
+                            <font-awesome-icon icon="terminal" />
+                        </button>
+                        <button
+                            v-if="!service.running" class="row-action" type="button" :title="$t('startStack')"
+                            :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`"
+                            @click="runService('startService', service.name)"
+                        >
+                            <font-awesome-icon icon="play" />
+                        </button>
+                        <button
+                            v-else class="row-action" type="button" :title="$t('restartStack')"
+                            :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`"
+                            @click="runService('restartService', service.name)"
+                        >
+                            <font-awesome-icon icon="rotate" />
+                        </button>
+                    </span>
+                </div>
+            </div>
 
             <p v-else-if="!processing" class="faint">{{ $t("noServicesInFile") }}</p>
 
@@ -181,7 +175,6 @@
 import { BModal } from "bootstrap-vue-next";
 import { parseDocument } from "yaml";
 import dotenv from "dotenv";
-import StateChip from "../components/StateChip.vue";
 import Uptime from "../components/Uptime.vue";
 import { ATTENTION, RUNNING, envsubstYAML, parseDockerPort } from "../../../common/util-common";
 import { summariseRegistries } from "../../../common/image-source";
@@ -194,7 +187,6 @@ const STATUS_INTERVAL_MS = 5000;
 export default {
     components: {
         BModal,
-        StateChip,
         Uptime,
     },
     data() {
@@ -301,6 +293,17 @@ export default {
             }
 
             return parts.join(" · ");
+        },
+
+        /** Надпись кнопки обновления: отставание в Git называется прямо на кнопке */
+        updateLabel() {
+            const behind = this.source?.behind;
+
+            if (this.source?.kind === "git" && typeof behind === "number" && behind > 0) {
+                return this.$t("updateFromGit");
+            }
+
+            return this.$t("updateStack");
         },
 
         /** Сервис, из-за которого стек требует внимания: к нему и ведут кнопки починки */
@@ -816,63 +819,79 @@ export default {
     }
 }
 
-// Таблица сервисов в узкой колонке: имя, состояние, расход, действия значками
+// Сервисы: пары «имя - расход», разделители тонкие, действия проявляются
 .services {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--text-sm);
-    font-variant-numeric: tabular-nums;
-    background-color: var(--surface-panel);
-    border: 1px solid var(--line-hair);
-    border-radius: var(--radius-panel);
+    border-top: 1px solid var(--line-hair);
+}
+
+.services-title {
+    padding: var(--gap-sm) 0 var(--gap-xs);
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+}
+
+.service-row {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-height: var(--row-height-dense);
+    border-top: 1px solid var(--line-hair);
+
+    &:hover .service-actions, &:focus-within .service-actions {
+        opacity: 1;
+    }
+}
+
+.service-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-weight: 500;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 
-    caption {
-        caption-side: top;
-        padding: var(--gap-sm) var(--gap-md) 0;
-        text-align: left;
-        font-size: var(--text-xs);
-        color: var(--text-faint);
-    }
+    .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: var(--radius-pill);
+        flex: none;
+        background-color: var(--state-unknown);
 
-    th, td {
-        text-align: left;
-        height: var(--row-height-dense);
-        padding: 0 var(--gap-sm);
-        border-bottom: 1px solid var(--line-hair);
-        vertical-align: middle;
-    }
+        &.state-running {
+            background-color: var(--state-running);
+        }
 
-    tbody tr:last-child > * {
-        border-bottom: 0;
-    }
+        &.state-attention {
+            background-color: var(--state-attention);
+        }
 
-    .name {
-        font-weight: 600;
-        color: var(--text-strong);
-        white-space: nowrap;
-        padding-left: var(--gap-md);
-        width: 1%;
+        &.state-stopped {
+            background-color: var(--state-stopped);
+        }
     }
 
     .one-shot {
-        display: block;
         font-weight: 400;
         font-size: var(--text-xs);
         color: var(--text-faint);
     }
+}
 
-    .usage {
-        color: var(--text-faint);
-        font-size: var(--text-xs);
-        overflow-wrap: anywhere;
-    }
+.service-usage {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
 
-    .row-actions {
-        text-align: right;
-        white-space: nowrap;
-        padding-right: var(--gap-sm);
-    }
+.service-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity ease-in-out 0.1s;
 }
 
 // Действие в строке - значок с подписью для чтения с экрана, цель полного размера

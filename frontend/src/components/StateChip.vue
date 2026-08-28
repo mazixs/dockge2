@@ -1,9 +1,11 @@
 <template>
-    <span class="state-chip" :class="[ `state-${state}`, { 'fixed-width': fixedWidth } ]" :title="title">
-        <!-- Точка несёт цвет, слово рядом - смысл: один цвет смысл не несёт -->
+    <span class="state-chip" :class="[ `state-${state}`, { 'fixed-width': fixedWidth, compact, 'dot-only': dotOnly } ]" :title="chipTitle">
+        <!-- Точка несёт цвет, слово рядом - смысл: один цвет смысл не несёт.
+             В строке списка слово прячется от глаз, но не от чтения с экрана:
+             там же, в строке, состояние названо словами в колонке доступности -->
         <span class="dot" aria-hidden="true"></span>
-        <font-awesome-icon v-if="attention" icon="triangle-exclamation" class="warn-icon" />
-        <span class="label">{{ label }}</span>
+        <font-awesome-icon v-if="attention && !dotOnly" icon="triangle-exclamation" class="warn-icon" />
+        <span class="label" :class="{ 'visually-hidden': dotOnly }">{{ label }}</span>
     </span>
 </template>
 
@@ -35,10 +37,36 @@ export default {
             type: Boolean,
             default: false,
         },
+        /**
+         * Тихий вид для строки списка: точка и слово мелким, без рамки и заливки.
+         * Слово остаётся - цвет не имеет права быть единственным носителем смысла.
+         */
+        compact: {
+            type: Boolean,
+            default: false,
+        },
+        /**
+         * Только точка: слово уходит в скрытый текст, потому что рядом в строке
+         * состояние уже названо словами (доступность, полоса внимания)
+         */
+        dotOnly: {
+            type: Boolean,
+            default: false,
+        },
         /** Подсказка с подробностями; текст обязан быть доступен и без неё */
         title: {
             type: String,
             default: "",
+        },
+    },
+    computed: {
+        /** В точечном виде подсказка обязана называть состояние словом */
+        chipTitle() {
+            if (!this.dotOnly) {
+                return this.title;
+            }
+
+            return this.title ? `${this.label} · ${this.title}` : this.label;
         },
     },
 };
@@ -93,6 +121,34 @@ export default {
 
 .state-unknown {
     --chip-state: var(--state-unknown);
+}
+
+// Точечный вид: имена стеков выравниваются по одной вертикали
+.state-chip.dot-only {
+    padding: 0;
+    border: 0;
+    background: none;
+    min-width: 0;
+    width: 14px;
+    justify-content: flex-start;
+}
+
+// Тихий вид: в строке списка чип не должен спорить с именем стека
+.state-chip.compact {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+
+    .dot {
+        width: 6px;
+        height: 6px;
+    }
+
+    &.fixed-width {
+        min-width: 74px;
+    }
 }
 
 // Ширина выровнена по самой длинной подписи со значком; текст не обрезается,
