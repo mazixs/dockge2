@@ -24,6 +24,9 @@
                     </button>
 
                     <BDropdown right :text="$t('moreActions')" variant="normal">
+                        <BDropdownItem @click="openLogs">
+                            <font-awesome-icon icon="stream" class="me-1" />{{ $t("openLogs") }}
+                        </BDropdownItem>
                         <BDropdownItem :to="composeUrl">
                             <font-awesome-icon icon="pen" class="me-1" />{{ $t("openComposeFile") }}
                         </BDropdownItem>
@@ -90,9 +93,9 @@
                             <button v-if="!service.running" class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`" @click="runService('startService', service.name)">{{ $t("startStack") }}</button>
                             <button v-else class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('stopStack')} ${service.name}`" @click="runService('stopService', service.name)">{{ $t("stopStack") }}</button>
                             <button class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`" @click="runService('restartService', service.name)">{{ $t("restartStack") }}</button>
-                            <router-link v-if="service.running" class="btn btn-sm btn-normal" :aria-label="`${$t('openShell')} ${service.name}`" :to="shellUrl(service.name)">
+                            <button v-if="service.running" class="btn btn-sm btn-normal" :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)">
                                 <font-awesome-icon icon="terminal" class="me-1" />{{ $t("openShell") }}
-                            </router-link>
+                            </button>
                         </td>
                     </tr>
                 </tbody>
@@ -271,7 +274,8 @@ export default {
     },
     watch: {
         // Выбор другого стека в списке остаётся в том же компоненте
-        stackName() {
+        stackName(to, from) {
+            this.leaveLogsUnlessDocked(from, this.stack.endpoint || "");
             this.loadStack();
         },
     },
@@ -280,8 +284,24 @@ export default {
     },
     unmounted() {
         clearTimeout(this.statusTimer);
+        this.leaveLogsUnlessDocked(this.stackName, this.endpoint);
     },
     methods: {
+        /**
+         * `getStack` подписывает клиента на вывод стека, поэтому уходя надо отписаться.
+         * Если тот же вывод открыт в доке, подписка остаётся его делом.
+         * @param {string} stackName Стек, от которого уходим
+         * @param {string} endpoint Агент
+         * @returns {void}
+         */
+        leaveLogsUnlessDocked(stackName, endpoint) {
+            if (!stackName || this.$root.dockHasLogs?.(stackName, endpoint)) {
+                return;
+            }
+
+            this.$root.emitAgent(endpoint, "leaveCombinedTerminal", stackName, () => {});
+        },
+
         loadStack() {
             this.processing = true;
             this.allIssues = false;
@@ -367,23 +387,23 @@ export default {
             });
         },
 
-        shellUrl(serviceName) {
-            const params = {
+        /** Вывод стека уходит в общий док: он остаётся открытым при переходе к другому стеку */
+        openLogs() {
+            this.$root.openStackLogs?.(this.stackName, this.endpoint);
+        },
+
+        /**
+         * Shell контейнера тоже открывается в доке, а не отдельной страницей
+         * @param {string} serviceName Сервис
+         * @returns {void}
+         */
+        openShell(serviceName) {
+            this.$root.openContainerShell?.({
                 stackName: this.stackName,
                 serviceName,
-                type: "bash",
-            };
-
-            if (this.endpoint) {
-                return {
-                    name: "containerTerminalEndpoint",
-                    params: { ...params,
-                        endpoint: this.endpoint },
-                };
-            }
-
-            return { name: "containerTerminal",
-                params };
+                shell: "bash",
+                endpoint: this.endpoint,
+            });
         },
 
         parsePort(port) {

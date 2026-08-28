@@ -97,6 +97,7 @@
             <router-view v-if="$root.loggedIn" />
             <Login v-if="! $root.loggedIn && $root.allowLoginDialog" />
             <CreateStackSheet v-if="$root.loggedIn" ref="createSheet" />
+            <TerminalDock v-if="$root.loggedIn" ref="dock" />
         </main>
     </div>
 </template>
@@ -104,6 +105,7 @@
 <script>
 import Login from "../components/Login.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
+import TerminalDock from "../components/TerminalDock.vue";
 import { compareVersions } from "compare-versions";
 import { ALL_ENDPOINTS } from "../../../common/util-common";
 
@@ -115,6 +117,7 @@ export default {
     components: {
         CreateStackSheet,
         Login,
+        TerminalDock,
     },
 
     data() {
@@ -151,6 +154,11 @@ export default {
         // Слой один на приложение, поэтому способ открыть его живёт в корне
         this.$root.openCreateStack = this.openCreateSheet;
 
+        // Док тоже один: вывод переживает переходы между стеками и экранами
+        this.$root.openStackLogs = (stackName, endpoint) => this.$refs.dock?.openLogs(stackName, endpoint);
+        this.$root.openContainerShell = (target) => this.$refs.dock?.openShell(target);
+        this.$root.dockHasLogs = (stackName, endpoint) => this.$refs.dock?.hasLogs(stackName, endpoint) ?? false;
+
         // Вставка в любом месте списка открывает слой уже заполненным
         document.addEventListener("paste", this.onPaste);
         window.addEventListener("dragover", this.onDragOver);
@@ -159,6 +167,9 @@ export default {
 
     beforeUnmount() {
         this.$root.openCreateStack = null;
+        this.$root.openStackLogs = null;
+        this.$root.openContainerShell = null;
+        this.$root.dockHasLogs = null;
         document.removeEventListener("paste", this.onPaste);
         window.removeEventListener("dragover", this.onDragOver);
         window.removeEventListener("drop", this.onDrop);
