@@ -432,3 +432,72 @@ export function resolveComposePsStatus(
     return { ...result,
         instances };
 }
+
+/** One service of a stack as the list row shows it */
+export interface ServiceSummary {
+    name : string;
+    /** running | attention | stopped | unknown */
+    state : string;
+    isOneShot : boolean;
+}
+
+/**
+ * Summarise every service of a stack for the list row.
+ *
+ * The row shows one chip per service, so the state has to be judged per service and
+ * fail closed: an unreadable or missing container never counts as running. Services
+ * keep the order of the compose file, and containers of services the file does not
+ * declare are appended - hiding them would misrepresent what runs on the host.
+ * @param instances Containers of this stack, already normalised
+ * @param expectedServices Services declared in the compose file, in file order
+ * @param oneShotServices Services marked as one-shot jobs
+ * @returns One entry per service
+ */
+export function summariseServices(
+    instances : readonly ContainerInstanceStatus[],
+    expectedServices : readonly string[] = [],
+    oneShotServices : ReadonlySet<string> = new Set(),
+) : ServiceSummary[] {
+    const extra = instances
+        .map((instance) => instance.service)
+        .filter((service) => service && !expectedServices.includes(service));
+
+    const names = [ ...expectedServices, ...new Set(extra) ];
+
+    return names.map((name) => {
+        const own = instances.filter((instance) => instance.service === name);
+        const isOneShot = oneShotServices.has(name) || own.some((instance) => instance.isOneShot);
+
+        // Nothing to judge: a stack without containers was never started, and a service
+        // without containers inside a running stack is stopped, not healthy
+        if (own.length === 0) {
+            return { name,
+                state: instances.length === 0 ? "unknown" : "stopped",
+                isOneShot };
+        }
+
+        // Output that cannot be read is unknown, not broken: the stack chip says the
+        // same, and calling it attention would invent a problem nobody can act on
+        if (own.every((instance) => instance.issue === "unknownState")) {
+            return { name,
+                state: "unknown",
+                isOneShot };
+        }
+
+        if (own.some((instance) => instance.issue)) {
+            return { name,
+                state: "attention",
+                isOneShot };
+        }
+
+        if (own.some((instance) => instance.state === "running" && instance.health !== "unhealthy")) {
+            return { name,
+                state: "running",
+                isOneShot };
+        }
+
+        return { name,
+            state: "stopped",
+            isOneShot };
+    });
+}

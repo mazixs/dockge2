@@ -22,6 +22,8 @@ import {
     resolveStackStatus,
     StackStatusIssue,
     StackStatusResult,
+    summariseServices,
+    type ServiceSummary,
 } from "../common/compose-status";
 import {
     acceptedComposeFileNames,
@@ -38,6 +40,7 @@ import {
 } from "../common/util-common";
 import { InteractiveTerminal, Terminal } from "./terminal";
 import { spawn } from "./child-process";
+import { readStackSource, type StackSource } from "./stack-source";
 import { Settings } from "./settings";
 
 interface ComposeLsEntry {
@@ -73,6 +76,10 @@ export class Stack {
     protected _configFilePath?: string | undefined;
     protected _composeFileName: string = "compose.yaml";
     protected _issues : StackStatusIssue[] = [];
+    /** Services of this stack with their own state, filled by the list scan */
+    protected _services : ServiceSummary[] = [];
+    /** Where the directory comes from, filled by the list scan */
+    protected _source : StackSource | null = null;
     protected _fileConfig : StackFileConfig = emptyStackFileConfig();
     protected _inventory? : StackFileInventory;
     protected server: DockgeServer;
@@ -287,6 +294,12 @@ export class Stack {
             isManagedByDockge: this.isManagedByDockge,
             composeFileName: this._composeFileName,
             endpoint,
+            // The list row shows what a stack consists of and where it comes from,
+            // so both travel with the row instead of one request per stack
+            services: this._services,
+            source: this._source,
+            // Directory of the stack: the header shows where its files live
+            dir: this.isManagedByDockge ? this.path : "",
         };
     }
 
@@ -589,6 +602,7 @@ export class Stack {
             });
 
             if (!res.stdout) {
+                await this.fillStackDetails(stackList);
                 return stackList;
             }
 
@@ -604,6 +618,8 @@ export class Stack {
                 stack._status = UNKNOWN;
                 stack._issues = [];
             }
+
+            await this.fillStackDetails(stackList);
 
             return stackList;
         }
@@ -628,9 +644,51 @@ export class Stack {
             stack._status = detailed.status;
             stack._issues = detailed.issues;
             stack._configFilePath = composeStack.ConfigFiles;
+            stack._services = summariseServices(
+                detailed.instances,
+                readComposeServices(stack.isManagedByDockge ? stack.composeYAML : ""),
+                readOneShotServices(stack.isManagedByDockge ? stack.composeYAML : ""),
+            );
         }
 
+        await this.fillStackDetails(stackList);
+
         return stackList;
+    }
+
+    /**
+     * Fill the parts of a row that Docker does not answer: the services a stack declares
+     * and where its directory comes from.
+     *
+     * A stack that was never deployed has no containers, so without this its row would
+     * show nothing but a name - and that is exactly the stack whose services the owner
+     * wants to see before pressing start.
+     * @param stackList Stacks of this scan
+     * @returns void
+     */
+    protected static async fillStackDetails(stackList : Map<string, Stack>) : Promise<void> {
+        for (const stack of stackList.values()) {
+            if (!stack.isManagedByDockge) {
+                continue;
+            }
+
+            try {
+                if (stack._services.length === 0) {
+                    stack._services = summariseServices(
+                        [],
+                        readComposeServices(stack.composeYAML),
+                        readOneShotServices(stack.composeYAML),
+                    );
+                }
+
+                stack._source = await readStackSource(stack.path);
+            } catch (e) {
+                // A broken file or an unreadable directory must not drop the whole list
+                if (e instanceof Error) {
+                    log.debug("getStackList", `Cannot describe ${stack.name}: ${e.message}`);
+                }
+            }
+        }
     }
 
     /**
@@ -644,11 +702,12 @@ export class Stack {
         composeStack : ComposeLsEntry,
         instanceMap : Map<string, ComposePsEntry[]> | null,
         stack? : Stack,
-    ) : StackStatusResult {
+    ) : StackStatusResult & { instances : ContainerInstanceStatus[] } {
         if (!instanceMap) {
             // Docker output could not be trusted, do not claim the stack is stopped
             return { status: UNKNOWN,
-                issues: [] };
+                issues: [],
+                instances: [] };
         }
 
         // The directory wins when it is known, because the project name can be overridden

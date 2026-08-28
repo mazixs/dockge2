@@ -1,15 +1,47 @@
 <template>
-    <router-link :to="url" :class="{ 'dim' : !stack.isManagedByDockge, 'fresh': isFresh }" class="item">
-        <Uptime :stack="stack" :fixed-width="true" />
-        <div class="title">
-            <span>{{ stackName }}</span>
+    <router-link
+        :to="url"
+        class="item"
+        :class="{ 'dim': !stack.isManagedByDockge, 'fresh': isFresh }"
+    >
+        <!-- Стек, агент и источник: одна колонка, потому что читаются вместе -->
+        <div class="who">
+            <Uptime :stack="stack" :fixed-width="true" />
+            <div class="naming">
+                <div class="title">
+                    <span class="name">{{ stackName }}</span>
+                    <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
+                </div>
+                <div class="origin">
+                    <span class="agent">{{ agentLabel }}</span>
+                    <span class="source" :class="`source-${sourceKind}`" :title="sourceTitle">{{ sourceLabel }}</span>
+                </div>
+            </div>
         </div>
-        <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
+
+        <!-- Сервисы: чип на каждый, лишние сворачиваются в «+N», но не исчезают -->
+        <div class="services">
+            <span
+                v-for="service in shownServices" :key="service.name"
+                class="service" :class="`state-${service.state}`"
+                :title="serviceTitle(service)"
+            >
+                <i class="dot" aria-hidden="true"></i>{{ service.name }}
+            </span>
+            <span v-if="hiddenServices > 0" class="service more" :title="hiddenServiceNames">+{{ hiddenServices }}</span>
+            <span v-if="services.length === 0" class="service empty">{{ $t("noServicesYet") }}</span>
+        </div>
+
+        <!-- Обновления: только то, что известно чтением, без догадок про реестр -->
+        <div class="updates" :class="{ pending: updatesPending }" :title="updatesTitle">{{ updatesLabel }}</div>
     </router-link>
 </template>
 
 <script>
 import Uptime from "./Uptime.vue";
+
+/** Сколько сервисов показывается до сворачивания в «+N» */
+const SHOWN_SERVICES = 3;
 
 export default {
     components: {
@@ -25,11 +57,6 @@ export default {
         isSelectMode: {
             type: Boolean,
             default: false,
-        },
-        /** How many ancestors are above this stack */
-        depth: {
-            type: Number,
-            default: 0,
         },
         /** Callback to determine if stack is selected */
         isSelected: {
@@ -47,15 +74,7 @@ export default {
             default: () => {}
         },
     },
-    data() {
-        return {
-            isCollapsed: true,
-        };
-    },
     computed: {
-        endpointDisplay() {
-            return this.$root.endpointDisplayFunction(this.stack.endpoint);
-        },
         url() {
             if (this.stack.endpoint) {
                 return `/stack/${this.stack.name}/${this.stack.endpoint}`;
@@ -63,13 +82,105 @@ export default {
                 return `/stack/${this.stack.name}`;
             }
         },
-        depthMargin() {
-            return {
-                marginLeft: `${31 * this.depth}px`,
-            };
-        },
+
         stackName() {
             return this.stack.name;
+        },
+
+        /** Где стек живёт: свой сервер или агент по имени */
+        agentLabel() {
+            if (!this.stack.endpoint) {
+                return this.$t("thisServer");
+            }
+            return this.$root.endpointDisplayFunction(this.stack.endpoint) || this.stack.endpoint;
+        },
+
+        services() {
+            return Array.isArray(this.stack.services) ? this.stack.services : [];
+        },
+
+        shownServices() {
+            return this.services.slice(0, SHOWN_SERVICES);
+        },
+
+        hiddenServices() {
+            return Math.max(this.services.length - SHOWN_SERVICES, 0);
+        },
+
+        /** Скрытые сервисы названы в подсказке: молча обрезать список нельзя */
+        hiddenServiceNames() {
+            return this.services.slice(SHOWN_SERVICES).map((service) => service.name).join(", ");
+        },
+
+        source() {
+            return this.stack.source ?? null;
+        },
+
+        sourceKind() {
+            return this.source?.kind === "git" ? "git" : "local";
+        },
+
+        /** Источник словами: Git с отставанием, Git синхронно или локальный каталог */
+        sourceLabel() {
+            if (this.sourceKind !== "git") {
+                return this.$t("sourceLocal");
+            }
+
+            const behind = this.source?.behind;
+
+            if (behind === null || behind === undefined) {
+                return this.$t("sourceGit");
+            }
+
+            if (behind === 0) {
+                return this.$t("sourceGitInSync");
+            }
+
+            return this.$t("sourceGitBehind", [ behind ]);
+        },
+
+        /** Подробности источника в подсказке: адрес, ветвь и незакоммиченные правки */
+        sourceTitle() {
+            if (this.sourceKind !== "git") {
+                return "";
+            }
+
+            const parts = [ this.source?.remote, this.source?.branch ].filter((part) => !!part);
+
+            if (this.source?.dirty) {
+                parts.push(this.$t("sourceDirty"));
+            }
+
+            return parts.join(" · ");
+        },
+
+        /**
+         * Обновления. Отставание в коммитах известно из локальных ссылок, а «новее в
+         * реестре» требует проверки digest, которой ещё нет - поэтому вместо догадки
+         * стоит «неизвестно».
+         */
+        updatesLabel() {
+            const behind = this.source?.behind;
+
+            if (this.sourceKind === "git" && typeof behind === "number") {
+                return behind > 0 ? this.$t("updatesGit", behind) : this.$t("updatesNone");
+            }
+
+            // Проверки образов в реестре ещё нет, поэтому вместо догадки стоит прочерк,
+            // а объяснение - в подсказке
+            return "—";
+        },
+
+        /** Почему в колонке обновлений прочерк */
+        updatesTitle() {
+            if (this.sourceKind === "git" && typeof this.source?.behind === "number") {
+                return "";
+            }
+            return this.$t("updatesNotCheckedYet");
+        },
+
+        updatesPending() {
+            return this.sourceKind === "git" && (this.source?.behind ?? 0) > 0;
         },
 
         /** Только что созданный стек, на который надо показать в списке */
@@ -77,33 +188,15 @@ export default {
             return this.$root.freshStack === this.stack.name;
         }
     },
-    watch: {
-        isSelectMode() {
-            // TODO: Resize the heartbeat bar, but too slow
-            // this.$refs.heartbeatBar.resize();
-        }
-    },
-    beforeMount() {
-
-    },
     methods: {
         /**
-         * Changes the collapsed value of the current stack and saves
-         * it to local storage
-         * @returns {void}
+         * Состояние сервиса словами для подсказки чипа
+         * @param {object} service Сервис из сводки
+         * @returns {string} Состояние и пометка разового сервиса
          */
-        changeCollapsed() {
-            this.isCollapsed = !this.isCollapsed;
-
-            // Save collapsed value into local storage
-            let storage = window.localStorage.getItem("stackCollapsed");
-            let storageObject = {};
-            if (storage !== null) {
-                storageObject = JSON.parse(storage);
-            }
-            storageObject[`stack_${this.stack.id}`] = this.isCollapsed;
-
-            window.localStorage.setItem("stackCollapsed", JSON.stringify(storageObject));
+        serviceTitle(service) {
+            const state = this.$t(`serviceState_${service.state}`);
+            return service.isOneShot ? `${state} · ${this.$t("oneShotService")}` : state;
         },
 
         /**
@@ -122,40 +215,29 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
-
-.small-padding {
-    padding-left: 5px !important;
-    padding-right: 5px !important;
-}
-
-.collapse-padding {
-    padding-left: 8px !important;
-    padding-right: 2px !important;
-}
-
-// Специфичность через тег: правило `.stack-list .item` живёт ещё и в main.scss,
-// а порядок подключения стилей не гарантирован.
+// Специфичность a.item намеренная: правило перебивает наследие общего слоя
+// независимо от порядка подключения файлов
 a.item {
-    text-decoration: none;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(90px, max-content);
     align-items: center;
-    gap: var(--gap-sm);
+    gap: var(--gap-md);
     min-height: var(--row-height);
+    padding: var(--gap-sm) var(--gap-md);
     border-radius: var(--radius-control);
-    transition: background-color ease-in-out 0.15s;
-    width: 100%;
-    padding: var(--gap-xs) var(--gap-sm);
+    border-left: 3px solid transparent;
+    text-decoration: none;
     color: var(--text-strong);
-    // Полоса слева есть у всех строк, но прозрачная: иначе выбор сдвигает текст.
-    box-shadow: inset 3px 0 0 transparent;
-
-    &.disabled {
-        opacity: 0.3;
-    }
+    transition: background-color ease-in-out 0.12s;
 
     &:hover {
         background-color: var(--surface-raised);
+    }
+
+    // Выбранный стек виден не только цветом: слева акцентная полоса
+    &.active, &[aria-current] {
+        background-color: var(--accent-soft);
+        border-left-color: var(--accent);
     }
 
     &:focus-visible {
@@ -163,62 +245,140 @@ a.item {
         outline-offset: var(--focus-offset);
     }
 
-    // Выбранная строка: полоса слева плюс фон, чтобы выбор был виден и без цвета.
-    &.active,
-    &[aria-current] {
-        background-color: var(--accent-soft);
-        box-shadow: inset 3px 0 0 var(--accent);
+    &.dim {
+        opacity: 0.6;
     }
 
-    .title {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    // Только что созданный стек: подсветка отвечает на «где он в списке»
+    &.fresh {
+        background-color: color-mix(in srgb, var(--state-running) 10%, transparent);
+        border-left-color: var(--state-running);
     }
+}
 
-    .endpoint {
-        font-size: var(--text-xs);
+.who {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-width: 0;
+}
+
+.naming {
+    min-width: 0;
+}
+
+.title {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+}
+
+.name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.origin {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+}
+
+.source {
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-chip);
+    padding: 0 4px;
+    white-space: nowrap;
+
+    &.source-git {
         color: var(--text-muted);
     }
+}
 
-    // Только что созданный стек: зелёная полоса отвечает на «где он в списке».
-    &.fresh {
-        box-shadow: inset 3px 0 0 var(--state-running);
-        background-color: color-mix(in srgb, var(--state-running) 10%, transparent);
+.services {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap-xs);
+    min-width: 0;
+}
+
+.service {
+    --chip-state: var(--state-unknown);
+
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 0 6px;
+    border: 1px solid color-mix(in srgb, var(--chip-state) 40%, transparent);
+    border-radius: var(--radius-chip);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--radius-pill);
+        background-color: var(--chip-state);
+        flex: none;
+    }
+
+    &.state-running {
+        --chip-state: var(--state-running);
+    }
+
+    &.state-attention {
+        --chip-state: var(--state-attention);
+    }
+
+    &.state-stopped {
+        --chip-state: var(--state-stopped);
+    }
+
+    &.state-unknown {
+        --chip-state: var(--state-unknown);
+    }
+
+    &.more, &.empty {
+        border-color: var(--line-hair);
+        color: var(--text-faint);
+    }
+}
+
+.updates {
+    justify-self: end;
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+    white-space: nowrap;
+
+    // Отставание - повод нажать «Обновить», поэтому оно заметнее остального
+    &.pending {
+        color: var(--state-attention);
     }
 }
 
 .fresh-badge {
-    margin-left: auto;
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--state-running);
     border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
     border-radius: var(--radius-chip);
-    padding: 1px 6px;
+    padding: 0 6px;
 }
 
-.collapsed {
-    transform: rotate(-90deg);
-}
+// Узкий экран: строка складывается в две, обновления уходят под сервисы
+@media (max-width: 1100px) {
+    a.item {
+        grid-template-columns: minmax(0, 1fr) minmax(90px, max-content);
+    }
 
-.animated {
-    transition: all 0.2s $easing-in;
+    .services {
+        grid-column: 1 / -1;
+    }
 }
-
-.select-input-wrapper {
-    float: left;
-    margin-top: 15px;
-    margin-left: 3px;
-    margin-right: 10px;
-    padding-left: 4px;
-    position: relative;
-    z-index: 15;
-}
-
-.dim {
-    opacity: 0.5;
-}
-
 </style>

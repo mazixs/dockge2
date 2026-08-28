@@ -8,6 +8,7 @@ import {
     readOneShotServices,
     resolveComposePsStatus,
     resolveStackStatus,
+    summariseServices,
 } from "../../common/compose-status";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 
@@ -382,4 +383,63 @@ test("a declared service is only reported as missing while the stack is up", () 
     ], [ "app", "db" ]);
     assert.equal(running.status, ATTENTION);
     assert.equal(running.issues.some((issue) => issue.reason === "missingInstance"), true);
+});
+
+test("сводка сервисов держит порядок файла и судит каждый сервис отдельно", () => {
+    const { instances } = resolveComposePsStatus([
+        { Service: "app",
+            Name: "demo-app-1",
+            State: "running",
+            Status: "Up 2 minutes" },
+        { Service: "worker",
+            Name: "demo-worker-1",
+            State: "exited",
+            ExitCode: 137,
+            Status: "Exited (137) 1 minute ago" },
+        { Service: "sidecar",
+            Name: "demo-sidecar-1",
+            State: "running",
+            Status: "Up 2 minutes" },
+    ], [ "app", "db", "worker" ]);
+
+    const summary = summariseServices(instances, [ "app", "db", "worker" ]);
+
+    // Порядок - файла, а не докера; сервис из докера, которого нет в файле, идёт в конец
+    assert.deepEqual(summary.map((item) => item.name), [ "app", "db", "worker", "sidecar" ]);
+
+    assert.equal(summary[0]?.state, "running");
+    // Объявлен, но контейнера нет, а стек поднят: это остановлен, а не «работает»
+    assert.equal(summary[1]?.state, "stopped");
+    // Код 137 - причина внимания, а не просто остановка
+    assert.equal(summary[2]?.state, "attention");
+    assert.equal(summary[3]?.state, "running");
+});
+
+test("сводка не выдаёт нечитаемое состояние за работающее", () => {
+    // Стек без контейнеров: состояние сервисов неизвестно, а не «остановлен»
+    const neverStarted = summariseServices([], [ "app", "db" ]);
+    assert.deepEqual(neverStarted.map((item) => item.state), [ "unknown", "unknown" ]);
+
+    // Docker вернул контейнер без состояния - это тоже «неизвестно»
+    const { instances } = resolveComposePsStatus([
+        { Service: "app",
+            Name: "demo-app-1",
+            Status: "" },
+    ], [ "app" ]);
+    assert.equal(summariseServices(instances, [ "app" ])[0]?.state, "unknown");
+});
+
+test("разовый сервис помечен в сводке отдельно от состояния", () => {
+    const { instances } = resolveComposePsStatus([
+        { Service: "job",
+            Name: "demo-job-1",
+            State: "exited",
+            ExitCode: 0,
+            Status: "Exited (0) 1 minute ago" },
+    ], [ "job" ], new Set([ "job" ]));
+
+    const summary = summariseServices(instances, [ "job" ], new Set([ "job" ]));
+    assert.equal(summary[0]?.isOneShot, true);
+    // Чистый выход разового контейнера внимания не требует
+    assert.equal(summary[0]?.state, "stopped");
 });

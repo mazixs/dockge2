@@ -1,19 +1,14 @@
 <template>
-    <div class="container-fluid">
-        <div class="row">
-            <div v-if="!$root.isMobile && !fullWidth" class="col-12 col-md-4 col-xl-3">
-                <div>
-                    <button class="btn btn-primary mb-3" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
-                        <font-awesome-icon icon="plus" /> {{ $t("deployStackAction") }}
-                    </button>
-                </div>
-                <StackList :scrollbar="true" />
-            </div>
+    <div class="dashboard" :class="{ full: fullWidth }">
+        <!-- Список широкий, инспектор узкий: в строке списка четыре колонки данных,
+             а инспектор держит действия и три коротких секции -->
+        <div v-if="!$root.isMobile && !fullWidth" class="list-column">
+            <StackList :scrollbar="true" />
+        </div>
 
-            <div ref="container" class="mb-3" :class="fullWidth ? 'col-12' : 'col-12 col-md-8 col-xl-9'">
-                <!-- Add :key to disable vue router re-use the same component -->
-                <router-view :key="$route.fullPath" :calculatedHeight="height" />
-            </div>
+        <div ref="container" class="work-column">
+            <!-- Add :key to disable vue router re-use the same component -->
+            <router-view :key="$route.fullPath" :calculatedHeight="height" />
         </div>
     </div>
 </template>
@@ -48,7 +43,29 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.container-fluid {
+.dashboard {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: var(--gap-lg);
     width: 98%;
+    margin: 0 auto;
+    padding-bottom: var(--gap-lg);
+
+    // Редактор и терминал забирают экран целиком
+    &.full {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.list-column, .work-column {
+    min-width: 0;
+}
+
+// Ниже 1300 px инспектор не влезает рядом со списком из четырёх колонок,
+// поэтому колонки складываются одна под другой
+@media (max-width: 1300px) {
+    .dashboard {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 </style>
