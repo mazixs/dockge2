@@ -212,21 +212,6 @@
                 </div>
             </div>
 
-            <!-- Вывод стека: пока нет общего нижнего дока, он идёт во всю ширину под файлом -->
-            <!-- Combined Terminal Output -->
-            <div v-show="!isEditMode">
-                <h4 class="mb-3">{{ $t("terminal") }}</h4>
-                <Terminal
-                    ref="combinedTerminal"
-                    class="mb-3 terminal"
-                    :name="combinedTerminalName"
-                    :endpoint="endpoint"
-                    :rows="combinedTerminalRows"
-                    :cols="combinedTerminalCols"
-                    style="height: 315px;"
-                ></Terminal>
-            </div>
-
             <div v-if="!stack.isManagedByDockge && !processing">
                 {{ $t("stackNotManagedByDockgeMsg") }}
             </div>
@@ -244,10 +229,7 @@ import { parseDocument } from "yaml";
 
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import {
-    COMBINED_TERMINAL_COLS,
-    COMBINED_TERMINAL_ROWS,
     envsubstYAML,
-    getCombinedTerminalName,
     getComposeTerminalName,
     PROGRESS_TERMINAL_ROWS
 } from "../../../common/util-common";
@@ -322,8 +304,6 @@ export default {
             processing: true,
             showProgressTerminal: false,
             progressTerminalRows: PROGRESS_TERMINAL_ROWS,
-            combinedTerminalRows: COMBINED_TERMINAL_ROWS,
-            combinedTerminalCols: COMBINED_TERMINAL_COLS,
             stack: {
 
             },
@@ -435,13 +415,6 @@ export default {
                 return "";
             }
             return getComposeTerminalName(this.endpoint, this.stack.name);
-        },
-
-        combinedTerminalName() {
-            if (!this.stack.name) {
-                return "";
-            }
-            return getCombinedTerminalName(this.endpoint, this.stack.name);
         },
 
         networks() {
@@ -676,9 +649,8 @@ export default {
             clearTimeout(serviceStatusTimeout);
             clearTimeout(dockerStatsTimeout);
 
-            // Leave Combined Terminal
-            console.debug("leaveCombinedTerminal", this.endpoint, this.stack.name);
-            this.$root.emitAgent(this.endpoint, "leaveCombinedTerminal", this.stack.name, () => {});
+            // Вывод стека живёт в доке: он сам решает, когда отписаться, поэтому
+            // уход с редактора больше не обрывает чужие логи
         },
 
         bindTerminal() {

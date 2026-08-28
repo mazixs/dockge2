@@ -294,5 +294,11 @@
     "networkCount": "{count} network | {count} networks",
     "exposedPortsShort": "outside: {0}",
     "nothingExposed": "nothing exposed",
-    "defaultNetworkOnly": "default network only"
+    "defaultNetworkOnly": "default network only",
+    "openLogs": "Logs",
+    "dockExpand": "Show output",
+    "dockCollapse": "Hide output",
+    "dockCloseSession": "Close this session",
+    "dockCloseAll": "Close output",
+    "dockResize": "Output height, arrow up and down change it"
 }

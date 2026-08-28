@@ -294,5 +294,11 @@
     "networkCount": "{count} сеть | {count} сети | {count} сетей",
     "exposedPortsShort": "наружу: {0}",
     "nothingExposed": "наружу ничего",
-    "defaultNetworkOnly": "только сеть по умолчанию"
+    "defaultNetworkOnly": "только сеть по умолчанию",
+    "openLogs": "Логи",
+    "dockExpand": "Показать вывод",
+    "dockCollapse": "Скрыть вывод",
+    "dockCloseSession": "Закрыть эту сессию",
+    "dockCloseAll": "Закрыть вывод",
+    "dockResize": "Высота вывода, меняется стрелками вверх и вниз"
 }

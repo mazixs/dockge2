@@ -188,6 +188,33 @@ export class TerminalSocketHandler extends AgentSocketHandler {
             }
         });
 
+        // Join Combined Terminal: the output of one stack, shown in the dock.
+        // Only the name of a stack is accepted, and Stack.getStack rejects anything
+        // that is not a stack directory, so no command can be smuggled in here.
+        agentSocket.on("joinCombinedTerminal", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string.");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+
+                if (!stack.isManagedByDockge) {
+                    throw new ValidationError("This stack is not managed by Dockge.");
+                }
+
+                await stack.joinCombinedTerminal(socket);
+
+                callbackResult({
+                    ok: true,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         // Leave Combined Terminal
         agentSocket.on("leaveCombinedTerminal", async (stackName : unknown, callback) => {
             try {
