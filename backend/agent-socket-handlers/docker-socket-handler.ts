@@ -2,9 +2,13 @@ import { AgentSocketHandler } from "../agent-socket-handler";
 import { DockgeServer } from "../dockge-server";
 import { callbackError, callbackResult, checkLogin, DockgeSocket, doubleCheckPassword, ValidationError } from "../util-server";
 import { Stack } from "../stack";
+import { readAvailability } from "../observations";
 import { ContainerInstanceStatus } from "../../common/compose-status";
 import type { StackFileConfig } from "../../common/types/stack";
 import { AgentSocket } from "../../common/agent-socket";
+
+/** Окна, которые предлагает интерфейс: сутки, неделя, месяц */
+const AVAILABILITY_WINDOWS = [ 24, 168, 720 ];
 
 export class DockerSocketHandler extends AgentSocketHandler {
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
@@ -247,6 +251,33 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     serviceStatusList,
                     stackStatus: detailed.status,
                     issues: detailed.issues,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Availability of one stack over a chosen window
+        agentSocket.on("stackAvailability", async (stackName : unknown, windowHours : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                // Only the windows the UI offers: an arbitrary number would let a client
+                // ask for a scan of the whole history
+                if (typeof(windowHours) !== "number" || !AVAILABILITY_WINDOWS.includes(windowHours)) {
+                    throw new ValidationError("Unsupported availability window");
+                }
+
+                // The name is validated by the same path every stack call uses
+                Stack.validateName(stackName);
+
+                callbackResult({
+                    ok: true,
+                    availability: await readAvailability(stackName, socket.endpoint, windowHours * 3_600_000),
                 }, callback);
             } catch (e) {
                 callbackError(e, callback);

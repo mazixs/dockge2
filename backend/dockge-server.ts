@@ -24,6 +24,7 @@ import expressStaticGzip from "express-static-gzip";
 import path from "path";
 import { TerminalSocketHandler } from "./agent-socket-handlers/terminal-socket-handler";
 import { Stack } from "./stack";
+import { recordScan } from "./observations";
 import { Cron } from "croner";
 import gracefulShutdown from "http-graceful-shutdown";
 import { spawn } from "./child-process";
@@ -468,6 +469,7 @@ export class DockgeServer {
                 protect: true,  // Enabled over-run protection.
             }, () => {
                 //log.debug("server", "Cron job running");
+                this.observeStacks().catch((e) => log.error("observations", e));
                 this.sendStackList(true);
 
                 // A socket is identified once, during its handshake, so a session that
@@ -662,6 +664,24 @@ export class DockgeServer {
      * Send stack list to all connected sockets
      * @param useCache
      */
+    /**
+     * Записать состояние всех стеков в историю.
+     *
+     * Отдельно от рассылки списка: доступность обязана считаться и тогда, когда панель
+     * никто не открыл, иначе процент описывал бы не работу стека, а время, которое
+     * владелец смотрел в экран.
+     * @returns void
+     */
+    async observeStacks() : Promise<void> {
+        const stackList = await Stack.getStackList(this, true);
+
+        await recordScan([ ...stackList.values() ].map((stack) => ({
+            name: stack.name,
+            endpoint: "",
+            status: stack.status,
+        })));
+    }
+
     async sendStackList(useCache = false) {
         let socketList = this.io.sockets.sockets.values();
 
@@ -676,6 +696,7 @@ export class DockgeServer {
                 // Get the list only if there is a logged in user
                 if (!stackList) {
                     stackList = await Stack.getStackList(this, useCache);
+                    await Stack.fillAvailability(stackList);
                 }
 
                 let map : Map<string, object> = new Map();

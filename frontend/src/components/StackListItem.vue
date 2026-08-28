@@ -32,6 +32,9 @@
             <span v-if="services.length === 0" class="service empty">{{ $t("noServicesYet") }}</span>
         </div>
 
+        <!-- Доступность: процент только там, где наблюдений хватает на вывод -->
+        <div class="availability" :class="`verdict-${availabilityVerdict}`" :title="availabilityTitle">{{ availabilityLabel }}</div>
+
         <!-- Обновления: только то, что известно чтением, без догадок про реестр -->
         <div class="updates" :class="{ pending: updatesPending }" :title="updatesTitle">{{ updatesLabel }}</div>
     </router-link>
@@ -39,6 +42,7 @@
 
 <script>
 import Uptime from "./Uptime.vue";
+import { formatDuration, formatPercent } from "../format";
 
 /** Сколько сервисов показывается до сворачивания в «+N» */
 const SHOWN_SERVICES = 3;
@@ -183,6 +187,57 @@ export default {
             return this.sourceKind === "git" && (this.source?.behind ?? 0) > 0;
         },
 
+        availability() {
+            return this.stack.availability ?? null;
+        },
+
+        availabilityVerdict() {
+            return this.availability?.verdict ?? "noData";
+        },
+
+        /**
+         * Доступность словами. Правила простые и обязательные: без наблюдений нет
+         * процента, полное окно без сбоев - это «без сбоев», а не «100%», а
+         * остановленный стек показывает срок, а не долю.
+         */
+        availabilityLabel() {
+            const data = this.availability;
+
+            if (!data) {
+                return this.$t("availabilityNoData");
+            }
+
+            if (data.verdict === "stopped") {
+                return this.$t("availabilityStopped", [ formatDuration(data.currentForMs, this.$t) ]);
+            }
+
+            if (data.verdict === "clean") {
+                return this.$t("availabilityClean");
+            }
+
+            if (data.verdict === "degraded") {
+                const percent = formatPercent(data.ratio, this.$i18n.locale);
+                return `${percent} · ${this.$t("availabilityIncidents", data.incidents)}`;
+            }
+
+            return this.$t("availabilityNoData");
+        },
+
+        /** Почему сказано «мало данных»: сколько наблюдений на самом деле есть */
+        availabilityTitle() {
+            const data = this.availability;
+
+            if (!data || data.verdict !== "noData") {
+                return "";
+            }
+
+            if (!data.coveredMs) {
+                return this.$t("availabilityNothingObserved");
+            }
+
+            return this.$t("availabilityObservedFor", [ formatDuration(data.coveredMs, this.$t) ]);
+        },
+
         /** Только что созданный стек, на который надо показать в списке */
         isFresh() {
             return this.$root.freshStack === this.stack.name;
@@ -219,7 +274,7 @@ export default {
 // независимо от порядка подключения файлов
 a.item {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(90px, max-content);
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(120px, max-content) minmax(90px, max-content);
     align-items: center;
     gap: var(--gap-md);
     min-height: var(--row-height);
@@ -350,6 +405,26 @@ a.item {
     }
 }
 
+// Доступность: сбой заметен, «мало данных» не притворяется зелёным
+.availability {
+    justify-self: end;
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+    white-space: nowrap;
+
+    &.verdict-clean {
+        color: var(--state-running);
+    }
+
+    &.verdict-degraded {
+        color: var(--state-attention);
+    }
+
+    &.verdict-stopped {
+        color: var(--text-muted);
+    }
+}
+
 .updates {
     justify-self: end;
     font-size: var(--text-xs);
@@ -379,6 +454,11 @@ a.item {
 
     .services {
         grid-column: 1 / -1;
+    }
+
+    .availability {
+        justify-self: start;
+        grid-column: 1;
     }
 }
 </style>
