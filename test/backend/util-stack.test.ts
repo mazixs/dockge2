@@ -98,6 +98,7 @@ test("Stack validates, saves and reads compose files using the real filesystem",
             services: [],
             source: null,
             dir: "",
+            availability: null,
         });
 
         await stack.save(true);

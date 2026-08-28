@@ -41,6 +41,8 @@ import {
 import { InteractiveTerminal, Terminal } from "./terminal";
 import { spawn } from "./child-process";
 import { readStackSource, type StackSource } from "./stack-source";
+import { readAvailability } from "./observations";
+import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
 
 interface ComposeLsEntry {
@@ -80,6 +82,8 @@ export class Stack {
     protected _services : ServiceSummary[] = [];
     /** Where the directory comes from, filled by the list scan */
     protected _source : StackSource | null = null;
+    /** Availability over the last day, filled by the list scan */
+    protected _availability : Availability | null = null;
     protected _fileConfig : StackFileConfig = emptyStackFileConfig();
     protected _inventory? : StackFileInventory;
     protected server: DockgeServer;
@@ -300,6 +304,8 @@ export class Stack {
             source: this._source,
             // Directory of the stack: the header shows where its files live
             dir: this.isManagedByDockge ? this.path : "",
+            // What is known about the last day, computed from recorded status changes
+            availability: this._availability,
         };
     }
 
@@ -654,6 +660,29 @@ export class Stack {
         await this.fillStackDetails(stackList);
 
         return stackList;
+    }
+
+    /**
+     * Fill the availability of every stack over the last day.
+     *
+     * One query per stack is enough here: the history holds only status changes, so a
+     * stack that has been running for a month answers with a single row.
+     * @param stackList Stacks of this scan
+     * @returns void
+     */
+    static async fillAvailability(stackList : Map<string, Stack>) : Promise<void> {
+        const day = 24 * 3_600_000;
+
+        for (const stack of stackList.values()) {
+            try {
+                stack._availability = await readAvailability(stack.name, "", day);
+            } catch (e) {
+                // No history is a normal answer, an error here must not drop the list
+                if (e instanceof Error) {
+                    log.debug("getStackList", `Cannot read the history of ${stack.name}: ${e.message}`);
+                }
+            }
+        }
     }
 
     /**

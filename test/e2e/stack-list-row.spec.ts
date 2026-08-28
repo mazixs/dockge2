@@ -71,3 +71,42 @@ test.describe("строка списка стеков", () => {
         await expect(page.locator(".inspector .services caption")).toHaveText(/state as of|состояние на/i);
     });
 });
+
+test.describe("доступность", () => {
+    test("окно без сбоев не превращается в «100%», а сбой называет и долю, и случай", async ({ page }) => {
+        await page.goto("/");
+
+        // Стек работает третьи сутки: окно закрыто целиком и без сбоев
+        const healthy = page.locator(".item", { hasText: E2E_STACK_NAME });
+        await expect(healthy.locator(".availability")).toHaveText(/no incidents|без сбоев/i);
+
+        // Стек со сбоем: доля и число случаев, а не «почти работает».
+        // Случаев может быть больше одного: сервер записывает и свои наблюдения,
+        // поэтому проверяется правило, а не конкретное число.
+        const degraded = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
+        await expect(degraded.locator(".availability")).toHaveText(/9\d[.,]\d%/);
+        await expect(degraded.locator(".availability")).toHaveText(/\d+ incident|\d+ сбо/i);
+    });
+
+    test("остановленный стек показывает срок, а не долю", async ({ page }) => {
+        await page.goto("/");
+
+        // У стека нет запущенных контейнеров: процент был бы бессмыслицей
+        const stopped = page.locator(".item", { hasText: E2E_FILES_STACK });
+        await expect(stopped.locator(".availability")).toHaveText(/stopped .* ago|остановлен .* назад/i);
+        await expect(stopped.locator(".availability")).not.toHaveText(/%/);
+    });
+
+    test("инспектор считает доступность по выбранному окну", async ({ page }) => {
+        await page.goto(`/stack/${E2E_ATTENTION_STACK}`);
+
+        const section = page.locator(".inspector .availability");
+        await expect(section).toBeVisible();
+        await expect(section.locator(".verdict")).toHaveText(/9\d[.,]\d%/);
+
+        // Месяц наблюдался не целиком, и это сказано прямо, а не спрятано
+        await page.getByRole("button", { name: /^30 (d|д)$/ }).click();
+        await expect(section.locator(".note")).toHaveText(/observed|наблюдалось/i);
+        await expect(page.getByRole("button", { name: /^30 (d|д)$/ })).toHaveAttribute("aria-pressed", "true");
+    });
+});

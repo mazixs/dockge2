@@ -127,6 +127,29 @@
 
             <p v-else-if="!processing" class="faint">{{ $t("noServicesInFile") }}</p>
 
+            <!-- Доступность: окно выбирается, а вывод не выдумывается -->
+            <div class="availability">
+                <div class="availability-head">
+                    <span class="availability-title">{{ $t("availabilitySection") }}</span>
+                    <div class="windows">
+                        <button
+                            v-for="hours in availabilityWindows" :key="hours"
+                            class="window" type="button"
+                            :aria-pressed="String(windowHours === hours)"
+                            :class="{ on: windowHours === hours }"
+                            @click="selectWindow(hours)"
+                        >
+                            {{ $t(`availabilityWindow${hours}`) }}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="availability-body" :class="`verdict-${availabilityVerdict}`">
+                    <span class="verdict">{{ availabilityLabel }}</span>
+                    <span v-if="availabilityNote" class="note">{{ availabilityNote }}</span>
+                </div>
+            </div>
+
             <!-- Связи, сети и файлы: одна строка, разворачивается на месте -->
             <div class="links">
                 <button class="summary" type="button" :aria-expanded="String(showLinks)" @click="showLinks = !showLinks">
@@ -162,6 +185,8 @@ import StateChip from "../components/StateChip.vue";
 import Uptime from "../components/Uptime.vue";
 import { ATTENTION, RUNNING, envsubstYAML, parseDockerPort } from "../../../common/util-common";
 import { summariseRegistries } from "../../../common/image-source";
+import { formatDuration, formatPercent } from "../format";
+import { isUpStatus, parseDockerDuration } from "../../../common/docker-time";
 
 /** Как часто спрашивать состояние сервисов, пока инспектор открыт */
 const STATUS_INTERVAL_MS = 5000;
@@ -191,6 +216,10 @@ export default {
             statusReadAt: 0,
             /** Секунды с последнего замера, пересчитываются раз в секунду */
             statusAgeSeconds: 0,
+            /** Выбранное окно доступности в часах */
+            windowHours: 24,
+            /** Доступность выбранного окна, приходит отдельным запросом */
+            availabilityData: null,
         };
     },
     computed: {
@@ -286,6 +315,59 @@ export default {
             }
 
             return this.$t("statusAgeSeconds", [ this.statusAgeSeconds ]);
+        },
+
+        /** Окна, которые предлагает сервер: сутки, неделя, месяц */
+        availabilityWindows() {
+            return [ 24, 168, 720 ];
+        },
+
+        availabilityVerdict() {
+            return this.availabilityData?.verdict ?? "noData";
+        },
+
+        /** Вывод по окну словами, по тем же правилам, что в строке списка */
+        availabilityLabel() {
+            const data = this.availabilityData;
+
+            if (!data) {
+                return this.$t("availabilityNoData");
+            }
+
+            if (data.verdict === "stopped") {
+                return this.$t("availabilityStopped", [ formatDuration(data.currentForMs, this.$t) ]);
+            }
+
+            if (data.verdict === "clean") {
+                return this.$t("availabilityCleanWindow", [ this.$t(`availabilityWindow${this.windowHours}`) ]);
+            }
+
+            if (data.verdict === "degraded") {
+                return `${formatPercent(data.ratio, this.$i18n.locale)} · ${this.$t("availabilityIncidents", data.incidents)}`;
+            }
+
+            return this.$t("availabilityNoData");
+        },
+
+        /** Приписка: сколько окна вообще наблюдалось - без неё процент выглядит полным */
+        availabilityNote() {
+            const data = this.availabilityData;
+
+            if (!data) {
+                return "";
+            }
+
+            if (data.verdict === "noData") {
+                return data.coveredMs
+                    ? this.$t("availabilityObservedFor", [ formatDuration(data.coveredMs, this.$t) ])
+                    : this.$t("availabilityNothingObserved");
+            }
+
+            if (data.coveredMs < data.windowMs * 0.98) {
+                return this.$t("availabilityCoverage", [ formatDuration(data.coveredMs, this.$t) ]);
+            }
+
+            return "";
         },
 
         composeUrl() {
@@ -425,6 +507,26 @@ export default {
             this.$root.emitAgent(endpoint, "leaveCombinedTerminal", stackName, () => {});
         },
 
+        /**
+         * Спросить доступность выбранного окна
+         * @returns {void}
+         */
+        requestAvailability() {
+            this.$root.emitAgent(this.endpoint, "stackAvailability", this.stackName, this.windowHours, (res) => {
+                this.availabilityData = res?.ok ? res.availability : null;
+            });
+        },
+
+        /**
+         * Выбрать окно доступности
+         * @param {number} hours Окно в часах
+         * @returns {void}
+         */
+        selectWindow(hours) {
+            this.windowHours = hours;
+            this.requestAvailability();
+        },
+
         loadStack() {
             this.processing = true;
             this.allIssues = false;
@@ -441,6 +543,7 @@ export default {
                 this.stack = res.stack;
                 this.parseConfig();
                 this.requestServiceStatus();
+                this.requestAvailability();
             });
         },
 
@@ -557,13 +660,20 @@ export default {
                 .filter((value) => !!value)
                 .join(", ");
 
+            // Время берётся из фразы докера, но выводится нашими словами: иначе в
+            // русской панели стояло бы «About a minute ago»
             const uptime = service.instances
-                .map((instance) => instance.statusText)
+                .map((instance) => {
+                    const duration = parseDockerDuration(instance.statusText ?? "");
+
+                    if (duration === null) {
+                        return "";
+                    }
+
+                    const value = formatDuration(duration, this.$t);
+                    return isUpStatus(instance.statusText ?? "") ? value : this.$t("agoSuffix", [ value ]);
+                })
                 .filter((text) => !!text)
-                .map((text) => text
-                    .replace(/^Up\s+/i, "")
-                    .replace(/^Exited\s*\([^)]*\)\s*/i, "")
-                    .replace(/\s*\(healthy\)$/i, ""))
                 .join(", ");
 
             return [ memory, uptime ].filter((part) => !!part).join(" · ");
@@ -807,6 +917,81 @@ export default {
 
 .faint {
     color: var(--text-faint);
+}
+
+// Доступность: заголовок с окнами и один вывод словами
+.availability {
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel);
+    background-color: var(--surface-panel);
+    padding: var(--gap-sm) var(--gap-md);
+}
+
+.availability-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gap-sm);
+}
+
+.availability-title {
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+}
+
+.windows {
+    display: flex;
+    gap: var(--gap-xs);
+}
+
+.window {
+    min-height: 24px;
+    padding: 0 var(--gap-sm);
+    background: none;
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-chip);
+    color: var(--text-faint);
+    font-size: var(--text-xs);
+
+    &.on {
+        border-color: var(--accent);
+        background-color: var(--accent-soft);
+        color: var(--text-strong);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+}
+
+.availability-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+
+    .verdict {
+        font-size: var(--text-md);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .note {
+        font-size: var(--text-xs);
+        color: var(--text-faint);
+    }
+
+    &.verdict-clean .verdict {
+        color: var(--state-running);
+    }
+
+    &.verdict-degraded .verdict {
+        color: var(--state-attention);
+    }
+
+    &.verdict-noData .verdict {
+        color: var(--text-muted);
+    }
 }
 
 // Связи, сети и файлы: одна спокойная строка, разворачивается на месте

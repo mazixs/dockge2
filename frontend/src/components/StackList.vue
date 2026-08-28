@@ -32,6 +32,7 @@
             <div class="columns" aria-hidden="true">
                 <span>{{ $t("columnStack") }}</span>
                 <span>{{ $t("columnServices") }}</span>
+                <span class="right">{{ $t("columnAvailability") }}</span>
                 <span class="right">{{ $t("columnUpdates") }}</span>
             </div>
         </div>
@@ -485,7 +486,7 @@ export default {
 // Заголовок колонок повторяет сетку строки, поэтому подписи стоят над своими данными
 .columns {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(90px, max-content);
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(120px, max-content) minmax(90px, max-content);
     gap: var(--gap-md);
     padding: 6px var(--gap-md) 0;
     font-size: var(--text-xs);
@@ -546,7 +547,7 @@ export default {
     .columns {
         grid-template-columns: minmax(0, 1fr) minmax(90px, max-content);
 
-        span:nth-child(2) {
+        span:nth-child(2), span:nth-child(3) {
             display: none;
         }
     }

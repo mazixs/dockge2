@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "../../backend/child-process";
 import { Database } from "../../backend/database";
+import { ATTENTION, RUNNING } from "../../common/util-common";
 import { Settings } from "../../backend/settings";
 
 import { countUsers, initAuth } from "../../backend/auth";
@@ -95,6 +96,32 @@ services:
             throw new Error(`Could not create the e2e account: ${response.status}`);
         }
     }
+
+    // История состояний: без неё доступность честно молчит, а спек не сможет проверить
+    // ни «без сбоев», ни процент со сбоем. Значения кладутся как настоящие строки.
+    const now = Date.now();
+    const hour = 3_600_000;
+
+    await Database.getKnex()("stack_observation").insert([
+        // Работает третьи сутки без сбоев
+        { stack_name: E2E_STACK_NAME,
+            endpoint: "",
+            status: RUNNING,
+            observed_at: now - 72 * hour },
+        // Сутки работы с часовым сбоем: 95,8% и один случай
+        { stack_name: E2E_ATTENTION_STACK,
+            endpoint: "",
+            status: RUNNING,
+            observed_at: now - 48 * hour },
+        { stack_name: E2E_ATTENTION_STACK,
+            endpoint: "",
+            status: ATTENTION,
+            observed_at: now - 3 * hour },
+        { stack_name: E2E_ATTENTION_STACK,
+            endpoint: "",
+            status: RUNNING,
+            observed_at: now - 2 * hour },
+    ]);
 
     Settings.stopCacheCleaner();
     await Database.close();
