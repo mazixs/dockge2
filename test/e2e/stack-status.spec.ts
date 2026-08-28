@@ -7,12 +7,12 @@ test.describe("stack status in the UI", () => {
 
         // The stack whose only service runs is active
         const healthyRow = page.locator(".item", { hasText: E2E_STACK_NAME });
-        await expect(healthyRow.locator(".badge")).toHaveText(/active/i);
+        await expect(healthyRow.locator(".state-chip")).toHaveText(/active/i);
 
         // The stack with an unmarked container that exited is not called inactive
         const attentionRow = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
-        await expect(attentionRow.locator(".badge")).toHaveText(/attention/i);
-        await expect(attentionRow.locator(".badge")).not.toHaveText(/inactive/i);
+        await expect(attentionRow.locator(".state-chip")).toHaveText(/attention/i);
+        await expect(attentionRow.locator(".state-chip")).not.toHaveText(/inactive/i);
     });
 
     test("инспектор называет причину и не выдаёт работающий сервис за мёртвый", async ({ page }) => {
@@ -27,7 +27,7 @@ test.describe("stack status in the UI", () => {
         // Таблица сервисов: работающий помечен running, остановленный - нет
         const services = page.locator("table.services");
         await expect(services).toBeVisible();
-        await expect(services.locator("tbody tr", { hasText: "app" }).locator(".badge")).toHaveText(/running/i);
-        await expect(services.locator("tbody tr", { hasText: "init" }).locator(".badge")).not.toHaveText(/running/i);
+        await expect(services.locator("tbody tr", { hasText: "app" }).locator(".state-chip")).toHaveText(/running/i);
+        await expect(services.locator("tbody tr", { hasText: "init" }).locator(".state-chip")).not.toHaveText(/running/i);
     });
 });

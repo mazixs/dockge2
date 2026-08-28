@@ -232,18 +232,17 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
-
 .backup-codes {
     padding: 0.5rem;
-    border-radius: 0.5rem;
-    background-color: rgba(127, 127, 127, 0.15);
+    border-radius: var(--radius-panel);
+    background-color: var(--surface-raised);
     font-family: var(--font-mono);
 }
 
-.dark {
-    .modal-dialog .form-text, .modal-dialog p {
-        color: $dark-font-color;
+// Текст модального окна: один токен на обе темы вместо правила под тёмную
+.modal-dialog {
+    .form-text, p {
+        color: var(--text-muted);
     }
 }
 </style>

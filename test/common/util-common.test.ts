@@ -21,7 +21,7 @@ import {
     parseDockerPort,
     sleep,
     ATTENTION,
-    statusColor,
+    statusStateName,
     statusName,
     statusNameShort,
 } from "../../common/util-common";
@@ -48,15 +48,16 @@ test("status helpers cover all supported statuses", () => {
         statusNameShort(99),
     ], [ "unknown", "inactive", "inactive", "active", "exited", "attention", "unknown" ]);
 
+    // Состояние никогда не приходит синим: акцент означает интерактив, а не «работает»
     assert.deepEqual([
-        statusColor(UNKNOWN),
-        statusColor(CREATED_FILE),
-        statusColor(CREATED_STACK),
-        statusColor(RUNNING),
-        statusColor(EXITED),
-        statusColor(ATTENTION),
-        statusColor(99),
-    ], [ "secondary", "dark", "dark", "primary", "danger", "warning", "secondary" ]);
+        statusStateName(UNKNOWN),
+        statusStateName(CREATED_FILE),
+        statusStateName(CREATED_STACK),
+        statusStateName(RUNNING),
+        statusStateName(EXITED),
+        statusStateName(ATTENTION),
+        statusStateName(99),
+    ], [ "unknown", "stopped", "stopped", "running", "failed", "attention", "unknown" ]);
 });
 
 test("common naming and hashing helpers are deterministic", () => {

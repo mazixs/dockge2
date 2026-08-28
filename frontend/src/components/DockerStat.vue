@@ -79,8 +79,8 @@ export default {
 }
 
 .stats {
-    font-size: 0.8rem;
-    color: #6c757d;
+    font-size: var(--text-sm);
+    color: var(--text-faint);
 }
 
 .stat-label {
@@ -88,7 +88,7 @@ export default {
 }
 
 .stats-title {
-    font-size: 0.9rem;
-    color: var(--bs-heading-color);
+    font-size: var(--text-base);
+    color: var(--text-muted);
 }
 </style>

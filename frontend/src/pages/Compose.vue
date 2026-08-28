@@ -938,32 +938,75 @@ export default {
 </script>
 
 <style scoped lang="scss">
-@use "../styles/vars.scss" as *;
-
+// Заголовок страницы и подписи берутся из шкалы кегля, а не из своих чисел:
+// иначе редактор набран не тем же голосом, что список и инспектор.
 h1 {
+    font-size: var(--text-xl);
+    font-weight: 600;
+    letter-spacing: -.01em;
+
     .back {
         text-decoration: none;
     }
 
     .file-name {
-        margin-left: 8px;
+        margin-left: var(--gap-sm);
         font-family: var(--font-mono);
         font-size: var(--text-md);
         color: var(--text-faint);
     }
 }
 
+h4 {
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text-strong);
+}
+
+.form-label {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.form-text {
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+}
+
 .terminal {
     height: 200px;
 }
 
+// Панель редактора: тот же радиус, что у остальных панелей, но поверхность
+// консольная в обеих темах - подсветка синтаксиса CodeMirror нарисована для
+// тёмного фона, и на белом её красные ключи не проходят порог контраста
 .editor-box {
     font-family: var(--font-mono);
-    font-size: 14px;
+    font-size: var(--text-base);
+    border-radius: var(--radius-panel);
+    background-color: var(--surface-console) !important;
+    border: 1px solid var(--line-hair);
 }
 
 .agent-name {
-    font-size: 13px;
-    color: $dark-font-color3;
+    font-size: var(--text-sm);
+    color: var(--text-faint);
+}
+
+// Предупреждение о текстовом режиме - та же полоса внимания, что в инспекторе
+.alert-warning {
+    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
+    background-color: color-mix(in srgb, var(--state-attention) 8%, transparent);
+    border-radius: var(--radius-panel);
+    color: var(--text-strong);
+    font-size: var(--text-base);
+}
+
+// Видимый фокус нужен и кнопкам страницы: глобальные правила .btn его гасят
+.btn:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
 }
 </style>

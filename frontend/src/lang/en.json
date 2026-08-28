@@ -5,6 +5,7 @@
     "PasswordsDoNotMatch": "Passwords do not match.",
     "Repeat Password": "Repeat Password",
     "Create": "Create",
+    "accountMenu": "Account menu",
     "signedInDisp": "Signed in as {0}",
     "signedInDispDisabled": "Auth Disabled.",
     "home": "Home",
@@ -300,5 +301,6 @@
     "dockCollapse": "Hide output",
     "dockCloseSession": "Close this session",
     "dockCloseAll": "Close output",
-    "dockResize": "Output height, arrow up and down change it"
+    "dockResize": "Output height, arrow up and down change it",
+    "externalNetworkKind": "external"
 }

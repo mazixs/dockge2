@@ -105,7 +105,7 @@ export default {
 @use "../styles/vars.scss" as *;
 
 .list-group {
-    background-color: $dark-bg2;
+    background-color: var(--surface-panel);
 
     li {
         display: flex;
@@ -114,13 +114,13 @@ export default {
 
         .domain-input {
             flex-grow: 1;
-            background-color: $dark-bg2;
+            background-color: transparent;
             border: none;
-            color: $dark-font-color;
+            color: var(--text-strong);
             outline: none;
 
             &::placeholder {
-                color: #1d2634;
+                color: var(--text-faint);
             }
         }
     }

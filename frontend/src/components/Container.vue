@@ -7,18 +7,16 @@
                     <span class="me-1">{{ imageName }}:</span><span class="tag">{{ imageTag }}</span>
                 </div>
                 <div v-if="!isEditMode">
-                    <span class="badge me-1" :class="bgStyle">
-                        <font-awesome-icon v-if="needsAttention" icon="triangle-exclamation" class="me-1" />{{ statusLabel }}
-                    </span>
+                    <StateChip class="me-1" :state="serviceState" :label="statusLabel" :attention="needsAttention" />
 
-                    <a v-for="port in (envsubstService.ports ?? [])" :key="port" :href="parsePort(port).url" target="_blank">
-                        <span class="badge me-1 bg-secondary">{{ parsePort(port).display }}</span>
+                    <a v-for="port in (envsubstService.ports ?? [])" :key="port" class="port-link me-1" :href="parsePort(port).url" target="_blank">
+                        <span class="port-chip">{{ parsePort(port).display }}</span>
                     </a>
 
                     <ul v-if="instances.length > 0" class="instance-list mt-2">
                         <li v-for="instance in instances" :key="instance.name">
                             <span class="instance-name">{{ instance.name || $t("unknown") }}</span>
-                            <span class="badge ms-1" :class="instanceStyle(instance)">{{ instanceLabel(instance) }}</span>
+                            <StateChip class="ms-1" :state="instanceState(instance)" :label="instanceLabel(instance)" :attention="!!instance.issue" />
                             <span v-if="instance.issue" class="issue ms-1">{{ instanceIssueText(instance) }}</span>
                         </li>
                     </ul>
@@ -204,11 +202,13 @@ import { defineComponent } from "vue";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { parseDockerPort } from "../../../common/util-common";
 import DockerStat from "./DockerStat.vue";
+import StateChip from "./StateChip.vue";
 
 export default defineComponent({
     components: {
         FontAwesomeIcon,
-        DockerStat
+        DockerStat,
+        StateChip,
     },
     props: {
         name: {
@@ -258,14 +258,19 @@ export default defineComponent({
             return list;
         },
 
-        bgStyle() {
+        /**
+         * Состояние сервиса именем системы: синий означает только интерактив,
+         * поэтому «работает» - это running, а не primary.
+         * @returns {string} Имя состояния для чипа
+         */
+        serviceState() {
             if (this.needsAttention) {
-                return "bg-warning";
+                return "attention";
             }
             if (this.hasRunningInstance) {
-                return "bg-primary";
+                return "running";
             }
-            return "bg-secondary";
+            return "stopped";
         },
 
         terminalRouteLink() {
@@ -415,18 +420,18 @@ export default defineComponent({
         },
 
         /**
-         * Badge style of one instance
+         * Состояние одного контейнера именем системы
          * @param {object} instance Typed instance status
-         * @returns {string} Bootstrap class
+         * @returns {string} Имя состояния для чипа
          */
-        instanceStyle(instance) {
+        instanceState(instance) {
             if (instance.issue) {
-                return "bg-warning";
+                return "attention";
             }
             if (instance.state === "running") {
-                return "bg-primary";
+                return "running";
             }
-            return "bg-secondary";
+            return "stopped";
         },
 
         /**
@@ -470,7 +475,6 @@ export default defineComponent({
 </script>
 
 <style scoped lang="scss">
-@use "../styles/vars.scss" as *;
 .instance-list {
     list-style: none;
     padding: 0;
@@ -488,10 +492,10 @@ export default defineComponent({
 
 .container {
     .image {
-        font-size: 0.8rem;
-        color: #6c757d;
+        font-size: var(--text-sm);
+        color: var(--text-muted);
         .tag {
-            color: #33383b;
+            color: var(--text-strong);
         }
     }
 
@@ -505,8 +509,32 @@ export default defineComponent({
     }
 
     .stats {
-        font-size: 0.8rem;
-        color: #6c757d;
+        font-size: var(--text-sm);
+        color: var(--text-muted);
     }
+}
+
+// Порт - ссылка, а не состояние: нейтральная поверхность и видимый фокус.
+.port-link {
+    display: inline-block;
+    text-decoration: none;
+    border-radius: var(--radius-pill);
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+}
+
+.port-chip {
+    display: inline-block;
+    padding: 1px var(--gap-sm);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+    line-height: 1.4;
+    color: var(--accent-text);
+    background-color: var(--surface-raised);
+    border: 1px solid var(--line-hair);
 }
 </style>

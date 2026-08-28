@@ -11,18 +11,25 @@
             </button>
 
             <div class="tabs" role="tablist">
-                <button
+                <!-- Закрытие - отдельная кнопка рядом с вкладкой: кнопку в кнопку
+                     вложить нельзя, иначе крестик недоступен с клавиатуры -->
+                <div
                     v-for="session in sessions" :key="session.key"
                     class="tab" :class="{ active: session.key === activeKey }"
-                    type="button" role="tab" :aria-selected="String(session.key === activeKey)" :title="session.stackName"
-                    @click="activate(session.key)"
+                    :title="session.stackName"
                 >
-                    <font-awesome-icon :icon="session.kind === 'logs' ? 'stream' : 'terminal'" class="me-2" />
-                    {{ session.label }}
-                    <span class="close" :title="$t('dockCloseSession')" @click.stop="close(session.key)">
+                    <button
+                        class="label" type="button" role="tab"
+                        :aria-selected="String(session.key === activeKey)"
+                        @click="activate(session.key)"
+                    >
+                        <font-awesome-icon :icon="session.kind === 'logs' ? 'stream' : 'terminal'" class="me-2" />
+                        {{ session.label }}
+                    </button>
+                    <button class="close" type="button" :title="$t('dockCloseSession')" :aria-label="`${$t('dockCloseSession')}: ${session.label}`" @click="close(session.key)">
                         <font-awesome-icon icon="times" />
-                    </span>
-                </button>
+                    </button>
+                </div>
             </div>
 
             <button class="close-all" type="button" :title="$t('dockCloseAll')" @click="closeAll">
@@ -286,71 +293,122 @@ export default {
 .bar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 8px;
-    min-height: 40px;
+    gap: var(--gap-sm);
+    padding: var(--gap-xs) var(--gap-sm);
+    min-height: var(--row-height);
 }
 
 .toggle, .close-all {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
     background: none;
     border: 0;
-    color: var(--text-faint);
-    width: 32px;
-    height: 32px;
     border-radius: var(--radius-control);
+    color: var(--text-faint);
+    width: var(--control-height);
+    height: var(--control-height);
 
     &:hover {
         background-color: var(--surface-raised);
         color: var(--text-strong);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
     }
 }
 
 .tabs {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    align-items: stretch;
+    gap: var(--gap-xs);
     overflow-x: auto;
     flex: 1;
+    min-width: 0;
 }
 
+// Вкладка отмечается подчёркиванием: рамка читалась как кнопка,
+// а нажатие вкладки не действие, а выбор
 .tab {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--gap-xs);
     white-space: nowrap;
-    background: none;
-    border: 1px solid transparent;
-    border-radius: var(--radius-control);
-    padding: 4px 8px;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
+    border-bottom: 2px solid transparent;
+    border-radius: var(--radius-control) var(--radius-control) 0 0;
+    padding-right: var(--gap-xs);
 
     &:hover {
         background-color: var(--surface-raised);
     }
 
+    // Активная вкладка помечена подчёркиванием, а не рамкой
     &.active {
-        border-color: var(--line-control);
-        color: var(--text-strong);
-        background-color: var(--surface-raised);
+        border-bottom-color: var(--accent);
+
+        .label {
+            color: var(--text-strong);
+            font-weight: 500;
+        }
+    }
+
+    .label, .close {
+        background: none;
+        border: 0;
+        min-height: var(--control-height);
+        color: var(--text-muted);
+        font-size: var(--text-sm);
+
+        &:focus-visible {
+            outline: var(--focus-ring);
+            outline-offset: var(--focus-offset);
+        }
+    }
+
+    .label {
+        display: flex;
+        align-items: center;
+        padding: 0 var(--gap-sm);
+        border-radius: var(--radius-control) var(--radius-control) 0 0;
+
+        &:hover {
+            color: var(--text-strong);
+        }
     }
 
     .close {
-        margin-left: 4px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        // Крестик - отдельная цель нажатия, поэтому он не мельче контрола
+        width: var(--control-height);
+        border-radius: var(--radius-control);
         color: var(--text-faint);
 
         &:hover {
+            background-color: var(--surface-sunken);
             color: var(--state-failed);
         }
     }
 }
 
+// Полоса перетаскивания: под курсором она обязана быть видна, иначе высоту
+// дока не найти мышью
 .grip {
     height: 6px;
+    flex: none;
     cursor: row-resize;
     background-color: var(--line-hair);
 
+    &:hover {
+        background-color: var(--accent);
+    }
+
     &:focus-visible {
+        background-color: var(--accent);
         outline: var(--focus-ring);
         outline-offset: var(--focus-offset);
     }
@@ -359,10 +417,18 @@ export default {
 .body {
     flex: 1;
     min-height: 0;
-    padding: 8px;
+    padding: var(--gap-sm);
 }
 
-.pane, .dock-terminal {
+// Консоль в доке - оформленная панель, а не вырезанный прямоугольник
+.pane {
+    height: 100%;
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+    background-color: var(--surface-console);
+}
+
+.dock-terminal {
     height: 100%;
 }
 </style>

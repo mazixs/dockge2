@@ -12,6 +12,49 @@
 @import "bootstrap/scss/bootstrap";
 @import "bootstrap-vue-next/dist/bootstrap-vue-next.css";
 
+// Мост к Bootstrap. Свои компоненты Bootstrap рисует собственными переменными,
+// поэтому тему ему задаёт одна таблица соответствий с нашими токенами: пока она
+// есть, ни одному правилу не нужен блок `.dark`, потому что токен меняется сам.
+//
+// Селектор именно `body`, а не `:root`: тёмные токены объявлены на `body.dark`,
+// то есть на потомке, поэтому мост на `:root` вычислился бы со светлыми
+// значениями и заголовки в тёмной теме получили бы почти чёрный цвет.
+body {
+    --bs-body-font-family: var(--font-ui);
+    --bs-body-font-size: var(--text-base);
+    --bs-font-monospace: var(--font-mono);
+
+    // Панель, а не страница: из --bs-body-bg берут фон поля, модальное окно и
+    // выпадающий список, а фон самой страницы задаётся ниже на body.
+    --bs-body-bg: var(--surface-panel);
+    --bs-body-color: var(--text-strong);
+    --bs-emphasis-color: var(--text-strong);
+    --bs-secondary-color: var(--text-muted);
+    --bs-secondary-bg: var(--surface-raised);
+    --bs-tertiary-color: var(--text-faint);
+    --bs-tertiary-bg: var(--surface-sunken);
+    --bs-heading-color: var(--text-strong);
+    --bs-border-color: var(--line-hair);
+    --bs-border-color-translucent: var(--line-hair);
+    --bs-link-color: var(--accent-text);
+    --bs-link-hover-color: var(--accent-text);
+    --bs-code-color: var(--text-strong);
+    --bs-highlight-color: var(--text-strong);
+    --bs-highlight-bg: var(--accent-soft);
+    --bs-border-radius: var(--radius-control);
+    --bs-border-radius-sm: var(--radius-chip);
+    --bs-border-radius-lg: var(--radius-panel);
+    --bs-border-radius-xl: var(--radius-panel);
+    --bs-focus-ring-color: var(--accent-soft);
+}
+
+// Фон страницы и основной текст: раньше это правило было продублировано в блоке
+// `.dark`, теперь его целиком несут токены.
+body {
+    background-color: var(--surface-base);
+    color: var(--text-strong);
+}
+
 #app {
     font-family: var(--font-ui);
     font-size: var(--text-base);
@@ -23,417 +66,365 @@
 }
 
 h1 {
-    font-size: 32px;
+    font-size: var(--text-xl);
 }
 
 h2 {
-    font-size: 26px;
+    font-size: var(--text-lg);
 }
 
-textarea.form-control {
-    border-radius: var(--radius-panel);
+mark, .mark {
+    background-color: var(--accent-soft);
+    color: var(--text-strong);
+}
+
+code {
+    padding: .2em .4em;
+    margin: 0;
+    font-size: 85%;
+    white-space: break-spaces;
     font-family: var(--font-mono);
+    background-color: var(--surface-sunken);
+    color: var(--text-strong);
+    border-radius: var(--radius-chip);
+}
+
+::placeholder {
+    color: var(--text-faint);
+}
+
+/*
+ * Полоса прокрутки
+ */
+
+html {
+    scrollbar-color: var(--line-control) transparent;
 }
 
 ::-webkit-scrollbar {
     width: 10px;
 }
 
-.bg-maintenance {
-    color: white !important;
-    background-color: $maintenance !important;
+::-webkit-scrollbar-track {
+    background: transparent;
 }
 
-.bg-dark {
-    color: white;
-}
-
-.text-maintenance {
-    color: $maintenance !important;
-}
-
-::placeholder {
-    color: $dark-font-color3;
-}
-
-.incident a,
-.bg-maintenance a {
-    color: inherit;
-}
-
-.list-group {
-    border-radius: 0.75rem;
-
-    .dark & {
-        .list-group-item {
-            background-color: $dark-bg2;
-            color: $dark-font-color;
-            border-color: $dark-border-color;
-        }
-    }
-}
-
-
-// optgroup
-optgroup {
-    color: #b1b1b1;
-    option {
-        color: #212529;
-    }
-}
-
-.dark {
-    optgroup {
-        color: #535864;
-        option {
-            color: $dark-font-color;
-        }
-    }
-}
-
-// Scrollbar
 ::-webkit-scrollbar-thumb {
-    background: #ccc;
-    border-radius: 20px;
+    background: var(--line-control);
+    border-radius: var(--radius-control);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-faint);
+}
+
+/*
+ * Панели
+ */
+
+.shadow-box {
+    background-color: var(--surface-panel);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
+    padding: var(--gap-md);
+
+    &.big-padding {
+        padding: var(--gap-lg);
+    }
 }
 
 .modal {
     backdrop-filter: blur(3px);
+
+    --bs-modal-bg: var(--surface-panel);
+    --bs-modal-color: var(--text-strong);
+    --bs-modal-border-color: var(--line-hair);
+    --bs-modal-border-radius: var(--radius-panel);
+    --bs-modal-header-border-color: var(--line-hair);
+    --bs-modal-footer-border-color: var(--line-hair);
 }
 
 .modal-content {
-    border-radius: 1rem;
-    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
-
-    .dark & {
-        box-shadow: 0 15px 70px rgb(0 0 0);
-        background-color: $dark-bg;
-    }
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
 }
 
-.VuePagination__count {
-    font-size: 13px;
-    text-align: center;
+.dropdown-menu {
+    --bs-dropdown-bg: var(--surface-panel);
+    --bs-dropdown-color: var(--text-strong);
+    --bs-dropdown-border-color: var(--line-hair);
+    --bs-dropdown-border-radius: var(--radius-panel);
+    --bs-dropdown-divider-bg: var(--line-hair);
+    --bs-dropdown-link-color: var(--text-strong);
+    --bs-dropdown-link-hover-color: var(--text-strong);
+    --bs-dropdown-link-hover-bg: var(--surface-raised);
+    --bs-dropdown-link-active-color: var(--text-on-accent);
+    --bs-dropdown-link-active-bg: var(--accent);
 }
 
-.shadow-box {
-    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
-    padding: 10px;
-    border-radius: 10px;
-
-    &.big-padding {
-        padding: 20px;
-    }
+.list-group {
+    --bs-list-group-bg: var(--surface-panel);
+    --bs-list-group-color: var(--text-strong);
+    --bs-list-group-border-color: var(--line-hair);
+    --bs-list-group-border-radius: var(--radius-panel);
+    --bs-list-group-action-hover-bg: var(--surface-raised);
+    --bs-list-group-action-hover-color: var(--text-strong);
+    --bs-list-group-active-bg: var(--accent);
+    --bs-list-group-active-border-color: var(--accent);
+    --bs-list-group-active-color: var(--text-on-accent);
 }
+
+.table {
+    --bs-table-color: var(--text-strong);
+    --bs-table-bg: transparent;
+    --bs-table-border-color: var(--line-hair);
+    --bs-table-hover-bg: var(--surface-raised);
+    --bs-table-hover-color: var(--text-strong);
+    --bs-table-striped-bg: var(--surface-raised);
+    --bs-table-striped-color: var(--text-strong);
+}
+
+/*
+ * Кнопки. Геометрия одна на все виды, а цвет задаётся видом ниже: у `.btn` и
+ * `.btn-primary` одна специфичность, поэтому вид перебивает общий случай только
+ * порядком в файле.
+ */
 
 .btn {
-    padding-left: 20px;
-    padding-right: 20px;
+    --bs-btn-font-size: var(--text-base);
+    --bs-btn-border-radius: var(--radius-control);
+    --bs-btn-color: var(--text-strong);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--line-control);
+    --bs-btn-hover-color: var(--text-strong);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--line-control);
+    --bs-btn-active-color: var(--text-strong);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--line-control);
+    --bs-btn-disabled-color: var(--text-faint);
+    --bs-btn-disabled-bg: transparent;
+    --bs-btn-disabled-border-color: var(--line-hair);
+    --bs-btn-box-shadow: none;
+    --bs-btn-active-shadow: none;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-height);
+    padding-left: var(--gap-lg);
+    padding-right: var(--gap-lg);
 }
 
-.btn-sm {
-    border-radius: 25px;
+// Таблетки в системе отменены: пилюля осталась только у бейджа состояния и
+// счётчика, поэтому мелкая кнопка берёт тот же радиус, что обычная.
+.btn-sm, .btn-group-sm > .btn {
+    --bs-btn-border-radius: var(--radius-control);
+    --bs-btn-font-size: var(--text-sm);
+
+    padding-left: var(--gap-md);
+    padding-right: var(--gap-md);
 }
 
 .btn-primary {
-    color: white;
-    background: $primary-gradient;
-
-    &:hover, &:active, &:focus, &.active {
-        color: white;
-        background: $primary-gradient-active;
-        border-color: $highlight;
-    }
-
-    .dark & {
-        color: $dark-font-color2;
-    }
+    --bs-btn-color: var(--text-on-accent);
+    --bs-btn-bg: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-color: var(--text-on-accent);
+    --bs-btn-hover-bg: var(--accent);
+    --bs-btn-hover-border-color: var(--accent-text);
+    --bs-btn-active-color: var(--text-on-accent);
+    --bs-btn-active-bg: var(--accent);
+    --bs-btn-active-border-color: var(--accent-text);
+    --bs-btn-disabled-color: var(--text-on-accent);
+    --bs-btn-disabled-bg: var(--accent);
+    --bs-btn-disabled-border-color: var(--accent);
 }
 
-.btn-normal {
-    $bg-color: #F5F5F5;
+.btn-outline-primary {
+    --bs-btn-color: var(--accent-text);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--accent-text);
+    --bs-btn-hover-color: var(--accent-text);
+    --bs-btn-hover-bg: var(--accent-soft);
+    --bs-btn-hover-border-color: var(--accent-text);
+    --bs-btn-active-color: var(--accent-text);
+    --bs-btn-active-bg: var(--accent-soft);
+    --bs-btn-active-border-color: var(--accent-text);
+    --bs-btn-disabled-color: var(--text-faint);
+    --bs-btn-disabled-border-color: var(--line-hair);
+}
 
-    background-color: $bg-color;
-    border-color: $bg-color;
-
-    &:hover {
-        $hover-color: darken($bg-color, 3%);
-        background-color: $hover-color;
-        border-color: $hover-color;
-    }
+// Опасное действие: граница и текст состояния отказа, фон остаётся прозрачным,
+// чтобы красная плашка не притягивала палец раньше, чем прочитана надпись.
+.btn-danger {
+    --bs-btn-color: var(--state-failed);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--state-failed);
+    --bs-btn-hover-color: var(--state-failed);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--state-failed);
+    --bs-btn-active-color: var(--state-failed);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--state-failed);
+    --bs-btn-disabled-color: var(--text-faint);
+    --bs-btn-disabled-bg: transparent;
+    --bs-btn-disabled-border-color: var(--line-hair);
 }
 
 .btn-warning {
-    color: white;
-
-    &:hover, &:active, &:focus, &.active {
-        color: white;
-    }
+    --bs-btn-color: var(--state-attention);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--state-attention);
+    --bs-btn-hover-color: var(--state-attention);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--state-attention);
+    --bs-btn-active-color: var(--state-attention);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--state-attention);
 }
 
-.btn-info {
-    color: white;
-
-    &:hover, &:active, &:focus, &.active {
-        color: white;
-    }
+.btn-secondary {
+    --bs-btn-color: var(--text-strong);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--line-control);
+    --bs-btn-hover-color: var(--text-strong);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--line-control);
+    --bs-btn-active-color: var(--text-strong);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--line-control);
 }
 
-.btn-dark {
-    background-color: #161B22;
+// `.btn-normal` - обычная кнопка форка: она стоит в десятках компонентов, поэтому
+// имя сохранено, а вид приведён к контракту обычной кнопки.
+.btn-normal {
+    --bs-btn-color: var(--text-strong);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--line-control);
+    --bs-btn-hover-color: var(--text-strong);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--line-control);
+    --bs-btn-active-color: var(--text-strong);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--line-control);
 }
 
+// Тот же вид доступен и без класса `.btn`: в списке стеков он стоит на голых
+// кнопках.
 .btn-outline-normal {
-    padding: 4px 10px;
-    border: 1px solid #ced4da;
-    border-radius: 25px;
+    min-height: var(--control-height);
+    padding: 0 var(--gap-md);
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius-control);
     background-color: transparent;
+    color: var(--text-strong);
 
-    .dark & {
-        color: $dark-font-color;
-        border: 1px solid $dark-font-color2;
+    &:hover {
+        background-color: var(--surface-raised);
     }
 
     &.active {
-        background-color: $highlight-white;
-
-        .dark & {
-            background-color: $dark-font-color2;
-        }
+        background-color: var(--surface-sunken);
     }
 }
 
-@media (max-width: 550px) {
-    .table-shadow-box {
-        padding: 10px !important;
+.btn-link {
+    --bs-btn-color: var(--accent-text);
+    --bs-btn-hover-color: var(--accent-text);
+    --bs-btn-active-color: var(--accent-text);
+    --bs-btn-border-color: transparent;
+    --bs-btn-hover-border-color: transparent;
+    --bs-btn-hover-bg: transparent;
+}
 
-        thead {
-            display: none;
-        }
+.btn-close {
+    --bs-btn-close-color: var(--text-strong);
 
-        tbody {
-            .shadow-box {
-                background-color: white;
-            }
-        }
+    box-shadow: none;
 
-        tr {
-            margin-top: 0 !important;
-            padding: 4px 10px !important;
-            display: block;
-            margin-bottom: 6px;
-
-            td:first-child {
-                font-weight: bold;
-            }
-
-            td:nth-child(-n+3) {
-                text-align: center;
-            }
-
-            td:last-child {
-                text-align: left;
-            }
-
-            td {
-                border-bottom: 1px solid $dark-font-color;
-                display: block;
-                padding: 4px;
-
-                .badge {
-                    margin: auto;
-                    display: block;
-                    width: 30%;
-                }
-            }
-        }
+    &:hover {
+        opacity: 0.6;
     }
 }
 
-// Dark Theme override here
-.dark {
-    background-color: #090c10;
-    color: $dark-font-color;
+/*
+ * Поля ввода
+ */
 
-    mark, .mark {
-        background-color: #b6ad86;
+.form-control, .form-select {
+    min-height: var(--control-height);
+    font-size: var(--text-base);
+    color: var(--text-strong);
+    background-color: var(--surface-panel);
+    border-color: var(--line-control);
+    border-radius: var(--radius-control);
+}
+
+.form-control:focus, .form-select:focus {
+    color: var(--text-strong);
+    background-color: var(--surface-panel);
+    border-color: var(--accent);
+    box-shadow: none;
+}
+
+.form-control:disabled, .form-control[readonly], .form-select:disabled {
+    color: var(--text-muted);
+    background-color: var(--surface-sunken);
+    opacity: 1;
+}
+
+// Многострочный список выбора: фон его строк рисует система, поэтому в тёмной
+// теме на месте списка получалась белая заплата - строки приходится красить сами.
+.form-select[multiple] {
+    background-image: none;
+    padding-right: var(--gap-sm);
+
+    option {
+        background-color: var(--surface-panel);
+        color: var(--text-strong);
     }
 
-    &::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb {
-        background: $dark-border-color;
+    option:checked {
+        background-color: var(--accent-soft);
+        color: var(--text-strong);
     }
+}
 
-    .shadow-box {
-        &:not(.alert) {
-            background-color: $dark-bg;
-        }
-    }
+// Многострочное поле - уже панель, а не контрол: радиус и высота у него свои.
+textarea.form-control {
+    border-radius: var(--radius-panel);
+    font-family: var(--font-mono);
+}
 
-    .form-check-input {
-        background-color: $dark-bg2;
-        border-color: $dark-border-color;
-    }
+.form-check-input {
+    background-color: var(--surface-panel);
+    border-color: var(--line-control);
+}
 
-    .input-group-text {
-        background-color: #282f39;
-        border-color: $dark-border-color;
-        color: $dark-font-color;
-    }
+.form-check-input:checked {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
 
-    .form-check-input:checked {
-        border-color: $primary; // Re-apply bootstrap border
-    }
+.form-switch .form-check-input {
+    background-color: var(--surface-sunken);
+}
 
-    .form-switch .form-check-input {
-        background-color: #232f3b;
-    }
+.form-switch .form-check-input:checked {
+    background-color: var(--accent);
+}
 
-    a:not(.btn),
-    .table,
-    .nav-link {
-        color: $dark-font-color;
+.input-group-text {
+    color: var(--text-strong);
+    background-color: var(--surface-raised);
+    border-color: var(--line-control);
+    border-radius: var(--radius-control);
+}
 
-        &.btn-info {
-            color: white;
-        }
-    }
-
-    .incident a,
-    .bg-maintenance a {
-        color: inherit;
-    }
-
-    .form-control,
-    .form-control:focus,
-    .form-select,
-    .form-select:focus {
-        color: $dark-font-color;
-        background-color: $dark-bg2;
-    }
-
-    .form-select:disabled {
-        color: rgba($dark-font-color, 0.7);
-        background-color: $dark-bg;
-    }
-
-    .form-control, .form-select {
-        border-color: $dark-border-color;
-    }
-
-    .form-control:disabled, .form-control[readonly] {
-        background-color: #232f3b;
-        opacity: 1;
-    }
-
-    .table-hover > tbody > tr:hover > * {
-        --bs-table-accent-bg: #070a10;
-        color: $dark-font-color;
-    }
-
-    .nav-pills .nav-link.active, .nav-pills .show > .nav-link {
-        color: $dark-font-color2;
-        background: $primary-gradient;
-
-        &:hover {
-            background: $primary-gradient-active;
-        }
-    }
-
-    .bg-primary {
-        color: $dark-font-color2;
-        background: $primary-gradient;
-    }
-
-    .btn-secondary {
-        color: white;
-    }
-
-    .btn-normal {
-        $bg-color: $dark-header-bg;
-
-        color: $dark-font-color;
-        background-color: $bg-color;
-        border-color: $bg-color;
-
-        &:hover {
-            $hover-color: darken($bg-color, 3%);
-            background-color: $hover-color;
-            border-color: $hover-color;
-        }
-    }
-
-    .btn-warning {
-        color: $dark-font-color2;
-
-        &:hover, &:active, &:focus, &.active {
-            color: $dark-font-color2;
-        }
-    }
-
-    .btn-close {
-        box-shadow: none;
-        filter: invert(1);
-
-        &:hover {
-            opacity: 0.6;
-        }
-    }
-
-    .modal-header {
-        border-color: $dark-bg;
-    }
-
-    .modal-footer {
-        border-color: $dark-bg;
-    }
-
-    // Pagination
-    .page-item.disabled .page-link {
-        background-color: $dark-bg;
-        border-color: $dark-border-color;
-    }
-
-    .page-link {
-        background-color: $dark-bg;
-        border-color: $dark-border-color;
-        color: $dark-font-color;
-    }
-
-    .stack-list {
-        .item {
-            &:hover {
-                background-color: $dark-bg2;
-            }
-
-            &.active {
-                background-color: $dark-bg2;
-            }
-        }
-    }
-
-    @media (max-width: 550px) {
-        .table-shadow-box {
-            tbody {
-                .shadow-box {
-                    background-color: $dark-bg2;
-
-                    td {
-                        border-bottom: 1px solid $dark-border-color;
-                    }
-                }
-            }
-        }
-    }
-
-    .alert {
-        &.bg-info,
-        &.bg-warning,
-        &.bg-danger,
-        &.bg-maintenance,
-        &.bg-light {
-            color: $dark-font-color2;
-        }
-    }
+.form-text {
+    color: var(--text-muted);
 }
 
 // Floating Label
@@ -442,11 +433,107 @@ optgroup {
 }
 
 .form-floating > label {
-    .dark & {
-        color: $dark-font-color3 !important;
-    }
+    color: var(--text-muted);
 }
 
+// CodeMirror ставит contenteditable на своё содержимое, поэтому фон редактора
+// даёт панель под ним, а не сама редактируемая область.
+[contenteditable="true"] {
+    background-color: transparent;
+}
+
+/*
+ * Сообщения. Цвет несёт смысл состояния, а не палитру Bootstrap: синий в системе
+ * означает только интерактив, поэтому успех берёт --state-running.
+ */
+
+.alert {
+    --bs-alert-border-color: var(--line-hair);
+
+    border-radius: var(--radius-panel);
+}
+
+.alert-success {
+    --bs-alert-color: var(--state-running);
+    --bs-alert-bg: transparent;
+    --bs-alert-border-color: var(--state-running);
+}
+
+.alert-warning {
+    --bs-alert-color: var(--state-attention);
+    --bs-alert-bg: transparent;
+    --bs-alert-border-color: var(--state-attention);
+}
+
+.alert-danger {
+    --bs-alert-color: var(--state-failed);
+    --bs-alert-bg: transparent;
+    --bs-alert-border-color: var(--state-failed);
+}
+
+.alert-info, .alert-secondary, .alert-light, .alert-dark {
+    --bs-alert-color: var(--text-strong);
+    --bs-alert-bg: var(--surface-raised);
+    --bs-alert-border-color: var(--line-hair);
+}
+
+.bg-primary {
+    color: var(--text-on-accent);
+    background-color: var(--accent) !important;
+}
+
+.spinner {
+    color: var(--accent-text);
+}
+
+h5.settings-subheading::after {
+    content: "";
+    display: block;
+    width: 50%;
+    padding-top: var(--gap-sm);
+    border-bottom: 1px solid var(--line-hair);
+}
+
+/*
+ * Видимый фокус. Bootstrap подменяет обводку своей тенью, поэтому нажимаемому
+ * возвращается кольцо из токенов - без него по списку стеков и докам терминалов
+ * нельзя ходить с клавиатуры.
+ */
+
+.btn:focus-visible,
+.btn-outline-normal:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible,
+.form-check-input:focus-visible,
+.nav-link:focus-visible,
+.dropdown-item:focus-visible,
+.page-link:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+    box-shadow: none;
+}
+
+/*
+ * Единственное место, где тема остаётся селектором: три встроенных значка
+ * Bootstrap - галочка селекта, ползунок переключателя и крестик закрытия -
+ * нарисованы вшитым SVG или подобраны фильтром и токен прочитать не могут.
+ */
+
+body.dark {
+    .form-select {
+        --bs-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ccd6e2' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    }
+
+    .form-switch .form-check-input {
+        --bs-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba%28255, 255, 255, 0.25%29'/%3e%3c/svg%3e");
+    }
+
+    .btn-close {
+        --bs-btn-close-filter: invert(1) grayscale(100%) brightness(200%);
+    }
+}
 
 /*
  * Transitions
@@ -495,104 +582,6 @@ optgroup {
     opacity: 0;
 }
 
-.stack-list {
-    &.scrollbar {
-        overflow-y: auto;
-    }
-
-    @media (max-width: 770px) {
-        &.scrollbar {
-            height: calc(100% - 97px);
-        }
-    }
-
-    .item {
-        display: flex;
-        align-items: center;
-        height: 52px;
-        text-decoration: none;
-        border-radius: 10px;
-        transition: all ease-in-out 0.15s;
-        width: 100%;
-        padding: 0 8px;
-
-        &.disabled {
-            opacity: 0.3;
-        }
-
-        &:hover {
-            background-color: $highlight-white;
-        }
-
-        &.active {
-            background-color: #cdf8f4;
-        }
-
-        .title {
-            display: inline-block;
-            margin-top: -4px;
-        }
-    }
-}
-
-.alert-success {
-    color: #122f21;
-    background-color: $primary;
-    border-color: $primary;
-}
-
-.alert-info {
-    color: #055160;
-    background-color: #cff4fc;
-    border-color: #cff4fc;
-}
-
-.alert-danger {
-    color: #842029;
-    background-color: #f8d7da;
-    border-color: #f8d7da;
-}
-
-.btn-success {
-    color: #fff;
-    background-color: #4caf50;
-    border-color: #4caf50;
-}
-
-
-[contenteditable=true] {
-    transition: all $easing-in 0.2s;
-    background-color: rgba(239, 239, 239, 0.7);
-    border-radius: 8px;
-
-    &.no-bg {
-        background-color: transparent !important;
-    }
-
-    &:focus {
-        outline: 0 solid #eee;
-        background-color: rgba(245, 245, 245, 0.9);
-    }
-
-    &:hover {
-        background-color: rgba(239, 239, 239, 0.8);
-    }
-
-    .dark & {
-        background-color: rgba(239, 239, 239, 0.2);
-    }
-
-    /*
-    &::after {
-        margin-left: 5px;
-        content: "🖊️";
-        font-size: 13px;
-        color: #eee;
-    }
-    */
-
-}
-
 .action {
     transition: all $easing-in 0.2s;
 
@@ -602,59 +591,26 @@ optgroup {
     }
 }
 
-.vue-image-crop-upload .vicp-wrap {
-    border-radius: 10px !important;
-}
-
-.spinner {
-    color: $primary;
-}
-
-
-h5.settings-subheading::after {
-    content: "";
-    display: block;
-    width: 50%;
-    padding-top: 8px;
-    border-bottom: 1px solid $dark-border-color;
-}
-
-/* required class */
-.code-editor, .css-editor {
-    /* we dont use `language-` classes anymore so thats why we need to add background and text color manually */
-
-    border-radius: 1rem;
-    padding: 10px 5px;
-    border: 1px solid #ced4da;
-
-    .dark & {
-        background: $dark-bg2;
-        border: 1px solid $dark-border-color;
+// Движение не несёт смысла, поэтому просьбу его убрать система выполняет
+// целиком: содержимое остаётся на месте, исчезает только переход.
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
     }
 }
 
+.stack-list {
+    &.scrollbar {
+        overflow-y: auto;
+    }
 
-$shadow-box-padding: 20px;
-
-.shadow-box-with-fixed-bottom-bar {
-    padding-top: $shadow-box-padding;
-    padding-bottom: 0;
-    padding-right: $shadow-box-padding;
-    padding-left: $shadow-box-padding;
-}
-
-.fixed-bottom-bar {
-    position: sticky;
-    bottom: 0;
-    margin-left: -$shadow-box-padding;
-    margin-right: -$shadow-box-padding;
-    z-index: 100;
-    background-color: rgba(white, 0.2);
-    backdrop-filter: blur(2px);
-    border-radius: 0 0 10px 10px;
-
-    .dark & {
-        background-color: rgba($dark-header-bg, 0.9);
+    @media (max-width: 770px) {
+        &.scrollbar {
+            height: calc(100% - 97px);
+        }
     }
 }
 
@@ -670,42 +626,22 @@ $shadow-box-padding: 20px;
     }
 }
 
-code {
-    padding: .2em .4em;
-    margin: 0;
-    font-size: 85%;
-    white-space: break-spaces;
-    background-color: rgba(239, 239, 239, 0.15);
-
-    border-radius: 6px;
-    font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    color: black;
-
-    .dark & {
-        color: $dark-font-color;
-    }
-}
-
-.form-text {
-    color: $dark-font-color3;
-}
-
-
 .cm-gutters {
-	background-color: transparent !important;
+    background-color: transparent !important;
 }
-.dark [contenteditable="true"] {
-	background-color: transparent !important;
-}
+
 .cm-editor {
-	background-color: transparent !important;
+    background-color: transparent !important;
 }
+
 .cm-activeLine, .cm-activeLineGutter {
-	background-color: transparent !important;
+    background-color: transparent !important;
 }
+
 .cm-selectionBackground {
-    background-color: #74c2ff3d !important;
+    background-color: var(--accent-soft) !important;
 }
+
 .cm-focused {
     outline: none !important;
 }

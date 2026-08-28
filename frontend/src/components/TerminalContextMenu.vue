@@ -115,8 +115,10 @@ export default {
     z-index: 1080;
     min-width: 160px;
     padding: 4px;
-    background-color: $dark-bg2;
-    border-radius: 8px;
+    background-color: var(--surface-panel);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
 }
 
 .menu-item {
@@ -125,13 +127,13 @@ export default {
     padding: 6px 10px;
     background: none;
     border: none;
-    border-radius: 6px;
-    color: $dark-font-color;
+    border-radius: var(--radius-control);
+    color: var(--text-strong);
     text-align: left;
 
     &:hover,
     &:focus {
-        background-color: rgba(127, 127, 127, 0.25);
+        background-color: var(--surface-raised);
     }
 }
 

@@ -54,8 +54,9 @@
                 </button>
             </div>
             <div v-for="(agent, agentIndex) in agentStackList" :key="agentIndex" class="stack-list-inner">
-                <div
-                    v-if="$root.agentCount > 1" class="p-2 agent-select"
+                <button
+                    v-if="$root.agentCount > 1" class="p-2 agent-select" type="button"
+                    :aria-expanded="!closedAgents.get(agent.endpoint)"
                     @click="closedAgents.set(agent.endpoint, !closedAgents.get(agent.endpoint))"
                 >
                     <span class="me-1">
@@ -64,7 +65,7 @@
                     </span>
                     <span v-if="agent.endpoint === 'current'">{{ $t("currentEndpoint") }}</span>
                     <span v-else>{{ agent.endpoint }}</span>
-                </div>
+                </button>
                 <StackListItem
                     v-for="(item, index) in agent.stacks"
                     v-show="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)" :key="index" :stack="item" :isSelectMode="selectMode"
@@ -389,8 +390,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
-
 .shadow-box {
     height: calc(100vh - 150px);
     position: sticky;
@@ -402,17 +401,15 @@ export default {
     padding-right: 5px !important;
 }
 
+// Цвет берётся токеном, а не правилом внутри темы: иначе одна из тем получит
+// чужой фон под своим текстом.
 .list-header {
-    border-bottom: 1px solid #dee2e6;
-    border-radius: 10px 10px 0 0;
+    background-color: var(--surface-panel);
+    border-bottom: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
     margin: -10px;
     margin-bottom: 10px;
     padding: 10px;
-
-    .dark & {
-        background-color: $dark-header-bg;
-        border-bottom: 0;
-    }
 }
 
 .header-top {
@@ -441,7 +438,7 @@ export default {
 
 .search-icon {
     padding: 10px;
-    color: #c0c0c0;
+    color: var(--text-muted);
 
     // Clear filter button (X)
     svg[data-icon="times"] {
@@ -482,15 +479,29 @@ export default {
     gap: 10px;
 }
 
+// Группа агента нажимается, поэтому это button: у div нет ни фокуса, ни роли.
 .agent-select {
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--text-base);
     font-weight: 500;
-    color: $dark-font-color3;
+    color: var(--text-muted);
+    background: none;
+    border: 0;
+    width: 100%;
+    min-height: var(--control-height);
     padding-left: 10px;
     padding-right: 10px;
     display: flex;
     align-items: center;
     user-select: none;
+
+    &:hover {
+        color: var(--text-strong);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
 }
 </style>

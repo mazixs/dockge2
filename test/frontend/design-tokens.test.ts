@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
@@ -243,4 +243,133 @@ test("узкое начертание не используется: в нём �
     }
 
     assert.ok(fonts.includes("ibm-plex-mono/cyrillic-400.css"));
+});
+
+/**
+ * Файлы стилей проекта: SFC и таблицы стилей, кроме самих носителей значений.
+ * @returns Пути относительно корня репозитория
+ */
+function listStyleFiles() : string[] {
+    const roots = [ "frontend/src" ];
+    const files : string[] = [];
+
+    const walk = (dir : string) => {
+        for (const entry of readdirSync(path.join(process.cwd(), dir), { withFileTypes: true })) {
+            const next = `${dir}/${entry.name}`;
+
+            if (entry.isDirectory()) {
+                walk(next);
+            } else if (next.endsWith(".vue") || next.endsWith(".scss")) {
+                files.push(next);
+            }
+        }
+    };
+
+    roots.forEach(walk);
+    return files.sort();
+}
+
+/**
+ * Часть файла, которая описывает вид: для SFC это блоки style, для scss весь файл
+ * @param file Путь к файлу
+ * @param source Содержимое
+ * @returns Только оформление
+ */
+function styleBlocks(file : string, source : string) : string {
+    if (!file.endsWith(".vue")) {
+        return source;
+    }
+
+    return [ ...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g) ].map((match) => match[1] ?? "").join("\n");
+}
+
+/** Файлы, которым разрешено объявлять цвет: сами значения и мост к Bootstrap */
+const COLOUR_OWNERS = [
+    "frontend/src/styles/tokens.scss",
+    "frontend/src/styles/vars.scss",
+    "frontend/src/styles/main.scss",
+];
+
+test("компоненты не объявляют цвет сами, а берут его токеном", () => {
+    const offenders : string[] = [];
+
+    for (const file of listStyleFiles()) {
+        if (COLOUR_OWNERS.includes(file)) {
+            continue;
+        }
+
+        const styles = styleBlocks(file, readFileSync(path.join(process.cwd(), file), "utf8"));
+
+        for (const [ index, line ] of styles.split("\n").entries()) {
+            const isComment = line.trimStart().startsWith("//");
+
+            // Литерал цвета в компоненте означает, что одна из тем получит чужой цвет
+            if (!isComment && /#[0-9a-fA-F]{3,8}\b|(?<![-\w])rgba?\(/.test(line)) {
+                offenders.push(`${file}:${index + 1} ${line.trim()}`);
+            }
+        }
+    }
+
+    assert.deepEqual(offenders, [], `цвет объявлен вне токенов:\n${offenders.join("\n")}`);
+});
+
+/**
+ * Проверить, что блок под тему занят только подменой ассетов Bootstrap.
+ *
+ * Галочка селекта, ползунок переключателя и крестик закрытия нарисованы внутри
+ * Bootstrap вшитым SVG или подобраны фильтром, поэтому цвет им нельзя передать
+ * токеном. Всё остальное под селектором темы - продублированный цвет.
+ * @param lines Строки блока стилей
+ * @param start Строка с селектором темы
+ * @returns Правда, если внутри только переменные --bs-*
+ */
+function onlySwapsBootstrapAssets(lines : string[], start : number) : boolean {
+    let depth = 0;
+
+    for (let index = start; index < lines.length; index += 1) {
+        const line = lines[index] as string;
+        depth += (line.match(/\{/g) ?? []).length;
+        depth -= (line.match(/\}/g) ?? []).length;
+
+        const declaration = /^\s*([-a-z][^:]*):/.exec(line);
+
+        if (declaration?.[1] && !declaration[1].trim().startsWith("--bs-")) {
+            return false;
+        }
+
+        if (depth <= 0 && index > start) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+test("тема не дублируется правилами под тёмную", () => {
+    const offenders : string[] = [];
+
+    for (const file of listStyleFiles()) {
+        if (file === "frontend/src/styles/tokens.scss") {
+            continue;
+        }
+
+        const styles = styleBlocks(file, readFileSync(path.join(process.cwd(), file), "utf8"));
+
+        const lines = styles.split("\n");
+
+        for (const [ index, line ] of lines.entries()) {
+            if (line.trimStart().startsWith("//")) {
+                continue;
+            }
+
+            // Правило под тему объявляет цвет дважды и однажды разойдётся с токеном.
+            // Разрешено единственное исключение: блок, который только подменяет
+            // переменные Bootstrap с вшитым SVG - такое значение токен прочитать не может.
+            if (/(^|[\s,>])(body)?\.dark(\s|,|>|&|\{|\.)/.test(line) && !onlySwapsBootstrapAssets(lines, index)) {
+                offenders.push(`${file}:${index + 1} ${line.trim()}`);
+            }
+        }
+    }
+
+    assert.deepEqual(offenders, [], `правило под тему вместо токена:\n${offenders.join("\n")}`);
 });

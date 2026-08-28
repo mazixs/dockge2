@@ -468,8 +468,10 @@ export default {
 </style>
 
 <style lang="scss">
+// Консоль рисует xterm своей тёмной темой, поэтому поверхность берётся токеном,
+// а не чистым чёрным: в светлой теме чёрный прямоугольник читался как дырка
 .terminal {
-    background-color: black !important;
+    background-color: var(--surface-console) !important;
     height: 100%;
 }
 </style>
