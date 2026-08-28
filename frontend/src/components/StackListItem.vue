@@ -1,10 +1,9 @@
 <template>
     <router-link :to="url" :class="{ 'dim' : !stack.isManagedByDockge, 'fresh': isFresh }" class="item">
-        <Uptime :stack="stack" :fixed-width="true" class="me-2" />
+        <Uptime :stack="stack" :fixed-width="true" />
         <div class="title">
             <span>{{ stackName }}</span>
         </div>
-        <!-- Стек, только что созданный: подсветка отвечает на «где он в списке» -->
         <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
     </router-link>
 </template>
@@ -135,32 +134,55 @@ export default {
     padding-right: 2px !important;
 }
 
-.item {
+// Специфичность через тег: правило `.stack-list .item` живёт ещё и в main.scss,
+// а порядок подключения стилей не гарантирован.
+a.item {
     text-decoration: none;
     display: flex;
     align-items: center;
-    min-height: 52px;
-    border-radius: 10px;
-    transition: all ease-in-out 0.15s;
+    gap: var(--gap-sm);
+    min-height: var(--row-height);
+    border-radius: var(--radius-control);
+    transition: background-color ease-in-out 0.15s;
     width: 100%;
-    padding: 5px 8px;
+    padding: var(--gap-xs) var(--gap-sm);
+    color: var(--text-strong);
+    // Полоса слева есть у всех строк, но прозрачная: иначе выбор сдвигает текст.
+    box-shadow: inset 3px 0 0 transparent;
+
     &.disabled {
         opacity: 0.3;
     }
+
     &:hover {
-        background-color: $highlight-white;
-    }
-    &.active {
-        background-color: #cdf8f4;
-    }
-    .title {
-        margin-top: -4px;
-    }
-    .endpoint {
-        font-size: 12px;
-        color: $dark-font-color3;
+        background-color: var(--surface-raised);
     }
 
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+
+    // Выбранная строка: полоса слева плюс фон, чтобы выбор был виден и без цвета.
+    &.active,
+    &[aria-current] {
+        background-color: var(--accent-soft);
+        box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .endpoint {
+        font-size: var(--text-xs);
+        color: var(--text-muted);
+    }
+
+    // Только что созданный стек: зелёная полоса отвечает на «где он в списке».
     &.fresh {
         box-shadow: inset 3px 0 0 var(--state-running);
         background-color: color-mix(in srgb, var(--state-running) 10%, transparent);

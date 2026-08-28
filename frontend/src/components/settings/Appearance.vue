@@ -88,17 +88,12 @@ export default {
 .btn-check:active + .btn-outline-primary,
 .btn-check:checked + .btn-outline-primary,
 .btn-check:hover + .btn-outline-primary {
-    color: #fff;
-
-    .dark & {
-        color: #000;
-    }
+    color: var(--text-on-accent);
 }
 
-.dark {
-    .list-group-item {
-        background-color: $dark-bg2;
-        color: $dark-font-color;
-    }
+// Список тем: цвет приходит токеном, поэтому правило одно на обе темы
+.list-group-item {
+    background-color: var(--surface-panel);
+    color: var(--text-strong);
 }
 </style>

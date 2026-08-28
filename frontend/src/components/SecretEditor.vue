@@ -246,7 +246,7 @@ export default {
 
 .secret {
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+    border-bottom: 1px solid var(--line-hair);
 
     &:last-of-type {
         border-bottom: none;

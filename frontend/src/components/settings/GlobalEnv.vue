@@ -87,12 +87,12 @@ export default {
 </script>
 
 <style scoped lang="scss">
+// Поверхность как у остальных редакторов: подсветка синтаксиса рисована для
+// тёмного фона, поэтому она не зависит от темы интерфейса
 .editor-box {
     font-family: var(--font-mono);
-    font-size: 14px;
-
-    &.edit-mode {
-        background-color: #2c2f38 !important;
-    }
+    font-size: var(--text-base);
+    background-color: var(--surface-console) !important;
+    border: 1px solid var(--line-hair);
 }
 </style>

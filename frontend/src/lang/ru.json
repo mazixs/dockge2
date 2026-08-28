@@ -5,6 +5,7 @@
     "PasswordsDoNotMatch": "Пароли не совпадают.",
     "Repeat Password": "Повторите пароль",
     "Create": "Создать",
+    "accountMenu": "Меню учётной записи",
     "signedInDisp": "Авторизован как {0}",
     "signedInDispDisabled": "Авторизация выключена.",
     "home": "Главная",
@@ -300,5 +301,6 @@
     "dockCollapse": "Скрыть вывод",
     "dockCloseSession": "Закрыть эту сессию",
     "dockCloseAll": "Закрыть вывод",
-    "dockResize": "Высота вывода, меняется стрелками вверх и вниз"
+    "dockResize": "Высота вывода, меняется стрелками вверх и вниз",
+    "externalNetworkKind": "внешняя"
 }

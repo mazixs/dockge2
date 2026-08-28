@@ -10,10 +10,10 @@
         </div>
 
         <!-- Desktop header -->
-        <header v-if="! $root.isMobile" class="d-flex flex-wrap justify-content-center py-3 mb-3 border-bottom">
-            <router-link to="/" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-dark text-decoration-none">
+        <header v-if="! $root.isMobile" class="app-header d-flex flex-wrap justify-content-center py-3 mb-3">
+            <router-link to="/" class="brand d-flex align-items-center mb-3 mb-md-0 me-md-auto text-decoration-none">
                 <object class="bi me-2 ms-4" width="40" height="40" data="/icon.svg" />
-                <span class="fs-4 title">Dockge</span>
+                <span class="title">Dockge</span>
             </router-link>
 
             <button v-if="$root.loggedIn" class="btn btn-primary me-3 create-stack-btn" type="button" @click="openCreateSheet()">
@@ -24,25 +24,25 @@
                 <font-awesome-icon icon="arrow-alt-circle-up" /> {{ $t("newUpdate") }}
             </a>
 
-            <ul class="nav nav-pills">
-                <li v-if="$root.loggedIn" class="nav-item me-2">
-                    <router-link to="/" class="nav-link">
+            <ul class="nav app-nav">
+                <li v-if="$root.loggedIn" class="nav-item">
+                    <router-link to="/" class="tab">
                         <font-awesome-icon icon="home" /> {{ $t("home") }}
                     </router-link>
                 </li>
 
-                <li v-if="$root.loggedIn" class="nav-item me-2">
-                    <router-link to="/console" class="nav-link">
+                <li v-if="$root.loggedIn" class="nav-item">
+                    <router-link to="/console" class="tab">
                         <font-awesome-icon icon="terminal" /> {{ $t("console") }}
                     </router-link>
                 </li>
 
                 <li v-if="$root.loggedIn" class="nav-item">
                     <div class="dropdown dropdown-profile-pic">
-                        <div class="nav-link" data-bs-toggle="dropdown">
+                        <button class="profile-trigger" type="button" data-bs-toggle="dropdown" :aria-label="$t('accountMenu')">
                             <div class="profile-pic">{{ $root.usernameFirstChar }}</div>
                             <font-awesome-icon icon="angle-down" />
-                        </div>
+                        </button>
 
                         <!-- Header's Dropdown Menu -->
                         <ul class="dropdown-menu">
@@ -273,65 +273,63 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
+// Оболочка читает только токены: тема меняется вместе с ними, поэтому блока
+// `.dark` здесь больше нет.
 
-.nav-link {
-    &.status-page {
-        background-color: rgba(255, 255, 255, 0.1);
-    }
+.app-header {
+    background-color: var(--surface-panel);
+    border-bottom: 1px solid var(--line-hair);
 }
 
-.bottom-nav {
-    z-index: 1000;
-    position: fixed;
-    bottom: 0;
-    height: calc(60px + env(safe-area-inset-bottom));
-    width: 100%;
-    left: 0;
-    background-color: #fff;
-    box-shadow: 0 15px 47px 0 rgba(0, 0, 0, 0.05), 0 5px 14px 0 rgba(0, 0, 0, 0.05);
-    text-align: center;
-    white-space: nowrap;
-    padding: 0 10px env(safe-area-inset-bottom);
+.brand {
+    color: var(--text-strong);
+}
 
-    a {
-        text-align: center;
-        width: 25%;
-        display: inline-block;
-        height: 100%;
-        padding: 8px 10px 0;
-        font-size: 13px;
-        color: #c1c1c1;
-        overflow: hidden;
-        text-decoration: none;
-
-        &.router-link-exact-active, &.active {
-            color: $primary;
-            font-weight: bold;
-        }
-
-        div {
-            font-size: 20px;
-        }
-    }
+.title {
+    font-size: var(--text-md);
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
 main {
     min-height: calc(100vh - 160px);
 }
 
-.title {
-    font-weight: bold;
-}
-
-.nav {
+.app-nav {
     margin-right: 25px;
+    gap: var(--gap-md);
+    align-items: center;
 }
 
+// Вкладка: активную показывает подчёркивание, а не рамка-таблетка. Цвет не
+// единственный признак - подчёркивание видно и без различения цветов.
+.tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-height: var(--control-height);
+    padding: 0 var(--gap-sm);
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+
+    &:hover {
+        color: var(--text-strong);
+    }
+
+    &.router-link-exact-active {
+        color: var(--text-strong);
+        border-bottom-color: var(--accent);
+        font-weight: 500;
+    }
+}
+
+// Обрыв связи - отказ, а не украшение: слово несёт смысл, цвет только помогает.
 .lost-connection {
-    padding: 5px;
-    background-color: crimson;
-    color: white;
+    padding: var(--gap-sm);
+    background-color: var(--surface-panel);
+    color: var(--state-failed);
+    border-bottom: 2px solid var(--state-failed);
     position: fixed;
     width: 100%;
     z-index: 99999;
@@ -341,16 +339,21 @@ main {
 .dropdown-profile-pic {
     user-select: none;
 
-    .nav-link {
+    .profile-trigger {
         cursor: pointer;
         display: flex;
-        gap: 6px;
+        gap: var(--gap-xs);
         align-items: center;
-        background-color: rgba(200, 200, 200, 0.2);
-        padding: 0.5rem 0.8rem;
+        min-height: var(--control-height);
+        padding: 0 var(--gap-sm);
+        color: var(--text-muted);
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: var(--radius-control);
 
         &:hover {
-            background-color: rgba(255, 255, 255, 0.2);
+            color: var(--text-strong);
+            background-color: var(--surface-raised);
         }
     }
 
@@ -358,42 +361,22 @@ main {
         transition: all 0.2s;
         padding-left: 0;
         padding-bottom: 0;
-        margin-top: 8px !important;
-        border-radius: 16px;
+        margin-top: var(--gap-sm) !important;
         overflow: hidden;
 
         .dropdown-divider {
             margin: 0;
-            border-top: 1px solid rgba(0, 0, 0, 0.4);
+            border-top: 1px solid var(--line-hair);
             background-color: transparent;
         }
 
         .dropdown-item-text {
-            font-size: 14px;
+            font-size: var(--text-base);
             padding-bottom: 0.7rem;
         }
 
         .dropdown-item {
             padding: 0.7rem 1rem;
-        }
-
-        .dark & {
-            background-color: $dark-bg;
-            color: $dark-font-color;
-            border-color: $dark-border-color;
-
-            .dropdown-item {
-                color: $dark-font-color;
-
-                &.active {
-                    color: $dark-font-color2;
-                    background-color: $highlight !important;
-                }
-
-                &:hover {
-                    background-color: $dark-bg2;
-                }
-            }
         }
     }
 
@@ -401,29 +384,14 @@ main {
         display: flex;
         align-items: center;
         justify-content: center;
-        color: white;
-        background-color: $primary;
+        color: var(--text-on-accent);
+        background-color: var(--accent);
         width: 24px;
         height: 24px;
         margin-right: 5px;
         border-radius: var(--radius-pill);
-        font-weight: bold;
-        font-size: 10px;
-    }
-}
-
-.dark {
-    header {
-        background-color: $dark-header-bg;
-        border-bottom-color: $dark-header-bg !important;
-
-        span {
-            color: #f0f6fc;
-        }
-    }
-
-    .bottom-nav {
-        background-color: $dark-bg;
+        font-weight: 600;
+        font-size: var(--text-xs);
     }
 }
 </style>

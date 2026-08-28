@@ -178,16 +178,14 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
-
 .shadow-box-settings {
     padding: 20px;
     min-height: calc(100vh - 155px);
 }
 
 footer {
-    color: #aaa;
-    font-size: 13px;
+    color: var(--text-faint);
+    font-size: var(--text-sm);
     margin-top: 20px;
     padding-bottom: 30px;
     text-align: center;
@@ -199,7 +197,7 @@ footer {
     }
 
     .menu-item {
-        border-radius: 10px;
+        border-radius: var(--radius-control);
         margin: 0.5em;
         padding: 0.7em 1em;
         cursor: pointer;
@@ -208,51 +206,35 @@ footer {
     }
 
     .menu-item:hover {
-        background: $highlight-white;
-
-        .dark & {
-            background: $dark-header-bg;
-        }
+        background: var(--surface-raised);
     }
 
+    // Выбранный раздел виден не только фоном: слева акцентная полоса
     .active .menu-item {
-        background: $highlight-white;
-        border-left: 4px solid $primary;
+        background: var(--surface-raised);
+        border-left: 3px solid var(--accent);
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
-
-        .dark & {
-            background: $dark-header-bg;
-        }
     }
 }
 
 .settings-content {
     .settings-content-header {
         width: calc(100% + 20px);
-        border-bottom: 1px solid #dee2e6;
-        border-radius: 0 10px 0 0;
+        border-bottom: 1px solid var(--line-hair);
         margin-top: -20px;
         margin-right: -20px;
         padding: 12.5px 1em;
-        font-size: 26px;
-
-        .dark & {
-            background: $dark-header-bg;
-            border-bottom: 0;
-        }
+        font-size: var(--text-xl);
 
         .mobile & {
             padding: 15px 0 0 0;
-
-            .dark & {
-                background-color: transparent;
-            }
+            border-bottom: 0;
         }
     }
 }
 
 .logout {
-    color: $danger !important;
+    color: var(--state-failed) !important;
 }
 </style>

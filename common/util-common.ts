@@ -86,20 +86,27 @@ export function statusNameShort(status : number) : string {
     }
 }
 
-export function statusColor(status : number) : string {
+/**
+ * Состояние стека как имя токена состояния, а не как вариант Bootstrap.
+ *
+ * Синий в системе означает только интерактив, поэтому «работает» не может быть
+ * `primary`: имена здесь совпадают с токенами `--state-*` из tokens.scss.
+ * @param status Числовое состояние стека
+ * @returns Имя состояния: running, attention, stopped, failed или unknown
+ */
+export function statusStateName(status : number) : string {
     switch (status) {
         case CREATED_FILE:
-            return "dark";
         case CREATED_STACK:
-            return "dark";
+            return "stopped";
         case RUNNING:
-            return "primary";
+            return "running";
         case EXITED:
-            return "danger";
+            return "failed";
         case ATTENTION:
-            return "warning";
+            return "attention";
         default:
-            return "secondary";
+            return "unknown";
     }
 }
 

@@ -16,14 +16,20 @@
             {{ $t("No External Networks") }}
         </div>
 
-        <div v-for="(networkName, index) in externalNetworkList" :key="networkName" class="form-check form-switch my-3">
-            <input :id=" 'external-network' + index" v-model="selectedExternalList[networkName]" class="form-check-input" type="checkbox">
-
-            <label class="form-check-label" :for=" 'external-network' +index">
-                {{ networkName }}
-            </label>
-
-            <span v-if="false" class="text-danger ms-2 delete">Delete</span>
+        <!-- Переключатель сети по контракту системы: button с role="switch",
+             подпись слева, вид сети справа. Чекбокс Bootstrap не давал ни
+             состояния для чтения с экрана, ни цели нажатия нужного размера -->
+        <div v-for="networkName in externalNetworkList" :key="networkName" class="network-row">
+            <span class="network-name">{{ networkName }}</span>
+            <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
+            <button
+                class="switch" type="button" role="switch"
+                :aria-checked="String(!!selectedExternalList[networkName])"
+                :aria-label="networkName"
+                @click="toggleExternal(networkName)"
+            >
+                <span class="knob" aria-hidden="true"></span>
+            </button>
         </div>
 
         <div v-if="false" class="input-group mb-3">
@@ -114,6 +120,17 @@ export default {
         this.loadExternalNetworkList();
     },
     methods: {
+        /**
+         * Включить или выключить внешнюю сеть.
+         * Watcher на selectedExternalList дописывает сервис в compose, поэтому
+         * здесь меняется только состояние.
+         * @param {string} networkName Имя внешней сети
+         * @returns {void}
+         */
+        toggleExternal(networkName) {
+            this.selectedExternalList[networkName] = !this.selectedExternalList[networkName];
+        },
+
         loadNetworkList() {
             this.loading = true;
             this.networkList = [];
@@ -218,7 +235,7 @@ export default {
 @use "../styles/vars.scss" as *;
 
 .list-group {
-    background-color: $dark-bg2;
+    background-color: var(--surface-panel);
 
     li {
         display: flex;
@@ -227,15 +244,67 @@ export default {
 
         .domain-input {
             flex-grow: 1;
-            background-color: $dark-bg2;
+            background-color: transparent;
             border: none;
-            color: $dark-font-color;
+            color: var(--text-strong);
             outline: none;
 
             &::placeholder {
-                color: #1d2634;
+                color: var(--text-faint);
             }
         }
+    }
+}
+
+// Переключатель: 34x20, подпись слева, состояние читается и без цвета
+.network-row {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-height: var(--control-height);
+}
+
+.network-name {
+    color: var(--text-strong);
+}
+
+.network-kind {
+    margin-right: auto;
+    font-size: var(--text-sm);
+    color: var(--text-faint);
+}
+
+.switch {
+    flex: none;
+    width: 34px;
+    height: 20px;
+    padding: 2px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line-control);
+    background-color: var(--surface-sunken);
+
+    .knob {
+        display: block;
+        width: 14px;
+        height: 14px;
+        border-radius: var(--radius-pill);
+        background-color: var(--text-faint);
+        transition: transform ease-in-out 0.12s;
+    }
+
+    &[aria-checked="true"] {
+        background-color: var(--accent);
+        border-color: var(--accent);
+
+        .knob {
+            background-color: var(--text-on-accent);
+            transform: translateX(14px);
+        }
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
     }
 }
 

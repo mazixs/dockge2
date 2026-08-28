@@ -61,45 +61,47 @@
                 {{ $t("stackNotManagedByDockgeMsg") }}
             </div>
 
-            <!-- Сервисы: то, из чего стек состоит, и что с каждым можно сделать -->
-            <table v-if="services.length > 0" class="services">
-                <caption class="visually-hidden">{{ $t("servicesSection") }}</caption>
-                <thead>
-                    <tr>
-                        <th scope="col">{{ $t("serviceColumn") }}</th>
-                        <th scope="col">{{ $t("stateColumn") }}</th>
-                        <th scope="col">{{ $t("imageColumn") }}</th>
-                        <th scope="col">{{ $t("portsColumn") }}</th>
-                        <th scope="col"><span class="visually-hidden">{{ $t("actionsColumn") }}</span></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="service in services" :key="service.name">
-                        <th scope="row" class="name">{{ service.name }}</th>
-                        <td>
-                            <span class="badge" :class="stateClass(service)">
-                                <font-awesome-icon v-if="service.attention" icon="triangle-exclamation" class="me-1" />{{ stateLabel(service) }}
-                            </span>
-                        </td>
-                        <td class="image">{{ service.image || "—" }}</td>
-                        <td class="ports">
-                            <template v-if="service.ports.length > 0">
-                                <a v-for="port in service.ports" :key="port.display" :href="port.url" target="_blank" rel="noreferrer">{{ port.display }}</a>
-                            </template>
-                            <span v-else class="faint">—</span>
-                        </td>
-                        <td class="row-actions">
-                            <!-- Подпись видна короткой, а озвучивается вместе с именем сервиса -->
-                            <button v-if="!service.running" class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`" @click="runService('startService', service.name)">{{ $t("startStack") }}</button>
-                            <button v-else class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('stopStack')} ${service.name}`" @click="runService('stopService', service.name)">{{ $t("stopStack") }}</button>
-                            <button class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`" @click="runService('restartService', service.name)">{{ $t("restartStack") }}</button>
-                            <button v-if="service.running" class="btn btn-sm btn-normal" :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)">
-                                <font-awesome-icon icon="terminal" class="me-1" />{{ $t("openShell") }}
-                            </button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <!-- Сервисы: то, из чего стек состоит, и что с каждым можно сделать.
+                 Таблица прокручивается внутри себя: на узком экране действия
+                 в конце строки иначе уезжают за край экрана -->
+            <div v-if="services.length > 0" class="services-scroll">
+                <table class="services">
+                    <caption class="visually-hidden">{{ $t("servicesSection") }}</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ $t("serviceColumn") }}</th>
+                            <th scope="col">{{ $t("stateColumn") }}</th>
+                            <th scope="col">{{ $t("imageColumn") }}</th>
+                            <th scope="col">{{ $t("portsColumn") }}</th>
+                            <th scope="col"><span class="visually-hidden">{{ $t("actionsColumn") }}</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="service in services" :key="service.name">
+                            <th scope="row" class="name">{{ service.name }}</th>
+                            <td>
+                                <StateChip :state="serviceState(service)" :label="stateLabel(service)" :attention="service.attention" />
+                            </td>
+                            <td class="image">{{ service.image || "—" }}</td>
+                            <td class="ports">
+                                <template v-if="service.ports.length > 0">
+                                    <a v-for="port in service.ports" :key="port.display" :href="port.url" target="_blank" rel="noreferrer">{{ port.display }}</a>
+                                </template>
+                                <span v-else class="faint">—</span>
+                            </td>
+                            <td class="row-actions">
+                                <!-- Подпись видна короткой, а озвучивается вместе с именем сервиса -->
+                                <button v-if="!service.running" class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`" @click="runService('startService', service.name)">{{ $t("startStack") }}</button>
+                                <button v-else class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('stopStack')} ${service.name}`" @click="runService('stopService', service.name)">{{ $t("stopStack") }}</button>
+                                <button class="btn btn-sm btn-normal" :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`" @click="runService('restartService', service.name)">{{ $t("restartStack") }}</button>
+                                <button v-if="service.running" class="btn btn-sm btn-normal" :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)">
+                                    <font-awesome-icon icon="terminal" class="me-1" />{{ $t("openShell") }}
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
 
             <p v-else-if="!processing" class="faint">{{ $t("noServicesInFile") }}</p>
 
@@ -130,6 +132,7 @@
 import { BModal } from "bootstrap-vue-next";
 import { parseDocument } from "yaml";
 import dotenv from "dotenv";
+import StateChip from "../components/StateChip.vue";
 import Uptime from "../components/Uptime.vue";
 import { ATTENTION, RUNNING, envsubstYAML, parseDockerPort } from "../../../common/util-common";
 
@@ -139,6 +142,7 @@ const STATUS_INTERVAL_MS = 5000;
 export default {
     components: {
         BModal,
+        StateChip,
         Uptime,
     },
     data() {
@@ -426,11 +430,16 @@ export default {
             return labels.size === 1 ? [ ...labels ][0] : this.$t("mixedState");
         },
 
-        stateClass(service) {
+        /**
+         * Состояние сервиса именем системы: вид чипа один на весь интерфейс
+         * @param {object} service Сервис с его контейнерами
+         * @returns {string} Имя состояния
+         */
+        serviceState(service) {
             if (service.attention) {
-                return "bg-warning";
+                return "attention";
             }
-            return service.running ? "bg-primary" : "bg-secondary";
+            return service.running ? "running" : "stopped";
         },
 
         issueText(issue) {
@@ -454,17 +463,19 @@ export default {
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--gap-md);
 
     .identity {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: var(--gap-sm);
         min-width: 0;
     }
 
     h1 {
-        font-size: 24px;
+        font-size: var(--text-xl);
+        font-weight: 600;
+        letter-spacing: -.01em;
         margin: 0;
         overflow-wrap: anywhere;
     }
@@ -477,88 +488,159 @@ export default {
     .actions {
         display: flex;
         align-items: center;
-        gap: 6px;
+        flex-wrap: wrap;
+        gap: var(--gap-sm);
     }
+}
+
+// Вид кнопки описан один раз в main.scss; здесь только то, что относится
+// к этой строке: подписи не переносятся, иначе группа управления скачет
+.actions :deep(.btn) {
+    white-space: nowrap;
 }
 
 .urls {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--gap-sm);
 
     a {
         font-family: var(--font-mono);
         font-size: var(--text-sm);
         border: 1px solid var(--line-control);
         border-radius: var(--radius-chip);
-        padding: 2px 8px;
+        padding: 2px var(--gap-sm);
         text-decoration: none;
     }
 }
 
+// Полоса внимания: причина и кнопки стоят в одной строке, подробности - под ней
 .attention {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-sm);
     border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
     background-color: color-mix(in srgb, var(--state-attention) 8%, transparent);
     border-radius: var(--radius-panel);
-    padding: 10px 12px;
+    padding: var(--gap-sm) var(--gap-md);
     color: var(--text-strong);
+    font-size: var(--text-base);
 
     .reason {
         overflow-wrap: anywhere;
+        min-width: 0;
+        flex: 1;
     }
 
     .btn-link {
+        display: inline-flex;
+        align-items: center;
+        min-height: var(--control-height);
         background: none;
         border: 0;
-        padding: 0 0 0 8px;
+        padding: 0 var(--gap-xs);
         color: var(--accent-text);
+        font-size: var(--text-sm);
         text-decoration: underline;
+
+        &:focus-visible {
+            outline: var(--focus-ring);
+            outline-offset: var(--focus-offset);
+        }
     }
 
+    // Остальные причины уходят на свою строку целиком
     .rest {
-        margin: 6px 0 0;
-        padding-left: 24px;
+        flex-basis: 100%;
+        margin: 0;
+        padding-left: var(--gap-lg);
+        font-size: var(--text-sm);
+        color: var(--text-muted);
     }
+}
+
+// Таблица сервисов: плотная строка, разделитель-волосок, действия в конце строки
+// Таблица сервисов - панель: список слева тоже панель, и без неё таблица висит
+// прямо на фоне страницы, а действия упираются в край экрана
+.services-scroll {
+    overflow-x: auto;
+    border-radius: var(--radius-panel);
 }
 
 .services {
     width: 100%;
     border-collapse: collapse;
     font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    background-color: var(--surface-panel);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
 
     th, td {
         text-align: left;
-        padding: 8px 10px;
+        height: var(--row-height-dense);
+        padding: 0 var(--gap-md);
         border-bottom: 1px solid var(--line-hair);
         vertical-align: middle;
+    }
+
+    // Последняя строка не подчёркивается: границу держит сама панель
+    tbody tr:last-child > * {
+        border-bottom: 0;
     }
 
     thead th {
         color: var(--text-faint);
         font-weight: 500;
+        font-size: var(--text-xs);
         white-space: nowrap;
     }
 
     .name {
         font-weight: 600;
+        color: var(--text-strong);
+        overflow-wrap: anywhere;
     }
 
     .image {
         font-family: var(--font-mono);
+        color: var(--text-muted);
         overflow-wrap: anywhere;
     }
 
     .ports a {
         font-family: var(--font-mono);
-        margin-right: 8px;
+        margin-right: var(--gap-sm);
     }
 
     .row-actions {
         text-align: right;
+        padding-right: 0;
         white-space: nowrap;
+    }
 
-        > * {
-            margin-left: 4px;
+    // Кнопки строки той же высоты, что и контролы шапки: строка не должна расти
+    .row-actions .btn {
+        display: inline-flex;
+        align-items: center;
+        height: var(--control-height);
+        margin-left: var(--gap-xs);
+        padding: 0 var(--gap-sm);
+        border-radius: var(--radius-control);
+        border: 1px solid var(--line-control);
+        background: transparent;
+        color: var(--text-strong);
+        font-size: var(--text-xs);
+
+        &:hover:not([disabled]) {
+            background: var(--surface-raised);
+        }
+
+        &:focus-visible {
+            outline: var(--focus-ring);
+            outline-offset: var(--focus-offset);
         }
     }
 }
@@ -567,21 +649,34 @@ export default {
     color: var(--text-faint);
 }
 
+// Свёрнутая строка «Связи и сети»: она сообщает, а не зовёт
 .links {
     .summary {
+        display: inline-flex;
+        align-items: center;
+        min-height: var(--control-height);
         background: none;
         border: 0;
         padding: 0;
-        color: var(--text-faint);
+        color: var(--text-muted);
         font-size: var(--text-sm);
         text-align: left;
+
+        &:hover {
+            color: var(--text-strong);
+        }
+
+        &:focus-visible {
+            outline: var(--focus-ring);
+            outline-offset: var(--focus-offset);
+        }
     }
 
     .details {
         display: grid;
         grid-template-columns: minmax(120px, max-content) 1fr;
-        gap: 4px 16px;
-        margin: 10px 0 0;
+        gap: var(--gap-xs) var(--gap-lg);
+        margin: var(--gap-sm) 0 0;
         font-size: var(--text-sm);
 
         dt {
@@ -591,6 +686,7 @@ export default {
 
         dd {
             margin: 0;
+            color: var(--text-muted);
             overflow-wrap: anywhere;
         }
     }

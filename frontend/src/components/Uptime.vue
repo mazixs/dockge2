@@ -1,31 +1,45 @@
 <template>
-    <span :class="className" :title="issueText">
-        <font-awesome-icon v-if="needsAttention" icon="triangle-exclamation" class="me-1" />{{ statusName }}
-    </span>
+    <StateChip
+        :state="state"
+        :label="statusName"
+        :attention="needsAttention"
+        :fixed-width="fixedWidth"
+        :title="issueText"
+    />
 </template>
 
 <script>
-import { ATTENTION, statusColor, statusNameShort } from "../../../common/util-common";
+import StateChip from "./StateChip.vue";
+import { ATTENTION, statusNameShort, statusStateName } from "../../../common/util-common";
 
 export default {
+    components: {
+        StateChip,
+    },
     props: {
         stack: {
             type: Object,
             default: null,
         },
+        /** Ровная ширина чипа: в списке имена стеков должны начинаться на одной вертикали */
         fixedWidth: {
+            type: Boolean,
+            default: false,
+        },
+        /**
+         * Оставлен для вызовов, где пилюля запрашивается явно.
+         * Чип состояния всегда пилюля, поэтому на вид не влияет.
+         */
+        pill: {
             type: Boolean,
             default: false,
         },
     },
 
     computed: {
-        uptime() {
-            return this.$t("notAvailableShort");
-        },
-
-        color() {
-            return statusColor(this.stack?.status);
+        /** Имя состояния системы: running, attention, stopped, failed, unknown */
+        state() {
+            return statusStateName(this.stack?.status);
         },
 
         statusName() {
@@ -37,8 +51,8 @@ export default {
         },
 
         /**
-         * Tooltip explaining why the stack needs attention
-         * @returns {string} Reason list, empty when there is nothing to explain
+         * Почему стек требует внимания; подсказка дополняет строку внимания, а не заменяет её
+         * @returns {string} Список причин, пустой если объяснять нечего
          */
         issueText() {
             const issues = this.stack?.issues;
@@ -54,28 +68,6 @@ export default {
                 })
                 .join("\n");
         },
-
-        className() {
-            let className = `badge rounded-pill bg-${this.color}`;
-
-            if (this.fixedWidth) {
-                className += " fixed-width";
-            }
-            return className;
-        },
     },
 };
 </script>
-
-<style scoped>
-.badge {
-    min-width: 62px;
-}
-
-.fixed-width {
-    /* Wide enough for the attention label with its warning icon */
-    width: 86px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-</style>

@@ -9,6 +9,7 @@
             aria-modal="true"
             :aria-labelledby="titleId"
             @keydown.esc.stop="requestClose"
+            @keydown.tab="keepFocusInside"
         >
             <header>
                 <h2 :id="titleId">{{ deploying ? $t("deployingStack", [ name ]) : $t("newStack") }}</h2>
@@ -39,7 +40,7 @@
                     <div v-if="converted" class="line recognized">
                         <i class="dot running"></i>
                         <span>{{ $t("convertedFromDockerRun") }}</span>
-                        <button class="btn btn-quiet sm" type="button" @click="returnCommand">{{ $t("returnCommand") }}</button>
+                        <button class="btn btn-quiet btn-sm" type="button" @click="returnCommand">{{ $t("returnCommand") }}</button>
                     </div>
 
                     <textarea
@@ -64,7 +65,7 @@
                         </template>
                         <button
                             v-if="restFlagCount > 0"
-                            class="btn btn-quiet sm"
+                            class="btn btn-quiet btn-sm"
                             type="button"
                             :aria-expanded="String(showAllFlags)"
                             @click="showAllFlags = !showAllFlags"
@@ -149,6 +150,8 @@ export default {
     data() {
         return {
             visible: false,
+            /** Элемент, которому вернётся фокус после закрытия */
+            opener: null,
             source: "",
             /** Исходная команда, чтобы её можно было вернуть: правка поля ломает отмену браузера */
             originalCommand: "",
@@ -229,6 +232,8 @@ export default {
          * @returns {void}
          */
         open(prefill = "") {
+            // Кнопка, с которой пришли: на неё возвращается фокус при закрытии
+            this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
             this.visible = true;
             this.failure = "";
             this.deploying = false;
@@ -260,7 +265,49 @@ export default {
                 return;
             }
 
+            this.close();
+        },
+
+        /**
+         * Закрыть слой и вернуть фокус туда, откуда его открыли
+         * @returns {void}
+         */
+        close() {
             this.visible = false;
+            this.opener?.focus();
+            this.opener = null;
+        },
+
+        /**
+         * Не выпускать фокус из слоя: Tab с последнего элемента идёт на первый,
+         * Shift+Tab с первого - на последний. Иначе клавиатура уходит в список
+         * за притемнением, где ничего нажимать нельзя.
+         * @param {KeyboardEvent} event Нажатие Tab
+         * @returns {void}
+         */
+        keepFocusInside(event) {
+            const sheet = this.$refs.sheet;
+
+            if (!sheet) {
+                return;
+            }
+
+            const reachable = [ ...sheet.querySelectorAll("a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex=\"-1\"])") ]
+                .filter((node) => node.offsetParent !== null);
+            const first = reachable[0];
+            const last = reachable[reachable.length - 1];
+
+            if (!first || !last) {
+                return;
+            }
+
+            if (event.shiftKey && document.activeElement === first) {
+                last.focus();
+                event.preventDefault();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                first.focus();
+                event.preventDefault();
+            }
         },
 
         /**
@@ -426,7 +473,7 @@ export default {
                 }
 
                 this.$root.markStackFresh(name, FRESH_MS);
-                this.visible = false;
+                this.close();
                 this.reset();
                 this.$root.toastRes(res);
                 this.$router.push(this.endpoint ? `/stack/${name}/${this.endpoint}` : `/stack/${name}`);
@@ -457,10 +504,12 @@ export default {
     z-index: 1055;
 }
 
+// Притемнение приходит токеном --scrim: у фильтра backdrop-filter в светлой
+// теме почти не видно эффекта, а список под слоем обязан уйти на второй план
 .scrim {
     position: absolute;
     inset: 0;
-    background: rgba(4, 7, 11, .62);
+    background-color: var(--scrim);
 }
 
 .sheet {
@@ -481,18 +530,20 @@ export default {
 header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
+    gap: var(--gap-md);
+    padding: var(--gap-md) var(--gap-lg);
     border-bottom: 1px solid var(--line-hair);
     position: sticky;
     top: 0;
     background: var(--surface-panel);
+    z-index: 1;
 }
 
 h2 {
     margin: 0;
     font-size: var(--text-lg);
     font-weight: 600;
+    letter-spacing: -.01em;
 }
 
 .head-note {
@@ -500,11 +551,15 @@ h2 {
     font-size: var(--text-xs);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--gap-xs);
 }
 
 .sheet-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     margin-left: auto;
+    flex: none;
     min-height: var(--control-height);
     min-width: var(--control-height);
     border: 1px solid var(--line-control);
@@ -512,24 +567,37 @@ h2 {
     background: transparent;
     color: var(--text-strong);
     cursor: pointer;
+
+    &:hover {
+        background: var(--surface-raised);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
 }
 
 .brief {
-    padding: 14px 16px 4px;
+    padding: var(--gap-md) var(--gap-lg) var(--gap-xs);
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--gap-lg);
 }
 
+// Мера строки: compose - узкий текст, около 104 знаков моноширинного,
+// и растягивать поле на весь монитор незачем
 .part {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: var(--gap-sm);
+    max-width: 840px;
 }
 
 .part-title {
     font-size: var(--text-base);
     font-weight: 500;
+    color: var(--text-strong);
 }
 
 .sub {
@@ -551,7 +619,7 @@ textarea {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     line-height: 1.6;
-    padding: 10px 12px;
+    padding: var(--gap-sm) var(--gap-md);
     resize: vertical;
 
     &.joined {
@@ -561,17 +629,30 @@ textarea {
     &::placeholder {
         color: var(--text-faint);
     }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
 }
 
+// Полоса над полем и отчёт под ним: сообщают, а не окрашивают экран
 .line {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: var(--gap-sm);
     font-size: var(--text-sm);
+    color: var(--text-strong);
     border: 1px solid var(--line-hair);
     border-radius: var(--radius-control);
-    padding: 7px 11px;
+    padding: var(--gap-xs) var(--gap-md);
+    min-height: var(--row-height);
     flex-wrap: wrap;
+
+    code {
+        font-family: var(--font-mono);
+        color: var(--text-strong);
+    }
 
     .btn {
         margin-left: auto;
@@ -581,21 +662,26 @@ textarea {
         border-radius: var(--radius-control) var(--radius-control) 0 0;
         border-bottom: 0;
         background: var(--surface-raised);
+        color: var(--text-muted);
+    }
+
+    &.report {
+        color: var(--text-muted);
     }
 
     &.failure {
         border: 0;
         border-bottom: 1px solid var(--line-hair);
         border-radius: 0;
-        background: color-mix(in srgb, var(--state-failed) 12%, transparent);
-        padding: 9px 16px;
+        background: color-mix(in srgb, var(--state-failed) 10%, transparent);
+        padding: var(--gap-sm) var(--gap-lg);
     }
 }
 
 .dot {
     width: 8px;
     height: 8px;
-    border-radius: 50%;
+    border-radius: var(--radius-pill);
     flex: none;
     display: inline-block;
 
@@ -613,26 +699,33 @@ textarea {
 
     li {
         display: flex;
-        gap: 9px;
+        gap: var(--gap-sm);
         align-items: baseline;
-        padding: 6px 11px;
+        padding: var(--gap-xs) var(--gap-md);
         border-bottom: 1px solid var(--line-hair);
         font-size: var(--text-sm);
 
         &:last-child { border-bottom: 0; }
     }
 
+    // Исход назван словом, поэтому цветом отмечается только потеря
     .kind {
         flex: none;
         font-family: var(--font-mono);
         font-size: var(--text-xs);
+        color: var(--text-muted);
         border: 1px solid var(--line-hair);
         border-radius: var(--radius-chip);
         padding: 1px 6px;
 
-        &.carried { color: var(--state-running); }
-        &.review { color: var(--state-attention); }
-        &.dropped { color: var(--state-failed); }
+        &.dropped {
+            color: var(--state-failed);
+            border-color: color-mix(in srgb, var(--state-failed) 45%, transparent);
+        }
+    }
+
+    code {
+        font-family: var(--font-mono);
     }
 
     .value {
@@ -643,7 +736,7 @@ textarea {
 
 .where {
     display: flex;
-    gap: 12px;
+    gap: var(--gap-md);
     flex-wrap: wrap;
     align-items: flex-end;
 }
@@ -651,7 +744,7 @@ textarea {
 .field {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--gap-xs);
     min-width: 190px;
 
     > span {
@@ -662,27 +755,33 @@ textarea {
     input,
     select {
         min-height: var(--control-height);
-        padding: 4px 9px;
+        padding: 0 var(--gap-sm);
         background: var(--surface-base);
         border: 1px solid var(--line-control);
         border-radius: var(--radius-control);
         color: var(--text-strong);
         font-family: inherit;
         font-size: var(--text-sm);
+
+        &:focus-visible {
+            outline: var(--focus-ring);
+            outline-offset: var(--focus-offset);
+        }
     }
 }
 
 .progress {
-    padding: 14px 16px;
+    padding: var(--gap-md) var(--gap-lg);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--gap-sm);
 
     .prow {
         display: flex;
-        gap: 12px;
+        gap: var(--gap-md);
         align-items: baseline;
-        padding-bottom: 8px;
+        min-height: var(--row-height-dense);
+        padding-bottom: var(--gap-sm);
         border-bottom: 1px solid var(--line-hair);
         font-size: var(--text-sm);
     }
@@ -690,14 +789,15 @@ textarea {
     .name {
         min-width: 200px;
         font-family: var(--font-mono);
+        color: var(--text-strong);
     }
 }
 
 footer {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 12px 16px;
+    gap: var(--gap-sm);
+    padding: var(--gap-md) var(--gap-lg);
     border-top: 1px solid var(--line-hair);
     background: var(--surface-raised);
     flex-wrap: wrap;
@@ -709,34 +809,12 @@ footer {
     flex: 1;
 }
 
-.btn {
-    min-height: var(--control-height);
-    border-radius: var(--radius-control);
-    border: 1px solid var(--line-control);
-    background: transparent;
-    color: var(--text-strong);
-    font-family: inherit;
-    font-size: var(--text-sm);
-    padding: 4px 12px;
-    cursor: pointer;
-
-    &.sm {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        min-height: 28px;
-    }
-
-    &.btn-primary {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: var(--text-on-accent);
-        font-weight: 500;
-    }
-
-    &[disabled] {
-        opacity: .55;
-        cursor: not-allowed;
-    }
+// Вид кнопки живёт в main.scss. Здесь остаётся только тихий вид: в слое
+// главная кнопка одна, остальные не должны с ней спорить.
+.btn-quiet {
+    --bs-btn-color: var(--text-strong);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--line-control);
 }
 
 @media (max-width: 900px) {

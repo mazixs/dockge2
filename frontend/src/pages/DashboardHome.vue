@@ -322,26 +322,27 @@ export default {
 <style lang="scss" scoped>
 @use "../styles/vars.scss" as *;
 
+// Счётчики состояний: цвет берётся из состояний системы, а не из палитры Bootstrap,
+// поэтому «активно» не может оказаться синим
 .num {
-    font-size: 30px;
-
-    font-weight: bold;
+    font-size: var(--text-xl);
+    font-weight: 600;
     display: block;
 
     &.active {
-        color: $primary;
+        color: var(--state-running);
     }
 
     &.exited {
-        color: $danger;
+        color: var(--state-failed);
     }
 
     &.attention {
-        color: $warning;
+        color: var(--state-attention);
     }
 
     &.unknown {
-        color: $dark-font-color3;
+        color: var(--state-unknown);
     }
 }
 
@@ -350,7 +351,7 @@ export default {
 }
 
 table {
-    font-size: 14px;
+    font-size: var(--text-base);
 
     tr {
         transition: all ease-in-out 0.2ms;
@@ -362,19 +363,13 @@ table {
     }
 }
 
-.docker-run {
-    border: none;
-    font-family: var(--font-mono);
-    font-size: 15px;
-}
-
-.first-row .shadow-box {
-
-}
-
 .remove-agent {
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--text-faint);
+
+    &:hover {
+        color: var(--state-failed);
+    }
 }
 
 .agent {
