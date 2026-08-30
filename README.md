@@ -127,6 +127,36 @@ services:
       - PGID=1000 # Set the stack file/dir ownership to this group
 ```
 
+## Запуск локально
+
+Локальная разработка поднимается одной командой из корня репозитория:
+
+```bash
+cp .env.example .env   # достаточно один раз
+./local.sh             # ./local.sh -d, если нужен фон
+```
+
+Скрипт пересоздает контейнеры проекта `dockge2-local` по `docker-compose.local.yml`
+и запускает внутри `npm run dev`: Vite на http://localhost:5000 и бэкенд на
+http://localhost:5001, оба с автоперезапуском. Зависимости ставятся в отдельный
+том `node_modules`, каталог стеков по умолчанию - `/tmp/dockge2-stacks`
+(меняется через `DOCKGE_LOCAL_STACKS_DIR`).
+
+Остановить: `docker compose -p dockge2-local -f docker-compose.local.yml down`.
+
+Production-конфигурация лежит в `docker-compose.yml` (образ собирается из этого
+репозитория, поэтому сначала `npm run build:frontend`). Файл `compose.yaml` рядом -
+пример от upstream, и без явного `-f` docker compose берет именно его:
+
+```bash
+npm run build:frontend
+docker compose -f docker-compose.yml up -d --build
+```
+
+Сейчас сборка образа падает на `npm ci` внутри `docker/Dockerfile`: npm пытается
+пересобрать `better-sqlite3` из исходников, а в базовом образе нет ни python, ни
+компилятора. Это отдельная проблема репозитория, а не конфигурации compose.
+
 ## Sign in
 
 The first visit asks for an email address and a password, and that account is the only

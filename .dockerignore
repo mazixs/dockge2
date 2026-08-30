@@ -9,6 +9,9 @@ tmp
 
 # Docker extra
 docker
+docker-compose.local.yml
+local.sh
+.env.example
 frontend
 coverage
 .editorconfig

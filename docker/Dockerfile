@@ -10,7 +10,11 @@ FROM louislam/dockge:base AS build
 WORKDIR /app
 COPY --chown=node:node  ./package.json ./package.json
 COPY --chown=node:node  ./package-lock.json ./package-lock.json
-RUN npm ci --omit=dev
+# --ignore-scripts обязателен: в базовом образе нет python и компилятора, а npm
+# иначе запускает node-gyp для better-sqlite3. Собирать нечего - готовые бинарники
+# лежат в самих пакетах (better-sqlite3/prebuilds, node-pty-prebuilt-multiarch/prebuilds),
+# и node-gyp-build подхватывает их во время выполнения.
+RUN npm ci --omit=dev --ignore-scripts
 
 ############################################
 # ⭐ Main Image

@@ -3,6 +3,11 @@ import { DockgeServer } from "../dockge-server";
 import { callbackError, callbackResult, checkLogin, DockgeSocket, doubleCheckPassword, ValidationError } from "../util-server";
 import { Stack } from "../stack";
 import { readAvailability } from "../observations";
+import { readImageUpdates } from "../image-updates";
+import { readStackSource } from "../stack-source";
+import { readComposeImages } from "../../common/compose-status";
+import { Terminal } from "../terminal";
+import { getComposeTerminalName } from "../../common/util-common";
 import { ContainerInstanceStatus } from "../../common/compose-status";
 import type { StackFileConfig } from "../../common/types/stack";
 import { AgentSocket } from "../../common/agent-socket";
@@ -251,6 +256,65 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     serviceStatusList,
                     stackStatus: detailed.status,
                     issues: detailed.issues,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // What an update would do: what the working copy says and what the registry serves.
+        // Nothing is pulled and nothing is started here - this is the preview state.
+        agentSocket.on("stackUpdatePreview", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+
+                if (!stack.isManagedByDockge) {
+                    throw new ValidationError("This stack is not managed by Dockge.");
+                }
+
+                // Images come from the file the server parsed itself, never from the client
+                const images = readComposeImages(stack.composeYAML);
+
+                callbackResult({
+                    ok: true,
+                    source: await readStackSource(stack.path),
+                    images: await readImageUpdates(images),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Stop a running compose command of this stack
+        agentSocket.on("abortCompose", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                // The name is built by the shared helper, so only this stack's own
+                // compose terminal can ever be ended here
+                Stack.validateName(stackName);
+                const terminal = Terminal.getTerminal(getComposeTerminalName(socket.endpoint, stackName));
+
+                if (!terminal) {
+                    throw new ValidationError("Nothing is running for this stack.");
+                }
+
+                await terminal.end();
+
+                callbackResult({
+                    ok: true,
+                    msg: "composeAborted",
+                    msgi18n: true,
                 }, callback);
             } catch (e) {
                 callbackError(e, callback);

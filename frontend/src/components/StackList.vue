@@ -39,10 +39,26 @@
 
         <div ref="stackList" class="stack-list" :class="{ scrollbar: scrollbar }" :style="stackListStyle">
             <div v-if="visibleCount === 0" class="empty-list">
-                <p v-if="searchText !== '' || activeFilter">{{ $t("nothingMatchesFilter") }}</p>
-                <button v-else class="btn btn-primary" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
-                    {{ $t("addFirstStackMsg") }}
-                </button>
+                <!-- Пусто по двум разным причинам, и лечатся они разным действием -->
+                <EmptyState
+                    v-if="isNarrowed"
+                    :title="$t('emptyFilteredTitle')"
+                    :hint="$t('emptyFilteredHint')"
+                >
+                    <button type="button" @click="resetSearchAndFilter">
+                        {{ $t("emptyFilteredAction") }}
+                    </button>
+                </EmptyState>
+
+                <EmptyState
+                    v-else
+                    :title="$t('emptyStacksTitle')"
+                    :hint="$t('emptyStacksHint')"
+                >
+                    <button class="primary" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
+                        {{ $t("emptyStacksAction") }}
+                    </button>
+                </EmptyState>
             </div>
 
             <div v-for="(agent, agentIndex) in agentStackList" :key="agentIndex" class="stack-list-inner">
@@ -74,12 +90,14 @@
 
 <script>
 import Confirm from "../components/Confirm.vue";
+import EmptyState from "../components/EmptyState.vue";
 import StackListItem from "../components/StackListItem.vue";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
 
 export default {
     components: {
         Confirm,
+        EmptyState,
         StackListItem,
     },
     props: {
@@ -208,6 +226,11 @@ export default {
             return this.agentStackList.reduce((sum, agent) => sum + agent.stacks.length, 0);
         },
 
+        /** Список сужен рукой: пусто из-за поиска или фильтра, а не из-за отсутствия стеков */
+        isNarrowed() {
+            return this.searchText !== "" || Boolean(this.activeFilter);
+        },
+
         /**
          * Фильтры со своими счётчиками. Счётчик считается по всему списку, а не по
          * отфильтрованному, иначе кнопка меняла бы своё число от собственного нажатия.
@@ -259,6 +282,19 @@ export default {
          */
         clearSearchText() {
             this.searchText = "";
+        },
+
+        /**
+         * Вернуть весь список: снять поиск и нажатый фильтр разом. Фильтр живёт ещё
+         * и в адресе, поэтому очистить одно поле мало - его снимает toggleFilter.
+         * @returns {void}
+         */
+        resetSearchAndFilter() {
+            this.clearSearchText();
+
+            if (this.activeFilter) {
+                this.toggleFilter(this.activeFilter);
+            }
         },
 
         /**
@@ -500,12 +536,6 @@ export default {
     &.scrollbar {
         overflow-y: auto;
     }
-}
-
-.empty-list {
-    padding: var(--gap-lg);
-    text-align: center;
-    color: var(--text-faint);
 }
 
 // Группа агента: кнопка, потому что она сворачивает список

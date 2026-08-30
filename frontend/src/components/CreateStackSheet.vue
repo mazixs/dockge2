@@ -32,6 +32,12 @@
                 <span><b>{{ $t("notDeployed") }}</b> {{ failure }}</span>
             </div>
 
+            <!-- Пока идёт развёртывание, единственное доступное действие - прервать его -->
+            <div v-if="deploying" class="line running">
+                <span>{{ $t("deployStepsRunning") }}</span>
+                <button class="btn btn-sm btn-normal" type="button" @click="abort">{{ $t("abortRunning") }}</button>
+            </div>
+
             <div v-if="!deploying" class="brief">
                 <div class="part">
                     <label class="part-title" :for="pasteId">{{ $t("whatToDeploy") }}</label>
@@ -481,6 +487,19 @@ export default {
         },
 
         /**
+         * Прервать запущенное развёртывание: команда останавливается, файлы остаются
+         * на диске черновиком
+         * @returns {void}
+         */
+        abort() {
+            this.$root.emitAgent(this.endpoint, "abortCompose", this.name.trim(), (res) => {
+                if (!res?.ok) {
+                    this.$root.toastRes(res);
+                }
+            });
+        },
+
+        /**
          * Забыть содержимое, чтобы следующий стек начинался с чистого поля
          * @returns {void}
          */
@@ -637,6 +656,12 @@ textarea {
 }
 
 // Полоса над полем и отчёт под ним: сообщают, а не окрашивают экран
+// Полоса выполнения: секунды идут в шапке, здесь - что происходит и как прервать
+.running {
+    justify-content: space-between;
+    color: var(--text-muted);
+}
+
 .line {
     display: flex;
     align-items: center;

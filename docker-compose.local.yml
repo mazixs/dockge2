@@ -1,0 +1,70 @@
+# Локальная разработка: бэкенд под tsx watch (5001) и Vite (5000) в одном контейнере.
+# Запускать только через ./local.sh - он пересоздает контейнеры и подставляет env-файлы.
+#
+# restart здесь намеренно не указан: после перезагрузки компьютера dev-окружение
+# подниматься само не должно.
+name: dockge2-local
+
+services:
+  dev:
+    # Тот же базовый образ, что и у production: node 24.19.0 из .nvmrc плюс docker CLI
+    # и плагин compose. Голый node не подходит - панель выполняет команды docker compose
+    # внутри контейнера, а без клиента их выполнить нечем.
+    build:
+      context: .
+      dockerfile: docker/Base.Dockerfile
+    image: dockge2-dev:latest
+    working_dir: /app
+    # Зависимости ставим только когда тома с ними еще нет: обычный старт не должен
+    # ждать установку. npm run dev поднимает Vite и бэкенд вместе (concurrently).
+    # --ignore-scripts обязателен: в образе нет ни python, ни компилятора, а npm 11
+    # иначе пересобирает better-sqlite3 из исходников. Готовые бинарники для
+    # better-sqlite3 и node-pty лежат прямо в их пакетах (prebuilds/), так что
+    # собирать нечего.
+    command:
+      - bash
+      - -c
+      - |
+        if [ ! -x node_modules/.bin/vite ]; then
+          npm ci --ignore-scripts --no-audit --no-fund
+        fi
+        exec npm run dev
+    ports:
+      # Интерфейс разработки (Vite).
+      - "5000:5000"
+      # Бэкенд: браузер ходит на него напрямую, поэтому порт нужен снаружи.
+      - "5001:5001"
+    volumes:
+      # Правки с хоста видны сразу, отсюда и hot reload.
+      - .:/app
+      # node_modules отдельным томом по двум причинам: монтирование репозитория иначе
+      # закрыло бы каталог собой, а хостовые нативные модули (better-sqlite3, node-pty)
+      # собраны под другую систему и внутри контейнера не запустятся.
+      - dev-node-modules:/app/node_modules
+      # Без сокета Docker панель не видит контейнеров.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Каталог стеков. Пути слева и справа обязаны совпадать - команды docker compose
+      # выполняет демон на хосте. По умолчанию временный каталог, чтобы разработка
+      # не требовала root и не трогала боевой /opt/stacks.
+      - ${DOCKGE_LOCAL_STACKS_DIR:-/tmp/dockge2-stacks}:${DOCKGE_LOCAL_STACKS_DIR:-/tmp/dockge2-stacks}
+    environment:
+      NODE_ENV: development
+      # Каталог данных внутри примонтированного репозитория, база остается в ./data.
+      DOCKGE_DATA_DIR: /app/data
+      DOCKGE_STACKS_DIR: ${DOCKGE_LOCAL_STACKS_DIR:-/tmp/dockge2-stacks}
+      # Локально консоль хоста удобна, в production она выключена.
+      DOCKGE_ENABLE_CONSOLE: "true"
+      # Файлы стеков создаются от имени хостового пользователя, иначе их придется
+      # править через sudo. Значения подставляет local.sh.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      # Браузеры Playwright весят сотни мегабайт и для npm run dev не нужны.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      # На macOS и Windows inotify через bind mount не работает, тогда поставьте true.
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-}
+    # Чтобы Ctrl+C и цветной вывод вели себя как при обычном npm run dev.
+    stdin_open: true
+    tty: true
+
+volumes:
+  dev-node-modules:

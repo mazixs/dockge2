@@ -7,6 +7,7 @@ import {
     readComposeServices,
     readOneShotServices,
     resolveComposePsStatus,
+    readComposeImages,
     resolveStackStatus,
     summariseServices,
 } from "../../common/compose-status";
@@ -442,4 +443,22 @@ test("разовый сервис помечен в сводке отдельн�
     assert.equal(summary[0]?.isOneShot, true);
     // Чистый выход разового контейнера внимания не требует
     assert.equal(summary[0]?.state, "stopped");
+});
+
+test("образы читаются из файла, а собираемые сервисы не выдумываются", () => {
+    const compose = `services:
+  web:
+    image: nginx:1.27
+  worker:
+    image: nginx:1.27
+  built:
+    build: .
+  broken:
+    image: ""
+`;
+
+    // Дубликат назван один раз, сервис со сборкой пропущен: у него нет ответа реестра
+    assert.deepEqual(readComposeImages(compose), [ "nginx:1.27" ]);
+    assert.deepEqual(readComposeImages("не: [yaml"), []);
+    assert.deepEqual(readComposeImages(""), []);
 });
