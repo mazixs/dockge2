@@ -501,3 +501,30 @@ export function summariseServices(
             isOneShot };
     });
 }
+
+/**
+ * Read the image references a compose file declares.
+ *
+ * Only images that are written in the file are returned: a service built from a
+ * Dockerfile has no registry answer to give, and inventing one would be a lie.
+ * @param composeYAML Compose file content
+ * @returns Image references in file order, without duplicates
+ */
+export function readComposeImages(composeYAML : string) : string[] {
+    try {
+        const parsed = yaml.parse(composeYAML) as { services? : Record<string, { image? : unknown }> } | null;
+        const services = parsed?.services;
+
+        if (!services || typeof services !== "object") {
+            return [];
+        }
+
+        const images = Object.values(services)
+            .map((service) => (typeof service?.image === "string" ? service.image.trim() : ""))
+            .filter((image) => image !== "");
+
+        return [ ...new Set(images) ];
+    } catch (e) {
+        return [];
+    }
+}

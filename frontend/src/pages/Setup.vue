@@ -2,16 +2,14 @@
     <div class="form-container" data-cy="setup-form">
         <div class="form">
             <form @submit.prevent="submit">
-                <div>
-                    <object width="64" height="64" data="/icon.svg" />
-                    <div style="font-size: 28px; font-weight: bold; margin-top: 5px;">
-                        Dockge
-                    </div>
+                <div class="brand">
+                    <object width="48" height="48" data="/icon.svg" aria-hidden="true" />
+                    <span class="wordmark">Dockge</span>
                 </div>
 
-                <p class="mt-3">
-                    {{ $t("Create your admin account") }}
-                </p>
+                <!-- Первый запуск: экран говорит, что здесь заводится, и что заводится один раз -->
+                <h1 class="title">{{ $t("setupTitle") }}</h1>
+                <p class="hint">{{ $t("setupHint") }}</p>
 
                 <div class="form-floating">
                     <select id="language" v-model="$root.language" class="form-select">
@@ -170,5 +168,32 @@ export default {
     padding: 15px;
     margin: auto;
     text-align: center;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap-sm);
+}
+
+.wordmark {
+    font-size: var(--text-xl);
+    font-weight: 600;
+    color: var(--text-strong);
+}
+
+.title {
+    margin: var(--gap-lg) 0 var(--gap-xs);
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text-strong);
+}
+
+// Объяснение в одну строку: почему учётная запись одна и что она значит
+.hint {
+    margin: 0 0 var(--gap-lg);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
 }
 </style>

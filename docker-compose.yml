@@ -1,0 +1,76 @@
+# Production-конфигурация dockge2.
+# Значения подставляются из .env рядом с этим файлом (см. .env.example),
+# его docker compose читает сам.
+#
+# Перед первым запуском нужен собранный фронтенд: npm run build:frontend,
+# потому что docker/Dockerfile кладет в образ уже готовый каталог frontend-dist.
+name: dockge2
+
+services:
+  dockge:
+    # Форк отличается от upstream, поэтому образ собирается из этого репозитория,
+    # а не берется с Docker Hub.
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: release
+    image: ${DOCKGE_IMAGE:-dockge2:latest}
+    # Панель обязана вернуться после падения процесса и после перезагрузки хоста.
+    restart: unless-stopped
+    ports:
+      # Порт снаружи и внутри держим одинаковым: на него же настроен healthcheck образа.
+      - "${DOCKGE_PORT:-5001}:${DOCKGE_PORT:-5001}"
+    volumes:
+      # Без сокета Docker панель не видит ни контейнеров, ни стеков.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # SQLite и настройки лежат на хосте, чтобы пересборка образа их не стирала.
+      # Слева - каталог на хосте из .env, справа - фиксированный путь внутри контейнера.
+      - ${DOCKGE_DATA_DIR:-./data}:/app/data
+
+      # Каталог стеков.
+      # ВНИМАНИЕ, ошибка здесь пишет файлы не туда, куда вы думаете:
+      # 1. только абсолютный путь, никаких относительных;
+      # 2. путь слева и справа обязан совпадать - docker compose запускается внутри
+      #    контейнера, а выполняет его демон на хосте, и он получит ровно этот путь.
+      # Верно:   /my-stacks:/my-stacks
+      # Неверно: /docker:/my-stacks
+      - ${DOCKGE_STACKS_DIR:-/opt/stacks}:${DOCKGE_STACKS_DIR:-/opt/stacks}
+
+      # Приватные реестры: пробросьте файл авторизации docker login.
+      # - /root/.docker/:/root/.docker
+
+      # HTTPS без обратного прокси: сюда монтируются файлы из DOCKGE_SSL_*.
+      # - ./certs:/app/certs:ro
+    environment:
+      DOCKGE_PORT: ${DOCKGE_PORT:-5001}
+      # Путь внутри контейнера, на хосте каталог задан томом выше.
+      DOCKGE_DATA_DIR: /app/data
+      DOCKGE_STACKS_DIR: ${DOCKGE_STACKS_DIR:-/opt/stacks}
+      # Панель знает, что живет в контейнере, и подсказывает обновление через compose.
+      DOCKGE_IS_CONTAINER: "1"
+
+      # Владелец файлов стеков, которые создает панель. Пусто - root.
+      # Работает только когда заданы обе переменные.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
+
+      # Веб-консоль хоста выключена: она дает shell любому, кто вошел в панель.
+      DOCKGE_ENABLE_CONSOLE: ${DOCKGE_ENABLE_CONSOLE:-false}
+
+      # За обратным прокси нужны обе: первая заставляет верить заголовкам прокси,
+      # вторая помечает cookie сессии как Secure.
+      DOCKGE_TRUST_PROXY: ${DOCKGE_TRUST_PROXY:-}
+      DOCKGE_SECURE_COOKIES: ${DOCKGE_SECURE_COOKIES:-}
+      DOCKGE_TRUSTED_ORIGINS: ${DOCKGE_TRUSTED_ORIGINS:-}
+
+      # Секрет подписи сессий. Пусто - генерируется и хранится в базе.
+      DOCKGE_AUTH_SECRET: ${DOCKGE_AUTH_SECRET:-}
+
+      DOCKGE_HOSTNAME: ${DOCKGE_HOSTNAME:-}
+      DOCKGE_SSL_KEY: ${DOCKGE_SSL_KEY:-}
+      DOCKGE_SSL_CERT: ${DOCKGE_SSL_CERT:-}
+      DOCKGE_SSL_KEY_PASSPHRASE: ${DOCKGE_SSL_KEY_PASSPHRASE:-}
+      DOCKGE_HIDE_LOG: ${DOCKGE_HIDE_LOG:-}
+      # Отключает проверку origin у websocket. Пусто - проверка работает.
+      DOCKGE_WS_ORIGIN_CHECK: ${DOCKGE_WS_ORIGIN_CHECK:-}

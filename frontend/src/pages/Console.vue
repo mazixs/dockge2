@@ -5,32 +5,25 @@
 
             <Terminal v-if="enableConsole" class="terminal" :rows="20" mode="mainTerminal" name="console" :endpoint="endpoint"></Terminal>
 
-            <div v-else class="alert alert-warning shadow-box" role="alert">
-                <h4 class="alert-heading">{{ $t("Console is not enabled") }}</h4>
-                <i18n-t scope="global" keypath="ConsoleNotEnabledMSG1" tag="p">
-                    <template #docker><code>{{ $t('dockerCode') }}</code></template>
-                    <template #rm><code>{{ $t('rmCode') }}</code></template>
-                </i18n-t>
-
-                <i18n-t scope="global" keypath="ConsoleNotEnabledMSG2" tag="p">
-                    <template #rmRf>
-                        <code>{{ $t('rmRfCode') }}</code>
-                    </template>
-                </i18n-t>
-
-                <i18n-t scope="global" keypath="ConsoleNotEnabledMSG3" tag="p">
-                    <template #envVar>
-                        <code>{{ $t('envVarCode') }}</code>
-                    </template>
-                </i18n-t>
-            </div>
+            <!-- Консоль выключена: экран объясняет, почему её нет и чем она включается -->
+            <EmptyState
+                v-else
+                class="console-off"
+                :title="$t('consoleDisabledTitle')"
+                :hint="$t('consoleDisabledHint')"
+            >
+                <router-link to="/settings">{{ $t("openSettings") }}</router-link>
+            </EmptyState>
         </div>
     </transition>
 </template>
 
 <script>
+import EmptyState from "../components/EmptyState.vue";
+
 export default {
     components: {
+        EmptyState,
     },
     data() {
         return {
@@ -58,5 +51,13 @@ export default {
 <style scoped lang="scss">
 .terminal {
     height: 410px;
+}
+
+// Пустой экран занимает место терминала, поэтому и выглядит как панель, а не
+// как предупреждение поверх страницы
+.console-off {
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel);
+    background-color: var(--surface-panel);
 }
 </style>

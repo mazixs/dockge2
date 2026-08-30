@@ -22,7 +22,7 @@
                     <button v-else class="btn btn-sm btn-normal" :disabled="processing" @click="run('stopStack')">{{ $t("stopStack") }}</button>
                     <button class="btn btn-sm btn-normal" :disabled="processing" @click="run('restartStack')">{{ $t("restartStack") }}</button>
                     <!-- Обновление - главное действие открытого стека, поэтому акцент на нём -->
-                    <button class="btn btn-sm btn-primary" :disabled="processing" @click="run('updateStack')">{{ updateLabel }}</button>
+                    <button class="btn btn-sm btn-primary" :disabled="processing" @click="openUpdatePreview">{{ updateLabel }}</button>
 
                     <BDropdown right :text="$t('moreActions')" variant="normal" size="sm">
                         <BDropdownItem @click="openLogs">
@@ -38,6 +38,49 @@
                             <font-awesome-icon icon="trash" class="me-1" />{{ $t("deleteStack") }}
                         </BDropdownItem>
                     </BDropdown>
+                </div>
+            </div>
+
+            <!-- Предпросмотр обновления: что известно до запуска. Ничего не тронуто -->
+            <div v-if="preview || previewLoading" class="preview">
+                <div class="preview-head">
+                    <span class="preview-title">{{ $t("updatePreviewTitle") }}</span>
+                    <button class="row-action" type="button" :title="$t('cancel')" :aria-label="$t('cancel')" @click="preview = null">
+                        <font-awesome-icon icon="times" />
+                    </button>
+                </div>
+
+                <p v-if="previewLoading" class="preview-line">{{ $t("updatePreviewCheck") }}…</p>
+
+                <template v-else-if="preview">
+                    <p class="preview-line">{{ previewSourceLine }}</p>
+
+                    <dl class="preview-images">
+                        <template v-for="item in preview.images" :key="item.image">
+                            <dt>{{ item.image }}</dt>
+                            <dd :class="{ newer: item.newer === true }">{{ imageVerdict(item) }}</dd>
+                        </template>
+                    </dl>
+
+                    <p class="preview-line faint">{{ $t("updatePreviewSteps") }}</p>
+
+                    <div class="preview-actions">
+                        <button class="btn btn-sm btn-primary" :disabled="processing" @click="runUpdate">{{ $t("updatePreviewRun") }}</button>
+                        <button class="btn btn-sm btn-normal" type="button" @click="preview = null">{{ $t("cancel") }}</button>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Выполнение: идут секунды, видно каждый контейнер, и это можно прервать -->
+            <div v-if="running" class="running" role="status">
+                <div class="running-head">
+                    <span><i class="dot attention" aria-hidden="true"></i>{{ $t("deployRunningFor", [ runElapsed ]) }}</span>
+                    <button class="btn btn-sm btn-normal" type="button" @click="abort">{{ $t("abortRunning") }}</button>
+                </div>
+
+                <div v-for="service in services" :key="service.name" class="running-row">
+                    <span class="running-name">{{ service.name }}</span>
+                    <span class="running-what">{{ progressLabel(service) }}</span>
                 </div>
             </div>
 
@@ -208,6 +251,14 @@ export default {
             statusReadAt: 0,
             /** Секунды с последнего замера, пересчитываются раз в секунду */
             statusAgeSeconds: 0,
+            /** Предпросмотр обновления: null пока его не просили */
+            preview: null,
+            previewLoading: false,
+            /** Имя выполняющейся команды, пусто когда ничего не идёт */
+            running: "",
+            /** Сколько секунд идёт команда */
+            runElapsed: 0,
+            runTimer: null,
             /** Выбранное окно доступности в часах */
             windowHours: 24,
             /** Доступность выбранного окна, приходит отдельным запросом */
@@ -293,6 +344,25 @@ export default {
             }
 
             return parts.join(" · ");
+        },
+
+        /** Что предпросмотр говорит про каталог стека */
+        previewSourceLine() {
+            const source = this.preview?.source;
+
+            if (!source || source.kind !== "git") {
+                return this.$t("updatePreviewLocal");
+            }
+
+            if (source.dirty) {
+                return this.$t("updatePreviewGitDirty");
+            }
+
+            if (typeof source.behind === "number" && source.behind > 0) {
+                return this.$t("updatePreviewGitBehind", [ source.behind ]);
+            }
+
+            return this.$t("updatePreviewGitClean");
         },
 
         /** Надпись кнопки обновления: отставание в Git называется прямо на кнопке */
@@ -492,6 +562,7 @@ export default {
     unmounted() {
         clearTimeout(this.statusTimer);
         clearInterval(this.ageTimer);
+        clearInterval(this.runTimer);
         this.leaveLogsUnlessDocked(this.stackName, this.endpoint);
     },
     methods: {
@@ -588,17 +659,130 @@ export default {
         },
 
         /**
+         * Открыть предпросмотр обновления: спросить сервер, что он знает до запуска
+         * @returns {void}
+         */
+        openUpdatePreview() {
+            this.previewLoading = true;
+            this.preview = null;
+
+            this.$root.emitAgent(this.endpoint, "stackUpdatePreview", this.stackName, (res) => {
+                this.previewLoading = false;
+
+                if (!res?.ok) {
+                    this.$root.toastRes(res);
+                    return;
+                }
+
+                this.preview = { source: res.source,
+                    images: res.images ?? [] };
+            });
+        },
+
+        /**
+         * Запустить обновление после предпросмотра
+         * @returns {void}
+         */
+        runUpdate() {
+            this.preview = null;
+            this.run("updateStack");
+        },
+
+        /**
+         * Прервать выполняющуюся команду стека
+         * @returns {void}
+         */
+        abort() {
+            this.$root.emitAgent(this.endpoint, "abortCompose", this.stackName, (res) => {
+                this.$root.toastRes(res);
+            });
+        },
+
+        /**
+         * Слово о том, что сейчас с сервисом: во время выполнения важно не состояние
+         * вообще, а то, чего именно ждём
+         * @param {object} service Сервис с его контейнерами
+         * @returns {string} Что происходит
+         */
+        progressLabel(service) {
+            const instances = service.instances ?? [];
+
+            if (instances.length === 0) {
+                return this.$t("serviceQueued");
+            }
+
+            if (instances.some((instance) => instance.health === "starting")) {
+                return this.$t("serviceWaitingHealth");
+            }
+
+            if (instances.every((instance) => instance.health === "healthy")) {
+                return this.$t("serviceHealthy");
+            }
+
+            if (instances.some((instance) => instance.state === "created")) {
+                return this.$t("serviceQueued");
+            }
+
+            return this.stateLabel(service);
+        },
+
+        /**
+         * Что известно про один образ: новее, актуален или ответа нет
+         * @param {object} item Ответ предпросмотра по образу
+         * @returns {string} Вывод словами
+         */
+        imageVerdict(item) {
+            if (item.newer === true) {
+                return this.$t("updatePreviewNewer");
+            }
+
+            if (item.newer === false) {
+                return this.$t("updatePreviewCurrent");
+            }
+
+            return item.reason === "notPulled"
+                ? this.$t("updatePreviewUnknownNotPulled")
+                : this.$t("updatePreviewUnknownRegistry");
+        },
+
+        /**
          * Действие над стеком одним событием агента
          * @param {string} event Имя события
          * @returns {void}
          */
         run(event) {
             this.processing = true;
+            this.startRunClock(event);
+
             this.$root.emitAgent(this.endpoint, event, this.stackName, (res) => {
                 this.processing = false;
+                this.stopRunClock();
                 this.$root.toastRes(res);
                 this.requestServiceStatus();
             });
+        },
+
+        /**
+         * Пока команда идёт, секунды считаются, а состояние опрашивается чаще:
+         * прогресс имеет смысл только пока он живой
+         * @param {string} event Имя события
+         * @returns {void}
+         */
+        startRunClock(event) {
+            this.running = event;
+            this.runElapsed = 0;
+            clearInterval(this.runTimer);
+
+            this.runTimer = setInterval(() => {
+                this.runElapsed += 1;
+                this.requestServiceStatus();
+            }, 2000);
+        },
+
+        stopRunClock() {
+            this.running = "";
+            clearInterval(this.runTimer);
+            this.runTimer = null;
         },
 
         /**
@@ -935,6 +1119,111 @@ export default {
 }
 
 .faint {
+    color: var(--text-faint);
+}
+
+// Предпросмотр обновления: спокойная панель, ничего не запущено
+.preview {
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-panel);
+    background-color: var(--surface-panel);
+    padding: var(--gap-sm) var(--gap-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+}
+
+.preview-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.preview-title {
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+}
+
+.preview-line {
+    margin: 0;
+    font-size: var(--text-sm);
+
+    &.faint {
+        color: var(--text-faint);
+        font-size: var(--text-xs);
+    }
+}
+
+.preview-images {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 2px var(--gap-sm);
+    margin: 0;
+    font-size: var(--text-xs);
+
+    dt {
+        font-family: var(--font-mono);
+        color: var(--text-muted);
+        overflow-wrap: anywhere;
+    }
+
+    dd {
+        margin: 0;
+        color: var(--text-faint);
+        white-space: nowrap;
+
+        // Новее в реестре - повод нажать «Обновить», поэтому это заметно
+        &.newer {
+            color: var(--state-attention);
+        }
+    }
+}
+
+.preview-actions {
+    display: flex;
+    gap: var(--gap-xs);
+    margin-top: var(--gap-xs);
+}
+
+// Выполнение: секунды идут, каждый контейнер виден, команду можно прервать
+.running {
+    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
+    border-radius: var(--radius-panel);
+    padding: var(--gap-sm) var(--gap-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+
+    .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 6px;
+        border-radius: var(--radius-pill);
+        background-color: var(--state-attention);
+    }
+}
+
+.running-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gap-sm);
+    font-size: var(--text-sm);
+}
+
+.running-row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--gap-sm);
+    font-size: var(--text-xs);
+}
+
+.running-name {
+    font-weight: 500;
+}
+
+.running-what {
     color: var(--text-faint);
 }
 
