@@ -4,33 +4,20 @@
         class="item"
         :class="{ 'dim': !stack.isManagedByDockge, 'fresh': isFresh }"
     >
-        <!-- Стек, агент и источник: одна строка, как в таблице -->
-        <div class="who">
+        <!-- Навигатор: имя и одна мета-строка. Подробности живут в рабочей области -->
+        <div class="line">
             <Uptime :stack="stack" :compact="true" :dot-only="true" />
             <span class="name">{{ stackName }}</span>
-            <span class="agent">{{ agentLabel }}</span>
-            <span class="source" :class="`source-${sourceKind}`" :title="sourceTitle">{{ sourceLabel }}</span>
             <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
         </div>
 
-        <!-- Сервисы: точка и имя, лишние сворачиваются в «+N», но не исчезают -->
-        <div class="services">
-            <span
-                v-for="service in shownServices" :key="service.name"
-                class="service" :class="`state-${service.state}`"
-                :title="serviceTitle(service)"
-            >
-                <i class="dot" aria-hidden="true"></i>{{ service.name }}
-            </span>
-            <span v-if="hiddenServices > 0" class="more" :title="hiddenServiceNames">+{{ hiddenServices }}</span>
-            <span v-if="services.length === 0" class="more">{{ $t("noServicesYet") }}</span>
+        <div class="meta">
+            <span v-if="agentLabel !== $t('thisServer')" class="agent">{{ agentLabel }}</span>
+            <span class="services-count">{{ $t("serviceCount", services.length) }}</span>
+            <span class="dot-sep" aria-hidden="true">·</span>
+            <span class="availability" :class="`verdict-${availabilityVerdict}`" :title="availabilityTitle">{{ availabilityLabel }}</span>
+            <span v-if="updatesPending" class="updates" :title="updatesTitle">{{ updatesLabel }}</span>
         </div>
-
-        <!-- Доступность: процент только там, где наблюдений хватает на вывод -->
-        <div class="availability" :class="`verdict-${availabilityVerdict}`" :title="availabilityTitle">{{ availabilityLabel }}</div>
-
-        <!-- Обновления: только то, что известно чтением, без догадок про реестр -->
-        <div class="updates" :class="{ pending: updatesPending }" :title="updatesTitle">{{ updatesLabel }}</div>
     </router-link>
 </template>
 
@@ -209,17 +196,26 @@ export default {
                 return this.$t("availabilityClean");
             }
 
+            if (data.verdict === "degraded" && data.incidents === 0) {
+                // Доля упала не из-за сбоя, а из-за остановки: «0 сбоев» было бы враньём
+                return formatPercent(data.ratio, this.$i18n.locale, true);
+            }
+
             if (data.verdict === "degraded") {
-                const percent = formatPercent(data.ratio, this.$i18n.locale);
+                const percent = formatPercent(data.ratio, this.$i18n.locale, true);
                 return `${percent} · ${this.$t("availabilityIncidents", data.incidents)}`;
             }
 
             return this.$t("availabilityNoData");
         },
 
-        /** Почему сказано «мало данных»: сколько наблюдений на самом деле есть */
+        /** Почему сказано «мало данных» или почему доля меньше единицы без сбоев */
         availabilityTitle() {
             const data = this.availability;
+
+            if (data?.verdict === "degraded" && data.incidents === 0) {
+                return this.$t("availabilityPartlyStopped");
+            }
 
             if (!data || data.verdict !== "noData") {
                 return "";
@@ -267,12 +263,8 @@ export default {
 // Специфичность a.item намеренная: правило перебивает наследие общего слоя
 // независимо от порядка подключения файлов
 a.item {
-    display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(130px, max-content) minmax(80px, max-content);
-    align-items: center;
-    gap: var(--gap-md);
-    min-height: var(--row-height);
-    padding: 0 var(--gap-md);
+    display: block;
+    padding: var(--gap-sm) var(--gap-md);
     border-bottom: 1px solid var(--line-hair);
     border-left: 2px solid transparent;
     text-decoration: none;
@@ -304,10 +296,10 @@ a.item {
     }
 }
 
-.who {
+.line {
     display: flex;
     align-items: center;
-    gap: var(--gap-sm);
+    gap: var(--gap-xs);
     min-width: 0;
 }
 
@@ -318,103 +310,41 @@ a.item {
     text-overflow: ellipsis;
 }
 
-.agent {
+// Мета-строка: сколько сервисов и что с доступностью - этого хватает,
+// чтобы выбрать стек, не открывая его
+.meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 14px;
     font-size: var(--text-xs);
     color: var(--text-faint);
     white-space: nowrap;
-}
-
-// Технические значения набираются моношрифтом: их читают, а не проглядывают
-.source {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    border: 1px solid var(--line-hair);
-    border-radius: var(--radius-chip);
-    padding: 0 5px;
-    white-space: nowrap;
-}
-
-.services {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-sm);
-    min-width: 0;
     overflow: hidden;
 }
 
-.service {
-    --chip-state: var(--state-unknown);
-
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
+.agent {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    white-space: nowrap;
-
-    .dot {
-        width: 6px;
-        height: 6px;
-        border-radius: var(--radius-pill);
-        background-color: var(--chip-state);
-        flex: none;
-    }
-
-    &.state-running {
-        --chip-state: var(--state-running);
-    }
-
-    &.state-attention {
-        --chip-state: var(--state-attention);
-    }
-
-    &.state-stopped {
-        --chip-state: var(--state-stopped);
-    }
-
-    &.state-unknown {
-        --chip-state: var(--state-unknown);
-    }
 }
 
-.more {
-    font-size: var(--text-xs);
-    color: var(--text-faint);
-    white-space: nowrap;
+.dot-sep {
+    color: var(--line-control);
 }
 
-// Доступность: сбой заметен, «мало данных» не притворяется зелёным
 .availability {
-    justify-self: end;
-    font-size: var(--text-xs);
-    color: var(--text-faint);
-    white-space: nowrap;
-
-    &.verdict-clean {
-        color: var(--text-muted);
-    }
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     &.verdict-degraded {
         color: var(--state-attention);
     }
 }
 
+// Отставание в Git - повод открыть стек, поэтому оно видно и в навигаторе
 .updates {
-    justify-self: end;
+    margin-left: auto;
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-faint);
-    white-space: nowrap;
-
-    // Отставание - повод нажать «Обновить», поэтому оно заметнее остального
-    &.pending {
-        color: var(--state-attention);
-        border: 1px solid color-mix(in srgb, var(--state-attention) 40%, transparent);
-        border-radius: var(--radius-chip);
-        padding: 0 5px;
-    }
+    color: var(--state-attention);
 }
 
 .fresh-badge {
@@ -424,22 +354,5 @@ a.item {
     border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
     border-radius: var(--radius-chip);
     padding: 0 5px;
-}
-
-// Узкий экран: строка складывается в две, доступность уходит под имя
-@media (max-width: 1100px) {
-    a.item {
-        grid-template-columns: minmax(0, 1fr) minmax(80px, max-content);
-        padding: var(--gap-sm) var(--gap-md);
-    }
-
-    .services {
-        grid-column: 1 / -1;
-    }
-
-    .availability {
-        justify-self: start;
-        grid-column: 1;
-    }
 }
 </style>

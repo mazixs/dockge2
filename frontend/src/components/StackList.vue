@@ -27,14 +27,6 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Заголовок колонок: что означает каждая часть строки -->
-            <div class="columns" aria-hidden="true">
-                <span>{{ $t("columnStack") }}</span>
-                <span>{{ $t("columnServices") }}</span>
-                <span class="right">{{ $t("columnAvailability") }}</span>
-                <span class="right">{{ $t("columnUpdates") }}</span>
-            </div>
         </div>
 
         <div ref="stackList" class="stack-list" :class="{ scrollbar: scrollbar }" :style="stackListStyle">
@@ -437,18 +429,22 @@ export default {
     padding: 0 var(--gap-md) var(--gap-sm);
 }
 
+// Счётчик в фильтре мельче подписи: он уточняет, а не спорит с ней
+.filter .count {
+    font-size: var(--text-xs);
+}
+
+// Узкая колонка: поиск строкой, фильтры под ним
 .header-top {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--gap-md);
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--gap-sm);
 }
 
 .search-wrapper {
     display: flex;
     align-items: center;
-    flex: 1 1 220px;
     min-width: 0;
 
     form {
@@ -518,20 +514,6 @@ export default {
     }
 }
 
-// Заголовок колонок повторяет сетку строки, поэтому подписи стоят над своими данными
-.columns {
-    display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(130px, max-content) minmax(80px, max-content);
-    gap: var(--gap-md);
-    padding: var(--gap-sm) var(--gap-md) 0;
-    font-size: var(--text-xs);
-    color: var(--text-faint);
-
-    .right {
-        justify-self: end;
-    }
-}
-
 .stack-list {
     &.scrollbar {
         overflow-y: auto;
@@ -575,12 +557,5 @@ export default {
         border-bottom: 1px solid var(--line-hair);
     }
 
-    .columns {
-        grid-template-columns: minmax(0, 1fr) minmax(80px, max-content);
-
-        span:nth-child(2), span:nth-child(3) {
-            display: none;
-        }
-    }
 }
 </style>

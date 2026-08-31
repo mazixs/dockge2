@@ -16,6 +16,9 @@ test("доля превращается в процент с одним знак
     assert.equal(formatPercent(0.942, "en"), "94.2%");
     assert.equal(formatPercent(0.942, "ru"), "94,2%");
     assert.equal(formatPercent(1, "en"), "100%");
+    // Доступность округляется вниз: простой был, значит «100%» писать нельзя
+    assert.equal(formatPercent(0.9996, "en", true), "99.9%");
+    assert.equal(formatPercent(0.9996, "en"), "100%");
     // Доли нет - и процента нет, а не «0%»
     assert.equal(formatPercent(null), "");
     assert.equal(formatPercent(undefined), "");

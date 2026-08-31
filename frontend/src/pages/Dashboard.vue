@@ -55,9 +55,11 @@ export default {
     margin: 0 auto;
 }
 
+// Навигатор узкий, работа широкая: действия, таблица сервисов и доступность
+// живут справа, и раньше они жались в 400 px, пока список забирал всю ширину
 .dashboard {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-columns: 320px minmax(0, 1fr);
     gap: var(--gap-lg);
     padding-bottom: var(--gap-lg);
 
@@ -71,9 +73,8 @@ export default {
     min-width: 0;
 }
 
-// Ниже 1300 px инспектор не влезает рядом со списком из четырёх колонок,
-// поэтому колонки складываются одна под другой
-@media (max-width: 1300px) {
+// На узком экране навигатор и работа складываются одна под другой
+@media (max-width: 1000px) {
     .dashboard {
         grid-template-columns: minmax(0, 1fr);
     }

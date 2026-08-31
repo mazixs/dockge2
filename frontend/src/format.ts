@@ -14,12 +14,16 @@
  * @param locale Язык интерфейса
  * @returns Например «94,2%», пустая строка если доли нет
  */
-export function formatPercent(ratio : number | null | undefined, locale = "en") : string {
+export function formatPercent(ratio : number | null | undefined, locale = "en", floor = false) : string {
     if (typeof ratio !== "number") {
         return "";
     }
 
-    return `${(ratio * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
+    // Доступность вниз, а не по правилам округления: 99,96% не имеет права
+    // превратиться в «100%», когда простой был
+    const percent = floor ? Math.floor(ratio * 1000) / 10 : ratio * 100;
+
+    return `${percent.toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
 }
 
 /** Перевод с поддержкой множественного числа, как его даёт vue-i18n */
