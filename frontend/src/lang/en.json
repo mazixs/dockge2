@@ -269,7 +269,7 @@
     "justNow": "just now",
     "moreFlags": "{0} more flags",
     "hideFlags": "Hide flags",
-    "flagsAllCarried": "All {0} flags were carried over",
+    "flagsAllCarried": "{count} flag carried over | all {count} flags carried over",
     "flagOutcome_carried": "carried",
     "flagOutcome_review": "check",
     "flagOutcome_dropped": "dropped",
@@ -394,5 +394,7 @@
     "serviceWaitingHealth": "waiting for the health check",
     "serviceQueued": "queued",
     "serviceHealthy": "healthy",
-    "deployStepsRunning": "Config check, then up with pull and health wait"
+    "deployStepsRunning": "Config check, then up with pull and health wait",
+    "usageColumn": "Usage",
+    "availabilityPartlyStopped": "part of the window the stack was stopped"
 }

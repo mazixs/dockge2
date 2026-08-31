@@ -1,130 +1,74 @@
 <template>
     <transition ref="tableContainer" name="slide-fade" appear>
-        <div v-if="$route.name === 'DashboardHome'">
-            <h1 class="mb-3">
-                {{ $t("home") }}
-            </h1>
+        <div v-if="$route.name === 'DashboardHome'" class="home">
+            <!-- Главный сценарий панели: вставить compose и развернуть.
+                 Тот же бриф, что в слое, только встроенный - счётчики и кнопка
+                 не повторяются, они уже есть в шапке -->
+            <CreateStackSheet :inline="true" />
 
-            <div class="row first-row">
-                <!-- Left -->
-                <div class="col-md-7">
-                    <!-- Stats -->
-                    <div class="shadow-box big-padding text-center mb-4">
-                        <div class="row">
-                            <div class="col">
-                                <h3>{{ $t("active") }}</h3>
-                                <span class="num active">{{ activeNum }}</span>
-                            </div>
-                            <div class="col">
-                                <h3>{{ $t("attention") }}</h3>
-                                <span class="num attention">{{ attentionNum }}</span>
-                            </div>
-                            <div class="col">
-                                <h3>{{ $t("exited") }}</h3>
-                                <span class="num exited">{{ exitedNum }}</span>
-                            </div>
-                            <div class="col">
-                                <h3>{{ $t("inactive") }}</h3>
-                                <span class="num inactive">{{ inactiveNum }}</span>
-                            </div>
-                            <!-- Without this an unreachable Docker shows four zeroes and no reason -->
-                            <div v-if="unknownNum > 0" class="col">
-                                <h3>{{ $t("unknown") }}</h3>
-                                <span class="num unknown">{{ unknownNum }}</span>
-                            </div>
-                        </div>
+            <!-- Агенты: их нужно где-то добавлять, но это не главное на экране -->
+            <details class="agents">
+                <summary>{{ $t("dockgeAgent", 2) }} <span class="count">{{ $root.agentCount }}</span></summary>
+
+                <div v-for="(agentItem, endpoint) in $root.agentList" :key="endpoint" class="agent">
+                    <template v-if="$root.agentStatusList[endpoint]">
+                        <span v-if="$root.agentStatusList[endpoint] === 'online'" class="badge bg-primary me-2">{{ $t("agentOnline") }}</span>
+                        <span v-else-if="$root.agentStatusList[endpoint] === 'offline'" class="badge bg-danger me-2">{{ $t("agentOffline") }}</span>
+                        <span v-else class="badge bg-secondary me-2">{{ $t($root.agentStatusList[endpoint]) }}</span>
+
+                        <span v-if="endpoint === '' && agentItem.name === ''" class="me-2">{{ $t("thisServer") }}</span>
+                        <span v-else-if="agentItem.name === ''" class="me-2">{{ endpoint }}</span>
+                        <span v-else class="me-2">{{ agentItem.name }}</span>
+                    </template>
+
+                    <font-awesome-icon v-if="endpoint !== ''" class="ms-2 remove-agent" icon="trash" @click="showRemoveAgentDialog[agentItem.url] = !showRemoveAgentDialog[agentItem.url]" />
+
+                    <BModal v-model="showRemoveAgentDialog[agentItem.url]" :okTitle="$t('removeAgent')" okVariant="danger" @ok="removeAgent(agentItem.url)">
+                        <p>{{ agentItem.url }}</p>
+                        {{ $t("removeAgentMsg") }}
+                    </BModal>
+                </div>
+
+                <button v-if="!showAgentForm" class="btn btn-sm btn-normal" @click="showAgentForm = !showAgentForm">{{ $t("addAgent") }}</button>
+
+                <form v-if="showAgentForm" class="agent-form" @submit.prevent="addAgent">
+                    <div class="mb-2">
+                        <label for="url" class="form-label">{{ $t("dockgeURL") }}</label>
+                        <input id="url" v-model="agent.url" type="url" class="form-control" required placeholder="http://">
                     </div>
 
-                    <!-- Развертывание живет в слое поверх списка: одно поле принимает
-                         и compose, и docker run, поэтому отдельного блока здесь нет -->
-                    <button class="btn btn-primary mb-4" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
-                        {{ $t("deployStackAction") }}
+                    <div class="mb-2">
+                        <label for="username" class="form-label">{{ $t("Username") }}</label>
+                        <input id="username" v-model="agent.username" type="text" class="form-control" required>
+                    </div>
+
+                    <div class="mb-2">
+                        <label for="password" class="form-label">{{ $t("Password") }}</label>
+                        <input id="password" v-model="agent.password" type="password" class="form-control" required autocomplete="new-password">
+                    </div>
+
+                    <div class="mb-2">
+                        <label for="name" class="form-label">{{ $t("Friendly Name") }}</label>
+                        <input id="name" v-model="agent.name" type="text" class="form-control">
+                    </div>
+
+                    <button type="submit" class="btn btn-sm btn-primary" :disabled="connectingAgent">
+                        <template v-if="connectingAgent">{{ $t("connecting") }}</template>
+                        <template v-else>{{ $t("connect") }}</template>
                     </button>
-                    <p class="text-muted">{{ $t("pasteAnywhereHint") }}</p>
-                </div>
-                <!-- Right -->
-                <div class="col-md-5">
-                    <!-- Agent List -->
-                    <div class="shadow-box big-padding">
-                        <h4 class="mb-3">{{ $t("dockgeAgent", 2) }} <span class="badge bg-warning" style="font-size: 12px;">beta</span></h4>
-
-                        <div v-for="(agentItem, endpoint) in $root.agentList" :key="endpoint" class="mb-3 agent">
-                            <!-- Agent Status -->
-                            <template v-if="$root.agentStatusList[endpoint]">
-                                <span v-if="$root.agentStatusList[endpoint] === 'online'" class="badge bg-primary me-2">{{ $t("agentOnline") }}</span>
-                                <span v-else-if="$root.agentStatusList[endpoint] === 'offline'" class="badge bg-danger me-2">{{ $t("agentOffline") }}</span>
-                                <span v-else class="badge bg-secondary me-2">{{ $t($root.agentStatusList[endpoint]) }}</span>
-                            </template>
-
-                            <!-- Agent Display Name -->
-                            <template v-if="$root.agentStatusList[endpoint]">
-                                <span v-if="endpoint === '' && agentItem.name === ''" class="badge bg-secondary me-2">Current</span>
-                                <span v-else-if="agentItem.name === ''" :href="agentItem.url" class="me-2">{{ endpoint }}</span>
-                                <span v-else :href="agentItem.url" class="me-2">{{ agentItem.name }}</span>
-                            </template>
-
-                            <!-- Edit Name  -->
-                            <font-awesome-icon v-if="agentItem.name !== ''" icon="pen-to-square" @click="showEditAgentNameDialog[agentItem.name] = !showEditAgentNameDialog[agentItem.Name]" />
-
-                            <!-- Edit Dialog -->
-                            <BModal v-model="showEditAgentNameDialog[agentItem.name]" :no-close-on-backdrop="true" :close-on-esc="true" :okTitle="$t('Update Name')" okVariant="info" @ok="updateName(agentItem.url, agentItem.updatedName)">
-                                <label for="Update Name" class="form-label">Current value: {{ $t(agentItem.name) }}</label>
-                                <input id="updatedName" v-model="agentItem.updatedName" type="text" class="form-control" optional>
-                            </BModal>
-
-                            <!-- Remove Button -->
-                            <font-awesome-icon v-if="endpoint !== ''" class="ms-2 remove-agent" icon="trash" @click="showRemoveAgentDialog[agentItem.url] = !showRemoveAgentDialog[agentItem.url]" />
-
-                            <!-- Remove Agent Dialog -->
-                            <BModal v-model="showRemoveAgentDialog[agentItem.url]" :okTitle="$t('removeAgent')" okVariant="danger" @ok="removeAgent(agentItem.url)">
-                                <p>{{ agentItem.url }}</p>
-                                {{ $t("removeAgentMsg") }}
-                            </BModal>
-                        </div>
-
-                        <button v-if="!showAgentForm" class="btn btn-normal" @click="showAgentForm = !showAgentForm">{{ $t("addAgent") }}</button>
-
-                        <!-- Add Agent Form -->
-                        <form v-if="showAgentForm" @submit.prevent="addAgent">
-                            <div class="mb-3">
-                                <label for="url" class="form-label">{{ $t("dockgeURL") }}</label>
-                                <input id="url" v-model="agent.url" type="url" class="form-control" required placeholder="http://">
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="username" class="form-label">{{ $t("Username") }}</label>
-                                <input id="username" v-model="agent.username" type="text" class="form-control" required>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="password" class="form-label">{{ $t("Password") }}</label>
-                                <input id="password" v-model="agent.password" type="password" class="form-control" required autocomplete="new-password">
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="name" class="form-label">{{ $t("Friendly Name") }}</label>
-                                <input id="name" v-model="agent.name" type="text" class="form-control" optional>
-                            </div>
-
-                            <button type="submit" class="btn btn-primary" :disabled="connectingAgent">
-                                <template v-if="connectingAgent">{{ $t("connecting") }}</template>
-                                <template v-else>{{ $t("connect") }}</template>
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
+                </form>
+            </details>
         </div>
     </transition>
     <router-view ref="child" />
 </template>
 
 <script>
-import { statusNameShort } from "../../../common/util-common";
+import CreateStackSheet from "../components/CreateStackSheet.vue";
 
 export default {
     components: {
-
+        CreateStackSheet,
     },
     props: {
         calculatedHeight: {
@@ -155,24 +99,6 @@ export default {
                 updatedName: "",
             }
         };
-    },
-
-    computed: {
-        activeNum() {
-            return this.getStatusNum("active");
-        },
-        inactiveNum() {
-            return this.getStatusNum("inactive");
-        },
-        exitedNum() {
-            return this.getStatusNum("exited");
-        },
-        attentionNum() {
-            return this.getStatusNum("attention");
-        },
-        unknownNum() {
-            return this.getStatusNum("unknown");
-        },
     },
 
     watch: {
@@ -245,18 +171,6 @@ export default {
             });
         },
 
-        getStatusNum(statusName) {
-            let num = 0;
-
-            for (let stackName in this.$root.completeStackList) {
-                const stack = this.$root.completeStackList[stackName];
-                if (statusNameShort(stack.status) === statusName) {
-                    num += 1;
-                }
-            }
-            return num;
-        },
-
         /**
          * Updates the displayed records when a new important heartbeat arrives.
          * @param {object} heartbeat - The heartbeat object received.
@@ -320,47 +234,48 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
+.home {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+    max-width: 1100px;
+}
 
-// Счётчики состояний: цвет берётся из состояний системы, а не из палитры Bootstrap,
-// поэтому «активно» не может оказаться синим
-.num {
-    font-size: var(--text-xl);
-    font-weight: 600;
-    display: block;
+// Агенты свёрнуты: на главной они нужны редко, а место нужно полю вставки
+.agents {
+    border-top: 1px solid var(--line-hair);
+    padding-top: var(--gap-sm);
 
-    &.active {
-        color: var(--state-running);
+    summary {
+        font-size: var(--text-sm);
+        color: var(--text-faint);
+        cursor: pointer;
+        min-height: var(--control-height);
+        display: flex;
+        align-items: center;
+        gap: var(--gap-sm);
+
+        &:focus-visible {
+            outline: var(--focus-ring);
+            outline-offset: var(--focus-offset);
+        }
     }
 
-    &.exited {
-        color: var(--state-failed);
-    }
-
-    &.attention {
-        color: var(--state-attention);
-    }
-
-    &.unknown {
-        color: var(--state-unknown);
+    .count {
+        font-family: var(--font-mono);
     }
 }
 
-.shadow-box {
-    padding: 20px;
+.agent {
+    display: flex;
+    align-items: center;
+    margin: var(--gap-sm) 0;
+    font-size: var(--text-sm);
 }
 
-table {
-    font-size: var(--text-base);
-
-    tr {
-        transition: all ease-in-out 0.2ms;
-    }
-
-    @media (max-width: 550px) {
-        table-layout: fixed;
-        overflow-wrap: break-word;
-    }
+.agent-form {
+    max-width: 420px;
+    margin-top: var(--gap-sm);
 }
 
 .remove-agent {
@@ -371,11 +286,4 @@ table {
         color: var(--state-failed);
     }
 }
-
-.agent {
-    a {
-        text-decoration: none;
-    }
-}
-
 </style>

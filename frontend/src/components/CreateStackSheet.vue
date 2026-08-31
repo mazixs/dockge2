@@ -1,12 +1,14 @@
 <template>
-    <div v-if="visible" class="sheet-layer">
-        <div class="scrim" @click="requestClose"></div>
+    <!-- Один и тот же бриф в двух местах: слоем поверх списка и встроенным в
+         рабочую область главной. Логика одна, разная только оболочка -->
+    <div v-if="inline || visible" class="sheet-layer" :class="{ inline }">
+        <div v-if="!inline" class="scrim" @click="requestClose"></div>
 
         <section
             ref="sheet"
             class="sheet"
-            role="dialog"
-            aria-modal="true"
+            :role="inline ? undefined : 'dialog'"
+            :aria-modal="inline ? undefined : 'true'"
             :aria-labelledby="titleId"
             @keydown.esc.stop="requestClose"
             @keydown.tab="keepFocusInside"
@@ -16,7 +18,7 @@
                 <span v-if="!deploying && converted" class="head-note">{{ targetSummary }}</span>
                 <span v-if="deploying" class="head-note"><i class="dot attention"></i> {{ $t("deployRunning", [ elapsed ]) }}</span>
                 <button
-                    v-if="!deploying"
+                    v-if="!deploying && !inline"
                     class="sheet-close"
                     type="button"
                     :aria-label="$t('Close')"
@@ -67,7 +69,7 @@
                         </template>
                         <template v-else>
                             <i class="dot running"></i>
-                            <span>{{ $t("flagsAllCarried", [ report.carried.length ]) }}</span>
+                            <span>{{ $t("flagsAllCarried", report.carried.length) }}</span>
                         </template>
                         <button
                             v-if="restFlagCount > 0"
@@ -153,6 +155,13 @@ let recogniseTimer = null;
 let elapsedTimer = null;
 
 export default {
+    props: {
+        /** Встроенный режим: бриф стоит прямо в рабочей области, а не поверх списка */
+        inline: {
+            type: Boolean,
+            default: false,
+        },
+    },
     data() {
         return {
             visible: false,
@@ -267,7 +276,7 @@ export default {
          * @returns {void}
          */
         requestClose() {
-            if (this.deploying) {
+            if (this.deploying || this.inline) {
                 return;
             }
 
@@ -479,7 +488,13 @@ export default {
                 }
 
                 this.$root.markStackFresh(name, FRESH_MS);
-                this.close();
+
+                // Встроенный бриф не закрывается: он просто снова становится пустым
+                if (this.inline) {
+                    this.reset();
+                } else {
+                    this.close();
+                }
                 this.reset();
                 this.$root.toastRes(res);
                 this.$router.push(this.endpoint ? `/stack/${name}/${this.endpoint}` : `/stack/${name}`);
@@ -521,6 +536,36 @@ export default {
     position: fixed;
     inset: 0;
     z-index: 1055;
+}
+
+// Встроенный бриф: без притемнения, без фиксации на весь экран
+.sheet-layer.inline {
+    position: static;
+    padding: 0;
+    display: block;
+
+    .sheet {
+        position: static;
+        transform: none;
+        width: 100%;
+        max-width: 100%;
+        max-height: none;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: none;
+    }
+
+    header {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    footer {
+        padding-left: 0;
+        padding-right: 0;
+        border-bottom: 0;
+    }
 }
 
 // Притемнение приходит токеном --scrim: у фильтра backdrop-filter в светлой
@@ -821,6 +866,7 @@ textarea {
 footer {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--gap-sm);
     padding: var(--gap-md) var(--gap-lg);
     border-top: 1px solid var(--line-hair);

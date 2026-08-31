@@ -269,7 +269,7 @@
     "justNow": "только что",
     "moreFlags": "Еще {0} флагов",
     "hideFlags": "Скрыть флаги",
-    "flagsAllCarried": "Все {0} флагов перенесены",
+    "flagsAllCarried": "{count} флаг перенесён | все {count} флага перенесены | все {count} флагов перенесены",
     "flagOutcome_carried": "перенесен",
     "flagOutcome_review": "проверьте",
     "flagOutcome_dropped": "не перенесен",
@@ -394,5 +394,7 @@
     "serviceWaitingHealth": "ждём проверку здоровья",
     "serviceQueued": "в очереди",
     "serviceHealthy": "здоров",
-    "deployStepsRunning": "Проверка конфигурации, затем подъём с вытягиванием образов и ожиданием готовности"
+    "deployStepsRunning": "Проверка конфигурации, затем подъём с вытягиванием образов и ожиданием готовности",
+    "usageColumn": "Расход",
+    "availabilityPartlyStopped": "часть окна стек был остановлен"
 }

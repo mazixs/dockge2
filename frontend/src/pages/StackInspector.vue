@@ -8,7 +8,7 @@
                     <h1>{{ stackName }}</h1>
                 </div>
 
-                <div class="facts">
+                <div class="facts" role="list">
                     <span class="fact" :title="stackPath">{{ agentLabel }}<span v-if="stackPath" class="path"> · {{ stackPath }}</span></span>
                     <span class="fact">{{ $t("serviceCount", services.length) }}</span>
                     <span v-if="registryLabel" class="fact">{{ registryLabel }}</span>
@@ -117,49 +117,67 @@
                 {{ $t("stackNotManagedByDockgeMsg") }}
             </div>
 
-            <!-- Сервисы: имя слева, расход справа. Действия появляются при наведении
-                 и по фокусу с клавиатуры, чтобы строка оставалась спокойной -->
+            <!-- Сервисы: таблица с местом под образ, порты и расход -->
             <div v-if="services.length > 0" class="services">
-                <div class="services-title">{{ $t("servicesCaption", [ statusAge ]) }}</div>
-
-                <div v-for="service in services" :key="service.name" class="service-row">
-                    <span class="service-name">
-                        <i class="dot" :class="`state-${serviceState(service)}`" aria-hidden="true"></i>
-                        {{ service.name }}
-                        <span v-if="service.isOneShot" class="one-shot">{{ $t("oneShotService") }}</span>
-                    </span>
-
-                    <span class="service-usage">{{ usageLabel(service) || stateLabel(service) }}</span>
-
-                    <span class="service-actions">
-                        <button
-                            class="row-action" type="button" :title="$t('openLogs')"
-                            :aria-label="`${$t('openLogs')}: ${service.name}`" @click="openLogs"
-                        >
-                            <font-awesome-icon icon="stream" />
-                        </button>
-                        <button
-                            v-if="service.running" class="row-action" type="button" :title="$t('openShell')"
-                            :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)"
-                        >
-                            <font-awesome-icon icon="terminal" />
-                        </button>
-                        <button
-                            v-if="!service.running" class="row-action" type="button" :title="$t('startStack')"
-                            :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`"
-                            @click="runService('startService', service.name)"
-                        >
-                            <font-awesome-icon icon="play" />
-                        </button>
-                        <button
-                            v-else class="row-action" type="button" :title="$t('restartStack')"
-                            :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`"
-                            @click="runService('restartService', service.name)"
-                        >
-                            <font-awesome-icon icon="rotate" />
-                        </button>
-                    </span>
-                </div>
+                <table>
+                    <caption>{{ $t("servicesCaption", [ statusAge ]) }}</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ $t("serviceColumn") }}</th>
+                            <th scope="col">{{ $t("stateColumn") }}</th>
+                            <th scope="col">{{ $t("imageColumn") }}</th>
+                            <th scope="col">{{ $t("portsColumn") }}</th>
+                            <th scope="col">{{ $t("usageColumn") }}</th>
+                            <th scope="col"><span class="visually-hidden">{{ $t("actionsColumn") }}</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="service in services" :key="service.name" class="service-row">
+                            <th scope="row" class="service-name">
+                                <i class="dot" :class="`state-${serviceState(service)}`" aria-hidden="true"></i>
+                                {{ service.name }}
+                                <span v-if="service.isOneShot" class="one-shot">{{ $t("oneShotService") }}</span>
+                            </th>
+                            <td class="service-state">{{ stateLabel(service) }}</td>
+                            <td class="service-image">{{ service.image || "—" }}</td>
+                            <td class="service-ports">
+                                <template v-if="service.ports.length > 0">
+                                    <a v-for="port in service.ports" :key="port.display" :href="port.url" target="_blank" rel="noreferrer">{{ port.display }}</a>
+                                </template>
+                                <span v-else class="faint">—</span>
+                            </td>
+                            <td class="service-usage">{{ usageLabel(service) || "—" }}</td>
+                            <td class="service-actions">
+                                <button
+                                    class="row-action" type="button" :title="$t('openLogs')"
+                                    :aria-label="`${$t('openLogs')}: ${service.name}`" @click="openLogs"
+                                >
+                                    <font-awesome-icon icon="stream" />
+                                </button>
+                                <button
+                                    v-if="service.running" class="row-action" type="button" :title="$t('openShell')"
+                                    :aria-label="`${$t('openShell')} ${service.name}`" @click="openShell(service.name)"
+                                >
+                                    <font-awesome-icon icon="terminal" />
+                                </button>
+                                <button
+                                    v-if="!service.running" class="row-action" type="button" :title="$t('startStack')"
+                                    :disabled="processing" :aria-label="`${$t('startStack')} ${service.name}`"
+                                    @click="runService('startService', service.name)"
+                                >
+                                    <font-awesome-icon icon="play" />
+                                </button>
+                                <button
+                                    v-else class="row-action" type="button" :title="$t('restartStack')"
+                                    :disabled="processing" :aria-label="`${$t('restartStack')} ${service.name}`"
+                                    @click="runService('restartService', service.name)"
+                                >
+                                    <font-awesome-icon icon="rotate" />
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
 
             <p v-else-if="!processing" class="faint">{{ $t("noServicesInFile") }}</p>
@@ -415,19 +433,28 @@ export default {
                 return this.$t("availabilityCleanWindow", [ this.$t(`availabilityWindow${this.windowHours}`) ]);
             }
 
+            if (data.verdict === "degraded" && data.incidents === 0) {
+                // Доля упала не из-за сбоя, а из-за остановки: «0 сбоев» было бы враньём
+                return formatPercent(data.ratio, this.$i18n.locale, true);
+            }
+
             if (data.verdict === "degraded") {
-                return `${formatPercent(data.ratio, this.$i18n.locale)} · ${this.$t("availabilityIncidents", data.incidents)}`;
+                return `${formatPercent(data.ratio, this.$i18n.locale, true)} · ${this.$t("availabilityIncidents", data.incidents)}`;
             }
 
             return this.$t("availabilityNoData");
         },
 
-        /** Приписка: сколько окна вообще наблюдалось - без неё процент выглядит полным */
+        /** Приписка: почему доля такая - без неё процент выглядит необъяснимым */
         availabilityNote() {
             const data = this.availabilityData;
 
             if (!data) {
                 return "";
+            }
+
+            if (data.verdict === "degraded" && data.incidents === 0) {
+                return this.$t("availabilityPartlyStopped");
             }
 
             if (data.verdict === "noData") {
@@ -903,18 +930,27 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// Рабочая область не растягивается на весь монитор: колонки таблицы держатся
+// вместе, иначе взгляду приходится ходить через пустоту от имени к расходу
 .inspector {
     display: flex;
     flex-direction: column;
     gap: var(--gap-md);
+    max-width: 1100px;
 }
 
+// Шапка в одну строку: имя и состояние слева, действия справа, чипы под ними
 .head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap-sm);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-areas:
+        "identity actions"
+        "facts actions";
+    align-items: start;
+    gap: var(--gap-xs) var(--gap-md);
 
     .identity {
+        grid-area: identity;
         display: flex;
         align-items: center;
         gap: var(--gap-sm);
@@ -922,17 +958,23 @@ export default {
     }
 
     h1 {
-        font-size: var(--text-lg);
+        font-size: var(--text-xl);
         font-weight: 600;
         margin: 0;
         overflow-wrap: anywhere;
     }
 
+    .facts {
+        grid-area: facts;
+    }
+
     .actions {
+        grid-area: actions;
         display: flex;
         align-items: center;
         gap: var(--gap-xs);
         flex-wrap: wrap;
+        justify-content: flex-end;
     }
 }
 
@@ -1003,44 +1045,59 @@ export default {
     }
 }
 
-// Сервисы: пары «имя - расход», разделители тонкие, действия проявляются
+// Таблица сервисов: это главный инструмент открытого стека, поэтому ей отдана
+// вся ширина рабочей области
 .services {
-    border-top: 1px solid var(--line-hair);
-}
+    overflow-x: auto;
 
-.services-title {
-    padding: var(--gap-sm) 0 var(--gap-xs);
-    font-size: var(--text-xs);
-    color: var(--text-faint);
-}
+    // Таблица по содержимому, а не по ширине экрана
+    table {
+        width: auto;
+        min-width: min(100%, 640px);
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+        font-variant-numeric: tabular-nums;
+    }
 
-.service-row {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-sm);
-    min-height: var(--row-height-dense);
-    border-top: 1px solid var(--line-hair);
+    caption {
+        caption-side: top;
+        padding: 0 0 var(--gap-xs);
+        text-align: left;
+        font-size: var(--text-xs);
+        color: var(--text-faint);
+    }
 
-    &:hover .service-actions, &:focus-within .service-actions {
+    th, td {
+        text-align: left;
+        height: var(--row-height-dense);
+        padding: 0 var(--gap-md) 0 0;
+        border-bottom: 1px solid var(--line-hair);
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    thead th {
+        color: var(--text-faint);
+        font-weight: 500;
+        font-size: var(--text-xs);
+        border-bottom-color: var(--line-control);
+    }
+
+    tbody tr:hover .service-actions, tbody tr:focus-within .service-actions {
         opacity: 1;
     }
 }
 
 .service-name {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-weight: 600;
+    color: var(--text-strong);
 
     .dot {
+        display: inline-block;
         width: 7px;
         height: 7px;
+        margin-right: 6px;
         border-radius: var(--radius-pill);
-        flex: none;
         background-color: var(--state-unknown);
 
         &.state-running {
@@ -1057,23 +1114,33 @@ export default {
     }
 
     .one-shot {
+        margin-left: 6px;
         font-weight: 400;
         font-size: var(--text-xs);
         color: var(--text-faint);
     }
 }
 
-.service-usage {
-    margin-left: auto;
+.service-state {
+    color: var(--text-muted);
+}
+
+.service-image, .service-usage {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-muted);
-    white-space: nowrap;
+}
+
+.service-ports a {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    margin-right: var(--gap-sm);
 }
 
 .service-actions {
-    display: flex;
-    gap: 2px;
+    text-align: right;
+    padding-right: 0;
+    padding-left: var(--gap-md);
     opacity: 0;
     transition: opacity ease-in-out 0.1s;
 }
@@ -1237,9 +1304,9 @@ export default {
 
 .availability-head {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
-    gap: var(--gap-sm);
+    gap: var(--gap-md);
 }
 
 .availability-title {

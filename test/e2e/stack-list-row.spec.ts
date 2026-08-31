@@ -8,17 +8,11 @@ test.describe("строка списка стеков", () => {
         const row = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
         await expect(row).toBeVisible();
 
-        // Где живёт стек и откуда взялся его каталог
-        await expect(row.locator(".agent")).toHaveText(/this server|этот сервер/i);
-        await expect(row.locator(".source")).toBeVisible();
-
-        // Сервисы названы поимённо, а не числом
-        const services = row.locator(".service");
-        await expect(services.filter({ hasText: "app" })).toBeVisible();
-        await expect(services.filter({ hasText: "init" })).toBeVisible();
-
-        // Колонка обновлений присутствует и ничего не выдумывает
-        await expect(row.locator(".updates")).toBeVisible();
+        // Навигатор держит одну мета-строку: сколько сервисов и что с доступностью.
+        // Подробности - образы, порты, расход - живут в рабочей области справа
+        const meta = row.locator(".meta");
+        await expect(meta).toContainText(/2 service|2 сервиса/i);
+        await expect(meta.locator(".availability")).toBeVisible();
     });
 
     test("фильтр сужает список и остаётся в адресе", async ({ page }) => {
@@ -68,7 +62,7 @@ test.describe("строка списка стеков", () => {
         await expect(attention.getByRole("button", { name: /restart init|перезапустить init/i })).toBeVisible();
 
         // Подпись раздела честно говорит, насколько свежие числа
-        await expect(page.locator(".inspector .services-title")).toHaveText(/state as of|состояние на/i);
+        await expect(page.locator(".inspector .services caption")).toHaveText(/state as of|состояние на/i);
     });
 });
 
@@ -78,14 +72,14 @@ test.describe("доступность", () => {
 
         // Стек работает третьи сутки: окно закрыто целиком и без сбоев
         const healthy = page.locator(".item", { hasText: E2E_STACK_NAME });
-        await expect(healthy.locator(".availability")).toHaveText(/no incidents|без сбоев/i);
+        await expect(healthy.locator(".meta .availability")).toHaveText(/no incidents|без сбоев/i);
 
         // Стек со сбоем: доля и число случаев, а не «почти работает».
         // Случаев может быть больше одного: сервер записывает и свои наблюдения,
         // поэтому проверяется правило, а не конкретное число.
         const degraded = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
-        await expect(degraded.locator(".availability")).toHaveText(/9\d[.,]\d%/);
-        await expect(degraded.locator(".availability")).toHaveText(/\d+ incident|\d+ сбо/i);
+        await expect(degraded.locator(".meta .availability")).toHaveText(/9\d[.,]\d%/);
+        await expect(degraded.locator(".meta .availability")).toHaveText(/\d+ incident|\d+ сбо/i);
     });
 
     test("остановленный стек показывает срок, а не долю", async ({ page }) => {
@@ -93,8 +87,8 @@ test.describe("доступность", () => {
 
         // У стека нет запущенных контейнеров: процент был бы бессмыслицей
         const stopped = page.locator(".item", { hasText: E2E_FILES_STACK });
-        await expect(stopped.locator(".availability")).toHaveText(/stopped .* ago|остановлен .* назад/i);
-        await expect(stopped.locator(".availability")).not.toHaveText(/%/);
+        await expect(stopped.locator(".meta .availability")).toHaveText(/stopped .* ago|остановлен .* назад/i);
+        await expect(stopped.locator(".meta .availability")).not.toHaveText(/%/);
     });
 
     test("инспектор считает доступность по выбранному окну", async ({ page }) => {
