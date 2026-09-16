@@ -306,14 +306,14 @@ export default {
 
 .user-you {
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: var(--weight-regular);
 }
 
 .user-login {
     color: var(--text-faint);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .user-role {

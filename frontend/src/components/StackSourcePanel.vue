@@ -73,13 +73,13 @@ export default {
 .git-version { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); padding-bottom: var(--gap-sm); border-bottom: 1px solid var(--line-hair); color: var(--text-muted); font-size: var(--text-sm); flex-wrap: wrap; }
 .git-version > * { display: inline-flex; align-items: center; gap: var(--gap-xs); }
 .git-version code { padding: 0; background: none; color: var(--text-muted); }
-.source-note, .directory { margin: 0; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--line-xs); overflow-wrap: anywhere; }
+.source-note, .directory { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--line-sm); overflow-wrap: anywhere; }
 .directory { font-family: var(--font-mono); }
 .source-status { display: flex; align-items: center; gap: var(--gap-sm); font-size: var(--text-sm); color: var(--state-running); }
 .source-status.unknown { color: var(--text-muted); }
 .source-status.changed { color: var(--state-attention); }
 .source-body > .btn { display: flex; align-items: center; justify-content: center; gap: var(--gap-sm); width: 100%; margin-top: var(--gap-xs); font-size: var(--text-sm); }
-.git-freshness { font-size: var(--text-xs); }
+.git-freshness { font-size: var(--text-sm); }
 .git-freshness summary { cursor: pointer; color: var(--text-muted); }
 .git-freshness summary:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .git-freshness .source-note { margin-top: var(--gap-xs); }

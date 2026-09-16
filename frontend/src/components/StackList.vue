@@ -421,11 +421,11 @@ export default {
 .header-top { display: flex; flex-direction: column; gap: var(--gap-sm); }
 .search-wrapper { position: relative; }
 .search-wrapper form { min-width: 0; }
-.search-input { width: 100%; padding-left: 32px; font-size: var(--text-xs); background: var(--surface-base); border-color: var(--line-hair); }
-.search-icon { position: absolute; left: 0; top: 0; width: 32px; height: 100%; display: grid; place-items: center; color: var(--text-faint); border: 0; background: none; font-size: var(--text-xs); }
-.filter-disclosure summary { color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; padding: var(--gap-xs); }
+.search-input { width: 100%; padding-left: 32px; font-size: var(--text-sm); background: var(--surface-base); border-color: var(--line-hair); }
+.search-icon { position: absolute; left: 0; top: 0; width: 32px; height: 100%; display: grid; place-items: center; color: var(--text-faint); border: 0; background: none; font-size: var(--text-sm); }
+.filter-disclosure summary { color: var(--text-muted); font-size: var(--text-sm); cursor: pointer; padding: var(--gap-xs); }
 .filters { display: flex; flex-direction: column; gap: var(--gap-xs); padding-top: var(--gap-xs); }
-.filter { display: flex; align-items: center; gap: var(--gap-xs); min-height: var(--control-height); padding: 0 var(--gap-sm); border: 1px solid var(--line-hair); border-radius: var(--radius-control); background: none; color: var(--text-muted); font-size: var(--text-xs); }
+.filter { display: flex; align-items: center; gap: var(--gap-xs); min-height: var(--control-height); padding: 0 var(--gap-sm); border: 1px solid var(--line-hair); border-radius: var(--radius-control); background: none; color: var(--text-muted); font-size: var(--text-sm); }
 .filter.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text-strong); }
 
 // Заготовка строки: та же сетка, что у настоящего стека, поэтому список не
@@ -453,7 +453,7 @@ export default {
 }
 .filter .count { margin-left: auto; }
 .stack-list { overflow-y: auto; height: auto !important; }
-.agent-select { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); background: none; border: 0; color: var(--text-faint); font-size: var(--text-xs); }
+.agent-select { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); background: none; border: 0; color: var(--text-faint); font-size: var(--text-sm); }
 .agent-select .count { margin-left: auto; }
 @media (max-width: 800px) {
     .search-icon { width: 44px; }

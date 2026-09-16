@@ -1364,7 +1364,7 @@ export default {
     display: flex;
     flex-wrap: wrap;
     gap: var(--gap-xs);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-faint);
 }
 
@@ -1442,7 +1442,7 @@ export default {
     thead th {
         color: var(--text-faint);
         font-weight: var(--weight-medium);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         border-bottom-color: var(--line-control);
     }
 
@@ -1479,25 +1479,25 @@ export default {
     .one-shot {
         margin-left: var(--gap-sm);
         font-weight: var(--weight-regular);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         color: var(--text-faint);
     }
 }
 
-.service-state :deep(.state-chip) { font-size: var(--text-xs); }
+.service-state :deep(.state-chip) { font-size: var(--text-sm); }
 .service-state {
     color: var(--text-muted);
 }
 
 .service-image, .service-usage {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-muted);
 }
 
 .service-ports a {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     margin-right: var(--gap-sm);
 }
 
@@ -1571,7 +1571,7 @@ export default {
 }
 
 .preview-title {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-faint);
 }
 
@@ -1581,7 +1581,7 @@ export default {
 
     &.faint {
         color: var(--text-faint);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
     }
 }
 
@@ -1590,7 +1590,7 @@ export default {
     grid-template-columns: minmax(0, 1fr) max-content;
     gap: 2px var(--gap-sm);
     margin: 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 
     dt {
         font-family: var(--font-mono);
@@ -1632,7 +1632,7 @@ export default {
 }
 
 .availability-title {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-faint);
 }
 
@@ -1648,7 +1648,7 @@ export default {
     border: 1px solid var(--line-hair);
     border-radius: var(--radius-chip);
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 
     &.on {
         border-color: var(--accent);
@@ -1674,7 +1674,7 @@ export default {
     }
 
     .note {
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         color: var(--text-faint);
     }
 
@@ -1735,7 +1735,7 @@ export default {
     .image-line {
         display: block;
         font-family: var(--font-mono);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
     }
 }
 </style>
@@ -1784,7 +1784,7 @@ export default {
 .services th, .services td { padding-top: var(--gap-md); padding-bottom: var(--gap-md); }
 .services-heading { display: flex; align-items: center; gap: var(--gap-md); padding-bottom: var(--gap-md); color: var(--text-muted); }
 .services-heading strong { font-size: var(--text-md); color: var(--text-strong); }
-.services-checked { margin-left: auto; font-size: var(--text-xs); }
+.services-checked { margin-left: auto; font-size: var(--text-sm); }
 .table-options { position: relative; }
 .table-options summary { cursor: pointer; list-style: none; min-width: var(--control-height); text-align: center; }
 .table-options label { display: flex; align-items: center; gap: var(--gap-sm); padding: var(--gap-sm); white-space: nowrap; }
@@ -1803,9 +1803,9 @@ summary:focus-visible, .usage-toggle:focus-visible { outline: var(--focus-ring);
 .menu-action svg { color: var(--text-muted); }
 .service-image summary { cursor: pointer; }
 .full-image { display: block; user-select: all; white-space: normal; overflow-wrap: anywhere; margin-top: var(--gap-sm); }
-.services td.service-image { max-width: 210px; min-width: 100px; white-space: normal; overflow-wrap: anywhere; font-size: var(--text-xs); }
+.services td.service-image { max-width: 210px; min-width: 100px; white-space: normal; overflow-wrap: anywhere; font-size: var(--text-sm); }
 .service-actions { min-width: 80px; opacity: 1; }
-.service-usage { white-space: normal; font-size: var(--text-xs); }
+.service-usage { white-space: normal; font-size: var(--text-sm); }
 .availability { padding: var(--gap-md) 0 0; border: 0; border-top: 1px solid var(--line-hair); border-radius: 0; background: transparent; }
 .availability-body { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: var(--gap-xs) var(--gap-md); margin-top: var(--gap-sm); }
 .availability-body .verdict { font-size: var(--text-sm); }

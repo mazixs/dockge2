@@ -545,7 +545,7 @@ export default defineComponent({
     padding: 0;
     margin: 0;
     width: 100%;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 
     // Имя экземпляра, его состояние и причина стоят в строку с одним шагом
     li {

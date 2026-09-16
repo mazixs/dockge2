@@ -1183,7 +1183,7 @@ h1 {
 
 .form-text {
     margin: 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-faint);
 }
 

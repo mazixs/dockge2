@@ -67,7 +67,7 @@ export default {
 .add-stack { background: transparent; border: none; color: var(--text-muted); min-width: var(--control-height); min-height: var(--control-height); }
 .sidebar-footer { margin-top: auto; padding: var(--gap-lg) var(--gap-sm) 0; display: flex; flex-direction: column; gap: var(--gap-md); }
 .sidebar-footer .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--gap-sm); min-height: var(--field-height); }
-.sidebar-footer span { display: flex; align-items: center; justify-content: center; gap: var(--gap-sm); color: var(--text-faint); font-size: var(--text-xs); text-align: center; }
+.sidebar-footer span { display: flex; align-items: center; justify-content: center; gap: var(--gap-sm); color: var(--text-faint); font-size: var(--text-sm); text-align: center; }
 @media (min-width: 801px) {
     .list-column { position: sticky; top: 0; height: calc(100dvh - var(--header-height)); overflow: hidden; }
     .list-column :deep(.stack-list) { min-height: 0; max-height: none; flex: 1; }

@@ -292,7 +292,7 @@ export default {
     border-radius: var(--radius-chip);
     background-color: var(--surface-raised);
     color: var(--text-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     line-height: var(--line-sm);
 
     &.bound {
@@ -304,7 +304,7 @@ export default {
 
 .meta {
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 }
 
 .remove {
@@ -341,8 +341,8 @@ export default {
 .services-label {
     flex: 1 0 100%;
     color: var(--text-muted);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .secret-services {
