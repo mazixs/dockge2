@@ -11,6 +11,7 @@ const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_FILES = 1000;
 const PREVIEW_MS = 10 * 60 * 1000;
+const MAX_BRANCHES = 500;
 
 type FileState = { bytes: Buffer; mode: number };
 type FileTree = Map<string, FileState>;
@@ -257,6 +258,28 @@ export class StackGitWorkflow {
         } finally {
             this.busy.delete(dir);
         }
+    }
+
+    /** List the branches a remote advertises so the name does not have to be typed from memory.
+     * Read-only and outside any stack directory: nothing is cloned and nothing is written.
+     * @param repository Remote address supplied by the user
+     * @returns Branch names as the remote reports them, capped to a readable list
+     */
+    async listBranches(repository: string): Promise<string[]> {
+        validateGitRepository(repository, this.options.allowLocalTransport);
+        const output = await this.git(os.tmpdir(), [ "ls-remote", "--heads", "--refs", "--", repository ]);
+        const names: string[] = [];
+        for (const line of output.toString("utf-8").split("\n")) {
+            const ref = line.split("\t")[1]?.trim();
+            if (!ref?.startsWith("refs/heads/")) {
+                continue;
+            }
+            const name = ref.slice("refs/heads/".length);
+            if (name && !names.includes(name)) {
+                names.push(name);
+            }
+        }
+        return names.slice(0, MAX_BRANCHES);
     }
 
     /** Clone into a private staging directory, validate, then publish without overwriting. */

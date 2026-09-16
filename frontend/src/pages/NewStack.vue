@@ -42,7 +42,15 @@
                     <div class="field-pair">
                         <div class="field">
                             <label for="git-branch" class="form-label">{{ $t("gitUiBranch") }}</label>
-                            <input id="git-branch" v-model="branch" type="text" class="form-control" placeholder="main" autocomplete="off" spellcheck="false" required>
+                            <select v-if="branches.length" id="git-branch" v-model="branch" class="form-select">
+                                <option v-for="branchName in branches" :key="branchName" :value="branchName">{{ branchName }}</option>
+                            </select>
+                            <input v-else id="git-branch" v-model="branch" type="text" class="form-control" placeholder="main" autocomplete="off" spellcheck="false" required>
+                            <p class="form-text branch-line">
+                                <button v-if="!branches.length" class="btn btn-quiet btn-sm" type="button" :disabled="!canListBranches" @click="loadBranches">{{ branchesBusy ? $t("gitUiBranchesLoading") : $t("gitUiLoadBranches") }}</button>
+                                <button v-else class="btn btn-quiet btn-sm" type="button" @click="branches = []">{{ $t("gitUiBranchesTyped") }}</button>
+                                <span v-if="branchesFailure">{{ branchesFailure }}</span>
+                            </p>
                         </div>
                         <div class="field">
                             <label for="git-server" class="form-label">{{ $t("gitUiServer") }}</label>
@@ -128,6 +136,9 @@ export default {
             busy: false,
             uncertain: false,
             composeBusy: false,
+            branches: [],
+            branchesBusy: false,
+            branchesFailure: "",
             failure: "",
             result: null,
         };
@@ -140,6 +151,12 @@ export default {
         canCreate() {
             return this.$root.canManageStacks && !this.busy && !this.uncertain && this.sourceReady
                 && /^[a-z0-9][a-z0-9_-]*$/.test(this.name.trim()) && Boolean(this.composeFile.trim());
+        },
+        // Список веток запрашивается у чужого сервера, поэтому кнопка доступна
+        // только когда адрес уже разобран и выбранный агент на связи
+        canListBranches() {
+            return !this.branchesBusy && isSafeGitRepository(this.repository)
+                && this.$root.agentStatusList[this.endpoint] === "online";
         },
         // Дорожка шагов стоит над выбором источника, поэтому номер шага нужен
         // и для вставки Compose: там единственная форма, и второй шаг наступает
@@ -156,6 +173,16 @@ export default {
         },
     },
     watch: {
+        // Ветки принадлежат конкретному адресу: сменился адрес или сервер -
+        // прежний список больше ничего не описывает
+        repository() {
+            this.branches = [];
+            this.branchesFailure = "";
+        },
+        endpoint() {
+            this.branches = [];
+            this.branchesFailure = "";
+        },
         "$root.socketIO.connected"(connected) {
             if (!connected && this.busy) {
                 this.busy = false;
@@ -175,6 +202,29 @@ export default {
         selectTab(tab) {
             this.sourceTab = tab;
             this.$nextTick(() => document.getElementById(`new-${tab}-tab`)?.focus());
+        },
+        /** Ask the remote which branches it has, on request rather than while typing. */
+        loadBranches() {
+            if (!this.canListBranches) {
+                return;
+            }
+            this.branchesBusy = true;
+            this.branchesFailure = "";
+            this.$root.emitAgent(this.endpoint, "gitListBranches", this.repository.trim(), (res) => {
+                this.branchesBusy = false;
+                if (!res?.ok) {
+                    this.branchesFailure = res?.msg || this.$t("gitUiRequestFailed");
+                    return;
+                }
+                this.branches = res.branches || [];
+                if (!this.branches.length) {
+                    this.branchesFailure = this.$t("gitUiBranchesEmpty");
+                    return;
+                }
+                if (!this.branches.includes(this.branch)) {
+                    this.branch = this.branches[0];
+                }
+            });
         },
         /** Consume pasted source from memory, keeping it out of URL/history storage. */
         consumeSeed() {
@@ -384,6 +434,20 @@ export default {
 
     .done b {
         border-color: var(--state-running);
+    }
+}
+
+// Кнопка списка веток живет в строке подсказки под полем: это уточнение
+// поля, а не отдельное действие формы
+.branch-line {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    flex-wrap: wrap;
+
+    .btn {
+        padding: 0;
+        min-height: 0;
     }
 }
 

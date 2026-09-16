@@ -109,6 +109,22 @@ export class GitSocketHandler extends AgentSocketHandler {
                 callbackError(safeError(error), callback);
             }
         });
+        // Список веток - отдельное действие по кнопке, а не побочный эффект набора
+        // адреса: это сетевой запрос к чужому серверу, и делать его на каждое
+        // нажатие клавиши нельзя
+        agentSocket.on("gitListBranches", async (repository: unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (typeof repository !== "string" || !repository.trim()) {
+                    throw new StackGitError("Укажите адрес репозитория.");
+                }
+                const branches = await getStackGitWorkflow(server).listBranches(repository.trim());
+                callbackResult({ ok: true,
+                    branches }, callback);
+            } catch (error) {
+                callbackError(safeError(error), callback);
+            }
+        });
         agentSocket.on("gitPreviewUpdate", async (stackName: unknown, callback) => {
             try {
                 checkLogin(socket);
