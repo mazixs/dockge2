@@ -66,6 +66,28 @@ function rootApp() {
         methods: {
 
             /**
+             * Translate a message the server marked as translatable.
+             *
+             * The server marks every `Error` as translatable, but only the messages it
+             * writes itself are keys. A failure from Docker or from Node arrives as an
+             * English sentence that no catalogue contains, and `$t` hands such a string
+             * straight back. The result was an English sentence inside a Russian
+             * interface. Anything without a catalogue entry is therefore shown as the
+             * raw detail of a translated frame, so the reader at least gets told in
+             * their own language that something unexpected happened.
+             * @param {string} key Key or raw message from the server
+             * @param {object} values Named values of the key, if it has any
+             * @returns {string} Text for the toast
+             */
+            translateServerMessage(key : string, values? : Record<string, unknown>) : string {
+                if (!this.$te(key)) {
+                    return this.$t("unexpectedServerError", { detail: key });
+                }
+
+                return values ? this.$t(key, values) : this.$t(key);
+            },
+
+            /**
              * Show success or error toast dependant on response status code
              * @param {object} res Response object
              * @returns {void}
@@ -74,11 +96,9 @@ function rootApp() {
                 let msg = typeof res.msg === "string" ? res.msg : "";
                 if (res.msgi18n) {
                     if (res.msg && typeof res.msg === "object") {
-                        msg = res.msg.values
-                            ? this.$t(res.msg.key, res.msg.values)
-                            : this.$t(res.msg.key);
+                        msg = this.translateServerMessage(res.msg.key, res.msg.values);
                     } else if (res.msg) {
-                        msg = this.$t(res.msg);
+                        msg = this.translateServerMessage(res.msg);
                     }
                 }
 
@@ -94,7 +114,7 @@ function rootApp() {
              * @returns {void}
              */
             toastSuccess(msg : string) {
-                toast.success(this.$t(msg));
+                toast.success(this.translateServerMessage(msg));
             },
 
             /**
@@ -103,7 +123,7 @@ function rootApp() {
              * @returns {void}
              */
             toastError(msg : string) {
-                toast.error(this.$t(msg));
+                toast.error(this.translateServerMessage(msg));
             },
         },
         render: () => h(App),

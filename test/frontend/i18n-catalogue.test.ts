@@ -104,3 +104,69 @@ test("every language names itself in the switcher", () => {
         assert.notEqual(name, "", `${code}: languageName is empty`);
     }
 });
+
+/**
+ * Every source file of a directory tree, recursively
+ * @param dir Directory to walk
+ * @param extensions Extensions to keep, with the dot
+ * @returns Absolute paths
+ */
+function sourceFiles(dir : string, extensions : string[]) : string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+            return sourceFiles(full, extensions);
+        }
+
+        return extensions.some((ext) => entry.name.endsWith(ext)) ? [ full ] : [];
+    });
+}
+
+test("every $t() literal names a key that exists", () => {
+    const english = new Set(keysOf(catalogue("en")));
+    const misses : string[] = [];
+
+    for (const file of sourceFiles(path.join(process.cwd(), "frontend/src"), [ ".vue", ".ts" ])) {
+        const source = readFileSync(file, "utf-8");
+
+        for (const match of source.matchAll(/\$t\(\s*"([^"]+)"\s*(\)|,)/g)) {
+            const key = match[1]!;
+
+            if (!english.has(key)) {
+                misses.push(`${path.relative(process.cwd(), file)}: ${key}`);
+            }
+        }
+    }
+
+    // A key that does not exist is not an error anywhere: vue-i18n prints the key
+    // itself, in every language at once. `$t("Cancel")` next to a catalogue that
+    // spells the key `cancel` put an English word in front of every reader, and the
+    // catalogues agreed with each other the whole time
+    assert.deepEqual(misses, [], "$t() asks for a key en.json does not have");
+});
+
+test("the server sends keys, not sentences, to the toast", () => {
+    const english = new Set(keysOf(catalogue("en")));
+    const strays : string[] = [];
+
+    for (const dir of [ "backend/socket-handlers", "backend/agent-socket-handlers" ]) {
+        for (const file of sourceFiles(path.join(process.cwd(), dir), [ ".ts" ])) {
+            const source = readFileSync(file, "utf-8");
+
+            for (const match of source.matchAll(/\bmsg:\s*"([^"]+)"/g)) {
+                const value = match[1]!;
+
+                if (!english.has(value)) {
+                    strays.push(`${path.relative(process.cwd(), file)}: ${value}`);
+                }
+            }
+        }
+    }
+
+    // `callbackError` marks every message as translatable, so whatever a handler puts
+    // in `msg` reaches `$t`. A sentence assembled on the server - "Service x started" -
+    // has no key and cannot get one, and the reader sees English. Handlers name a key
+    // and pass the parts as values
+    assert.deepEqual(strays, [], "msg: is a sentence rather than a key of en.json");
+});

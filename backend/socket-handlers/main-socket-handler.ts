@@ -91,7 +91,8 @@ export class MainSocketHandler extends SocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Saved"
+                    msg: "Saved",
+                    msgi18n: true,
                 }, callback);
 
                 server.sendInfo(socket);

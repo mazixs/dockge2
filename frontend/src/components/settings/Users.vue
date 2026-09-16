@@ -38,7 +38,7 @@
                 <p class="form-text">{{ $t("authUsernameHint") }} {{ $t("usersRoleHint") }}</p>
                 <div class="actions">
                     <button class="btn btn-primary" :disabled="busy">{{ $t("Create") }}</button>
-                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("Cancel") }}</button>
+                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
                 </div>
             </form>
 
@@ -50,7 +50,7 @@
                 </div>
                 <div class="actions">
                     <button class="btn btn-primary" :disabled="busy">{{ $t("usersResetPassword") }}</button>
-                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("Cancel") }}</button>
+                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
                 </div>
             </form>
 
@@ -68,7 +68,7 @@
                 </label>
                 <div class="actions">
                     <button class="btn btn-primary" :disabled="busy">{{ $t("Save") }}</button>
-                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("Cancel") }}</button>
+                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
                 </div>
             </form>
 
@@ -76,7 +76,7 @@
                 <p class="form-text">{{ $t("usersDeleteHint", { name: selected?.username || selected?.email }) }}</p>
                 <div class="actions">
                     <button class="btn btn-danger" :disabled="busy" @click="remove">{{ $t("usersDelete") }}</button>
-                    <button class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("Cancel") }}</button>
+                    <button class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
                 </div>
             </div>
         </section>

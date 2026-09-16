@@ -138,7 +138,7 @@
 
                     <div class="actions">
                         <button class="btn btn-primary" :disabled="busy || !password || !selected.length">{{ $t(editing ? "mcpReduce" : "mcpCreate") }}</button>
-                        <button type="button" class="btn btn-normal" @click="cancelEdit">{{ $t("Cancel") }}</button>
+                        <button type="button" class="btn btn-normal" @click="cancelEdit">{{ $t("cancel") }}</button>
                     </div>
                 </form>
             </section>
@@ -236,7 +236,7 @@
 
                     <div class="actions">
                         <button class="btn btn-primary" :disabled="busy" @click="approve">{{ $t("mcpApprove") }}</button>
-                        <button class="btn btn-normal" @click="reviewed = null">{{ $t("Cancel") }}</button>
+                        <button class="btn btn-normal" @click="reviewed = null">{{ $t("cancel") }}</button>
                     </div>
                 </div>
             </section>
