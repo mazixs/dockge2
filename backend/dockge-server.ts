@@ -7,11 +7,14 @@ import packageJSON from "../package.json";
 import { log } from "./log";
 import * as socketIO from "socket.io";
 import express, { Express } from "express";
+import { mountMcp } from "./mcp-server";
 import { parse } from "ts-command-line-args";
 import https from "https";
 import http from "http";
 import { Router } from "./router";
 import { Socket } from "socket.io";
+import { authorizeSocketEvent, normalizeRole, viewerStackSummary } from "./auth-access";
+import { UsersSocketHandler } from "./socket-handlers/users-socket-handler";
 import { MainSocketHandler } from "./socket-handlers/main-socket-handler";
 import { SocketHandler } from "./socket-handler";
 import { Settings } from "./settings";
@@ -19,6 +22,9 @@ import checkVersion from "./check-version";
 import dayjs from "dayjs";
 import { isDev, LooseObject } from "../common/util-common";
 import { Arguments, Config, DockgeSocket, dropRevokedSessions } from "./util-server";
+import { GitSocketHandler } from "./agent-socket-handlers/git-socket-handler";
+import { StabilitySocketHandler } from "./agent-socket-handlers/stability-socket-handler";
+import { observeContainerStability } from "./stability";
 import { DockerSocketHandler } from "./agent-socket-handlers/docker-socket-handler";
 import expressStaticGzip from "express-static-gzip";
 import path from "path";
@@ -57,6 +63,7 @@ export class DockgeServer {
      */
     socketHandlerList : SocketHandler[] = [
         new MainSocketHandler(),
+        new UsersSocketHandler(),
         new ManageAgentSocketHandler(),
     ];
 
@@ -67,6 +74,8 @@ export class DockgeServer {
      */
     agentSocketHandlerList : AgentSocketHandler[] = [
         new DockerSocketHandler(),
+        new StabilitySocketHandler(),
+        new GitSocketHandler(),
         new TerminalSocketHandler(),
     ];
 
@@ -84,7 +93,7 @@ export class DockgeServer {
         // Catch unexpected errors here
         let unexpectedErrorHandler = (error : unknown) => {
             console.trace(error);
-            console.error("If you keep encountering errors, please report to https://github.com/louislam/dockge");
+            console.error("If you keep encountering errors, please report to https://github.com/mazixs/dockge2");
         };
         process.addListener("unhandledRejection", unexpectedErrorHandler);
         process.addListener("uncaughtException", unexpectedErrorHandler);
@@ -231,21 +240,41 @@ export class DockgeServer {
                 return;
             }
 
-            toNodeHandler(getAuth())(request, response).catch(next);
+            toNodeHandler(getAuth())(request, response)
+                .then(() => dropRevokedSessions(this.io.sockets.sockets.values() as Iterable<DockgeSocket>))
+                .catch(next);
         });
+
+        mountMcp(this);
 
         // Binding Routers
         for (const router of this.routerList) {
             this.app.use(router.create(this.app, this));
         }
 
-        // Static files
+        // Static files. Имя файла в /assets/ содержит хеш содержимого, поэтому
+        // ответ можно объявить неизменяемым: другое содержимое - другое имя, и
+        // браузер не переспрашивает про каждый файл при каждой загрузке
+        this.app.use("/assets", expressStaticGzip("frontend-dist/assets", {
+            enableBrotli: true,
+            serveStatic: {
+                immutable: true,
+                maxAge: "1y",
+            },
+        }));
+
+        // Все остальное - index.html, manifest.json, иконки - имя не меняет.
+        // Долгий срок оставил бы браузеру прежнюю версию после обновления панели
         this.app.use("/", expressStaticGzip("frontend-dist", {
             enableBrotli: true,
         }));
 
         // Universal Route Handler, must be at the end of all express routes.
         this.app.get("*", async (_request, response) => {
+            // index.html имени не меняет и ссылается на хешированные ассеты,
+            // поэтому браузер обязан спрашивать его заново: иначе после
+            // обновления панели он открыл бы старую страницу с мертвыми ссылками
+            response.set("Cache-Control", "no-cache");
             response.send(this.indexHTML);
         });
 
@@ -303,8 +332,44 @@ export class DockgeServer {
 
         this.io.on("connection", async (socket: Socket) => {
             let dockgeSocket = socket as DockgeSocket;
+            const identityReady = resolveSocketIdentity(socket.request.headers).then((identity) => {
+                dockgeSocket.userID = identity.userID ?? "";
+                dockgeSocket.userRole = identity.role ?? "viewer";
+                return identity;
+            });
             dockgeSocket.instanceManager = new AgentManager(dockgeSocket);
+            // Default deny at the transport boundary, including future handlers.
+            dockgeSocket.use(async (packet, next) => {
+                const [ event, ...args ] = packet;
+                if (event === "needsSetup") {
+                    next();
+                    return;
+                }
+                try {
+                    await identityReady;
+                    if (event === "agent") {
+                        if (typeof args[1] !== "string") {
+                            throw new Error("authPermissionDenied");
+                        }
+                        await authorizeSocketEvent(dockgeSocket, args[1], true);
+                    } else {
+                        await authorizeSocketEvent(dockgeSocket, event);
+                    }
+                    next();
+                } catch (error) {
+                    const callback = args[args.length - 1];
+                    if (typeof callback === "function") {
+                        callback({ ok: false,
+                            msg: error instanceof Error ? error.message : "authPermissionDenied",
+                            msgi18n: true });
+                    }
+                    // Do not call next: a denied packet must not reach its handler.
+                }
+            });
             dockgeSocket.emitAgent = (event : string, ...args : unknown[]) => {
+                if (!dockgeSocket.connected || (dockgeSocket.userRole === "viewer" && event !== "stackList")) {
+                    return;
+                }
                 let obj = args[0];
                 if (typeof(obj) === "object") {
                     let obj2 = obj as LooseObject;
@@ -359,13 +424,14 @@ export class DockgeServer {
 
             // Who this socket is comes from the session cookie of the handshake,
             // verified by better-auth. There is no login event on the socket any more.
-            const identity = await resolveSocketIdentity(socket.request.headers);
+            const identity = await identityReady;
 
             if (identity.userID) {
                 if (identity.autoLogin) {
                     log.info("auth", "Disabled Auth: acting as the owner account");
                 }
 
+                dockgeSocket.userRole = identity.role ?? "viewer";
                 await this.afterLogin(dockgeSocket, identity.userID);
 
                 if (identity.autoLogin) {
@@ -415,6 +481,9 @@ export class DockgeServer {
     async afterLogin(socket : DockgeSocket, userID : string) {
         socket.userID = userID;
         socket.join(userID);
+        socket.userRole = normalizeRole(socket.userRole);
+        socket.emit("authIdentity", { userID,
+            role: socket.userRole });
 
         this.sendInfo(socket);
 
@@ -467,14 +536,13 @@ export class DockgeServer {
             // Run every 10 seconds
             new Cron("*/10 * * * * *", {
                 protect: true,  // Enabled over-run protection.
-            }, () => {
-                //log.debug("server", "Cron job running");
-                this.observeStacks().catch((e) => log.error("observations", e));
-                this.sendStackList(true);
+            }, async () => {
+                await this.observeStacks().catch((e) => log.error("observations", e));
+                await this.sendStackList(true);
 
                 // A socket is identified once, during its handshake, so a session that
                 // was signed out or revoked elsewhere has to lose its open sockets here
-                dropRevokedSessions(this.io.sockets.sockets.values() as Iterable<DockgeSocket>)
+                await dropRevokedSessions(this.io.sockets.sockets.values() as Iterable<DockgeSocket>)
                     .catch((e) => log.error("auth", e));
             });
 
@@ -680,6 +748,7 @@ export class DockgeServer {
             endpoint: "",
             status: stack.status,
         })));
+        await observeContainerStability(stackList);
     }
 
     async sendStackList(useCache = false) {
@@ -702,7 +771,8 @@ export class DockgeServer {
                 let map : Map<string, object> = new Map();
 
                 for (let [ stackName, stack ] of stackList) {
-                    map.set(stackName, stack.toSimpleJSON(dockgeSocket.endpoint));
+                    const summary = stack.toSimpleJSON(dockgeSocket.endpoint);
+                    map.set(stackName, dockgeSocket.userRole === "viewer" ? viewerStackSummary(summary) : summary);
                 }
 
                 log.debug("server", "Send stack list to user: " + dockgeSocket.id + " (" + dockgeSocket.endpoint + ")");
@@ -805,6 +875,7 @@ export class DockgeServer {
             let socket = rawSocket as DockgeSocket;
             if ((!userID || socket.userID === userID) && socket.id !== currentSocketID) {
                 try {
+                    socket.instanceManager?.disconnectAll();
                     socket.emit("refresh");
                     socket.disconnect();
                 } catch (e) {

@@ -7,6 +7,10 @@ export class MainRouter extends Router {
         const router = express.Router();
 
         router.get("/", (req, res) => {
+            // Страница ссылается на хешированные ассеты и сама имени не меняет:
+            // без перепроверки браузер после обновления панели открыл бы старую
+            // разметку с мертвыми ссылками
+            res.set("Cache-Control", "no-cache");
             res.send(server.indexHTML);
         });
 

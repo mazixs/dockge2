@@ -15,18 +15,17 @@ services:
       dockerfile: docker/Base.Dockerfile
     image: dockge2-dev:latest
     working_dir: /app
-    # Зависимости ставим только когда тома с ними еще нет: обычный старт не должен
-    # ждать установку. npm run dev поднимает Vite и бэкенд вместе (concurrently).
-    # --ignore-scripts обязателен: в образе нет ни python, ни компилятора, а npm 11
-    # иначе пересобирает better-sqlite3 из исходников. Готовые бинарники для
-    # better-sqlite3 и node-pty лежат прямо в их пакетах (prebuilds/), так что
-    # собирать нечего.
+    # Обновляем зависимости при изменении lockfile или Node.js, сохраняя быстрый
+    # повторный запуск. Маркер пишется только после успешной установки.
     command:
       - bash
       - -c
       - |
-        if [ ! -x node_modules/.bin/vite ]; then
-          npm ci --ignore-scripts --no-audit --no-fund
+        expected="$$(sha256sum package-lock.json | cut -d ' ' -f 1)-$$(node -p 'process.version + "-" + process.platform + "-" + process.arch')"
+        installed="$$(cat node_modules/.dockge-install-stamp 2>/dev/null || true)"
+        if [ ! -x node_modules/.bin/vite ] || [ "$$installed" != "$$expected" ]; then
+          npm ci --ignore-scripts --no-audit --no-fund || exit $$?
+          printf '%s' "$$expected" > node_modules/.dockge-install-stamp
         fi
         exec npm run dev
     ports:
@@ -37,6 +36,7 @@ services:
     volumes:
       # Правки с хоста видны сразу, отсюда и hot reload.
       - .:/app
+      - ${DOCKGE_LOCAL_DATA_DIR:-./data}:/app/data
       # node_modules отдельным томом по двум причинам: монтирование репозитория иначе
       # закрыло бы каталог собой, а хостовые нативные модули (better-sqlite3, node-pty)
       # собраны под другую систему и внутри контейнера не запустятся.
@@ -51,6 +51,7 @@ services:
       NODE_ENV: development
       # Каталог данных внутри примонтированного репозитория, база остается в ./data.
       DOCKGE_DATA_DIR: /app/data
+      DOCKGE_MCP_DELEGATION_CONFIG: ${DOCKGE_MCP_DELEGATION_CONFIG:-}
       DOCKGE_STACKS_DIR: ${DOCKGE_LOCAL_STACKS_DIR:-/tmp/dockge2-stacks}
       # Локально консоль хоста удобна, в production она выключена.
       DOCKGE_ENABLE_CONSOLE: "true"
