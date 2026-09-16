@@ -1,4 +1,5 @@
-# Should update .dockerignore as well
+# .dockerignore шире этого файла: в образ не идут еще и тесты,
+# документация и приемка. Меняя здесь, сверяйтесь с ним
 .env
 .env.local
 .tmp/
@@ -27,6 +28,10 @@ test/e2e/.auth
 Thumbs.db
 *~
 *.swp
+
+# Появляется у того, кто развернул панель по README
+certs
+docker-compose.override.yml
 
 # Local artifacts
 *.log

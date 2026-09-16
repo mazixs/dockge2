@@ -24,32 +24,41 @@ if (! exists) {
 }
 
 /**
- * Commit updated files
+ * Commit the new version.
+ * Only package.json goes in: `commit -a` swept in whatever else was open in the
+ * working copy, and the tag below would then name a commit nobody reviewed
  * @param {string} version Version to update to
  */
 function commit(version) {
     let msg = "Update to " + version;
 
-    let res = childProcess.spawnSync("git", [ "commit", "-m", msg, "-a" ]);
-    let stdout = res.stdout.toString().trim();
-    console.log(stdout);
+    let res = childProcess.spawnSync("git", [ "commit", "-m", msg, "package.json" ]);
+    console.log(res.stdout.toString().trim());
 
-    if (stdout.includes("no changes added to commit")) {
+    // Git says why on stderr and answers with a status, and the old check read
+    // neither: a failed commit passed for a good one and got tagged
+    if (res.status !== 0) {
+        console.error(res.stderr.toString().trim());
         throw new Error("commit error");
     }
 }
 
 /**
- * Create a tag with the specified version
- * @param {string} version Tag to create
+ * Create the tag of a release
+ * @param {string} version Version to tag
  */
 function tag(version) {
-    let res = childProcess.spawnSync("git", [ "tag", version ]);
+    let res = childProcess.spawnSync("git", [ "tag", "-a", tagName(version), "-m", tagName(version) ]);
     console.log(res.stdout.toString().trim());
+
+    if (res.status !== 0) {
+        console.error(res.stderr.toString().trim());
+        throw new Error("tag error");
+    }
 }
 
 /**
- * Check if a tag exists for the specified version
+ * Whether the release is already tagged
  * @param {string} version Version to check
  * @returns {boolean} Does the tag already exist
  */
@@ -58,7 +67,18 @@ function tagExists(version) {
         throw new Error("invalid version");
     }
 
-    let res = childProcess.spawnSync("git", [ "tag", "-l", version ]);
+    let res = childProcess.spawnSync("git", [ "tag", "-l", tagName(version) ]);
 
-    return res.stdout.toString().trim() === version;
+    return res.stdout.toString().trim() === tagName(version);
+}
+
+/**
+ * Tag of a version.
+ * Releases are read back from their tags, `v` and all - by the update check here
+ * and by anyone reading the list, so the tag is written the same way every time
+ * @param {string} version Version to name
+ * @returns {string} Tag name
+ */
+function tagName(version) {
+    return version.startsWith("v") ? version : `v${version}`;
 }
