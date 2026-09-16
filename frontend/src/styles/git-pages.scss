@@ -1,0 +1,104 @@
+// Общее для двух страниц гита: создание стека и разбор изменений. Размеры,
+// радиусы и цвета берутся из токенов - страницы гита не отдельный остров, а
+// такая же рабочая область, как инспектор стека.
+.git-ui {
+    color: var(--text-strong);
+    min-width: 0;
+
+    button, input, select, textarea {
+        touch-action: manipulation;
+    }
+
+    summary:focus-visible,
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+
+    // Возврат на шаг назад стоит над именем страницы и звучит тише него
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--gap-xs);
+        min-height: var(--control-height);
+        color: var(--text-muted);
+        font-size: var(--text-sm);
+        text-decoration: none;
+
+        &:hover {
+            color: var(--text-strong);
+        }
+    }
+
+    .action-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--gap-sm);
+    }
+
+    // Сообщение о ходе дела: та же полоса, что у предупреждений в системе
+    .notice {
+        margin: 0;
+        padding: var(--gap-md);
+        border: 1px solid var(--line-hair);
+        border-left: 3px solid var(--line-control);
+        border-radius: var(--radius-control);
+        background-color: var(--surface-raised);
+        color: var(--text-muted);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
+        overflow-wrap: anywhere;
+
+        p {
+            margin: 0 0 var(--gap-sm);
+        }
+
+        p:last-child {
+            margin-bottom: 0;
+        }
+    }
+
+    .notice.failure {
+        border-left-color: var(--state-failed);
+        color: var(--state-failed);
+    }
+
+    // Итог действия: одна панель по центру с именем итога и одним выходом
+    .result-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--gap-md);
+        padding: var(--gap-2xl) var(--gap-lg);
+        border: 1px solid var(--line-hair);
+        border-radius: var(--radius-panel);
+        background-color: var(--surface-panel);
+        text-align: center;
+
+        h2 {
+            margin: 0;
+        }
+
+        > p {
+            margin: 0;
+            max-width: 62ch;
+            color: var(--text-muted);
+            font-size: var(--text-sm);
+            line-height: var(--line-sm);
+        }
+    }
+
+    // Выбранная сторона файла: обычная кнопка с зеленым словом, без заливки
+    .btn.chosen {
+        --bs-btn-color: var(--state-running);
+        --bs-btn-border-color: var(--state-running);
+        --bs-btn-hover-color: var(--state-running);
+        --bs-btn-hover-border-color: var(--state-running);
+        --bs-btn-active-color: var(--state-running);
+        --bs-btn-active-border-color: var(--state-running);
+    }
+}
