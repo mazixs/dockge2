@@ -1,40 +1,58 @@
-# Доступ к Dockge2
+# Access to Dockge2
 
-Dockge2 использует better-auth для паролей, сессий и двухфакторной защиты. Пароли хешируются; сессия хранится в cookie с HttpOnly и SameSite=Lax. Открытая регистрация отключена на сервере, включая первый запуск.
+Dockge2 uses better-auth for passwords, sessions and two factor authentication. Passwords are
+hashed; the session lives in a cookie with `HttpOnly` and `SameSite=Lax`. Public signup is disabled
+on the server, including on the first start.
 
-## Первый владелец
+## The first owner
 
-При запуске без учетных записей создается `bootstrap-token` в каталоге `DOCKGE_DATA_DIR` с правами `0600`. Прочитайте его на сервере и введите в форме настройки вместе с логином, email и паролем. В контейнере со стандартным каталогом данных:
+Starting with no accounts creates a `bootstrap-token` file in `DOCKGE_DATA_DIR` with permissions
+`0600`. Read it on the server and enter it in the setup form together with a username, an email and
+a password. In a container with the standard data directory:
 
 ```sh
 docker exec <container-name> cat /app/data/bootstrap-token
 ```
 
-Подставьте имя своего контейнера и фактический каталог данных. Не помещайте код в переписку, открытые журналы или репозиторий. Альтернатива - передать `DOCKGE_BOOTSTRAP_TOKEN` длиной не менее 32 символов через защищенный механизм настройки окружения.
+Substitute your own container name and data directory. Do not put the code in a chat, an open log or
+a repository. The alternative is to pass `DOCKGE_BOOTSTRAP_TOKEN`, at least 32 characters, through
+whatever protected mechanism configures your environment.
 
-После создания владельца файл удаляется, повторное создание через этот адрес запрещается. Код из окружения также перестает приниматься после настройки; удалите его из настроек окружения при следующем обслуживании. Создание первого владельца и его пароля выполняется одной транзакцией SQLite с единственной записью первоначальной настройки. Одновременные запросы не создают нескольких первых владельцев.
+Once the owner exists the file is deleted and that route refuses to create another. A code from the
+environment also stops being accepted after setup; remove it from the environment at the next
+maintenance window. The first owner and their password are created in a single SQLite transaction
+with one initial-setup record, so concurrent requests cannot produce two first owners.
 
-При обновлении прежняя учетная запись становится владельцем. Ее идентификатор, пароль, настройки двухфакторной защиты и существующие сессии сохраняются. Вход по email продолжает работать. Новые учетные записи также получают логин: 3-30 латинских букв, цифр, точек или знаков подчеркивания. Пароль содержит от 10 до 128 символов.
+On an upgrade the previous account becomes the owner. Its identifier, password, two factor settings
+and existing sessions are preserved, and email login keeps working. New accounts also get a
+username: 3 to 30 Latin letters, digits, dots or underscores. A password is 10 to 128 characters.
 
-## Учетные записи
+## Accounts
 
-Владелец открывает "Настройки" -> "Пользователи" и создает учетные записи. Отправка приглашений или паролей по почте не выполняется: способ передачи учетных данных выбирает владелец.
+The owner opens Settings -> Users and creates accounts. Nothing is emailed: how the credentials reach
+the person is the owner's decision.
 
-| Роль | Возможности |
+| Role | What it can do |
 | --- | --- |
-| Владелец (`admin`) | Управление пользователями, агентами, настройками, стеками и Docker |
-| Оператор (`operator`) | Управление стеками и Docker, включая Compose, окружение, секреты, журналы и терминал |
-| Наблюдатель (`viewer`) | Статусы, состав сервисов, доступность и стабильность. Без содержимого Compose/env, секретов, журналов и терминала |
+| Owner (`admin`) | Users, agents, settings, stacks and Docker |
+| Operator (`operator`) | Stacks and Docker, including compose, environment, secrets, logs and the terminal |
+| Viewer (`viewer`) | Statuses, the list of services, availability and stability. No compose or env contents, no secrets, no logs, no terminal |
 
-Оператор управляет Docker и терминалом, что дает полномочия уровня хоста. Это доверенный доступ: роль оператора не обеспечивает безопасную изоляцию от владельца. Для новых учетных записей по умолчанию выбрана роль наблюдателя.
+An operator controls Docker and the terminal, which is host-level authority. It is trusted access:
+the operator role is not a security boundary against the owner. New accounts default to viewer.
 
-Сброс пароля отзывает все текущие сессии пользователя; двухфакторная защита сохраняется. Приостановка доступа запрещает новый вход. Изменение роли и удаление учетной записи также завершают ее действующие сессии, подключения агентов и потоки терминала. Последнего активного владельца нельзя удалить, приостановить или перевести в другую роль.
+Resetting a password revokes every current session of that user and keeps their two factor setup.
+Suspending an account blocks new logins. Changing a role or deleting an account also ends that
+account's sessions, agent connections and terminal streams. The last active owner cannot be deleted,
+suspended or moved to another role.
 
-Права проверяются на сервере для каждого запроса Socket.IO и вложенной операции агента. Для новых событий действует запрет, пока они явно не включены в разрешения. Наблюдатель получает отдельный набор безопасных полей списка стеков. Настройки учетной записи и собственная двухфакторная защита доступны всем ролям.
+Rights are checked on the server for every Socket.IO request and every nested agent operation. A new
+event is denied until it is explicitly allowed. A viewer receives a separate, safe set of stack list
+fields. Account settings and one's own two factor setup are available to every role.
 
-## HTTPS и обратный прокси
+## HTTPS and a reverse proxy
 
-Для публичного домена, обслуживаемого через TLS-прокси, задайте:
+For a public domain served through a TLS proxy, set:
 
 ```dotenv
 DOCKGE_PUBLIC_URL=https://dockge.example.com
@@ -42,18 +60,36 @@ DOCKGE_SECURE_COOKIES=true
 DOCKGE_TRUST_PROXY=true
 ```
 
-`DOCKGE_PUBLIC_URL` должен быть адресом HTTP(S) без пути и учетных данных. Для HTTPS он автоматически включает Secure cookie; явное отключение Secure при таком адресе приводит к ошибке запуска. `DOCKGE_SECURE_COOKIES=true` также можно использовать без публичного URL, когда TLS завершается на прокси.
+`DOCKGE_PUBLIC_URL` has to be an HTTP(S) origin without a path and without credentials. An HTTPS
+value turns Secure cookies on by itself, and switching Secure off explicitly with such an address
+fails the start. `DOCKGE_SECURE_COOKIES=true` also works without a public URL, when TLS terminates
+at the proxy.
 
-`DOCKGE_TRUST_PROXY=true` допустим, когда к порту приложения подключается только доверенный прокси, а прокси перезаписывает входящие `X-Forwarded-*`. Закройте прямой доступ к порту Dockge2 в сетевых правилах. Без этого параметра заголовки прокси не определяют адрес клиента для ограничения попыток входа. Дополнительные доверенные адреса браузера при необходимости перечисляются через запятую в `DOCKGE_TRUSTED_ORIGINS`.
+`DOCKGE_TRUST_PROXY=true` is appropriate when only a trusted proxy can reach the application port
+and that proxy overwrites incoming `X-Forwarded-*` headers. Close direct access to the Dockge2 port
+in your network rules. Without this setting the proxy headers do not determine the client address
+for the login rate limit. Extra browser origins, if any, are listed comma separated in
+`DOCKGE_TRUSTED_ORIGINS`.
 
-Для входа по email и логину разрешено до 10 попыток в минуту с адреса клиента; для первоначальной настройки - до 3. Проверки Origin/CSRF и ограничение попыток остаются включенными. Не отключайте проверку Origin через `DOCKGE_WS_ORIGIN_CHECK=bypass` на публичном экземпляре.
+Logging in by email or username allows up to 10 attempts a minute per client address, and the
+initial setup up to 3. Origin and CSRF checks and the rate limit stay on. Do not disable the origin
+check with `DOCKGE_WS_ORIGIN_CHECK=bypass` on a public instance.
 
-Режим "Отключить авторизацию" сохраняется для установки, где весь доступ уже защищен внешним шлюзом. В этом режиме посетитель действует от имени владельца, поэтому роли отдельных пользователей не ограничивают анонимный доступ. Для обычного публичного доступа оставляйте авторизацию включенной.
+The "disable authentication" mode exists for an installation where all access is already protected by
+an external gateway. In that mode a visitor acts as the owner, so per-user roles do not restrict
+anonymous access. For ordinary public access, leave authentication on.
 
-## Агенты
+## Agents
 
-Подключение к агенту входит через HTTP API better-auth по логину или email, затем передает полученную сессию в Socket.IO. Учетные данные в URL запрещены. Сессия хранится на сервере и используется всеми подключениями к одному агенту с одинаковыми учетными данными. Одновременные вкладки разделяют один запрос входа. Срок cookie учитывается; при отзыве сессии выполняется согласованный повторный вход. Ответ 429 учитывает Retry-After и допускает до двух повторов, сохраняя ограничение попыток.
+Connecting to an agent logs in through the better-auth HTTP API by username or email, then passes the
+resulting session to Socket.IO. Credentials in a URL are rejected. The session is kept on the server
+and shared by every connection to the same agent with the same credentials, so concurrent tabs share
+one login request. The cookie lifetime is respected, and a revoked session triggers a coordinated
+re-login. A 429 response honours `Retry-After` and allows up to two retries, preserving the limit.
 
-Для автоматического подключения используйте отдельную служебную учетную запись агента с необходимыми правами. Интерактивный ввод второго фактора этим подключением не поддерживается: такая учетная запись дает явную ошибку, а защита владельца не отключается. Права локального пользователя дополнительно проверяются перед передачей каждой операции агенту.
+For an automatic connection, use a dedicated agent service account with the rights it needs.
+Interactive second-factor entry is not supported over that connection: such an account fails with an
+explicit error rather than having the owner's protection switched off. The local user's rights are
+checked again before each operation is passed to an agent.
 
-Эти изменения не публикуют экземпляр в интернете и не настраивают сам обратный прокси.
+None of this publishes the instance to the internet or configures the reverse proxy itself.

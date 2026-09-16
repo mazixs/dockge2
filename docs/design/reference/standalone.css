@@ -1,8 +1,0 @@
-/* Export-only adaptation: internal product styles remain byte-for-byte original. */
-body { background: #111419; }
-.chooser, .direction-info, .showcase-footer { display: none !important; }
-.showcase .app-frame { margin: 0; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
-/* Review helpers are outside the product area and do not affect its geometry. */
-.reference-note { padding: 12px 24px; font: 12px/1.5 Plex, sans-serif; color: #9ba3b2; border-top: 1px solid #303640; }
-.reference-note a { color: #9dacf9; margin-left: 16px; }
-.showcase { min-height: 0; }

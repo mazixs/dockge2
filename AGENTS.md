@@ -1,100 +1,198 @@
-# Dockge2: руководство по проекту
+# AGENTS.md
 
-## Назначение и границы
+Guidance for anyone - human or AI agent - working in this repository. `CLAUDE.md` points here,
+so there is one description of the project rather than two that drift apart.
 
-Dockge2 - развитие Dockge: простая панель для развертывания и обслуживания приложений через Docker Compose. Основная единица интерфейса - стек, его файлы и работающие сервисы. Сохраняйте прямоту исходного Dockge: выбрать стек, понять состояние, выполнить нужное действие.
+Dockge2 is a fork of Dockge: a self-hosted manager for `compose.yaml` stacks. Work happens on
+`main`. Node 22.23.2 or 24.19.0; `.nvmrc` pins 24.19.0.
 
-Целевой сценарий: указать Git-репозиторий, выбрать ветку и Compose-файл, проверить настройки и развернуть стек. При обновлении пользователь видит изменения, понимает последствия и выбирает, какие версии файлов применить, а какие локальные правки сохранить.
+The project is led in English: code, comments, documentation, commit messages and interface
+strings. The interface is translated into the most widely spoken languages, so English is the
+language the rest is translated from, not a preference.
 
-Не расширяйте продукт до универсальной панели администрирования вроде Portainer. Не добавляйте разделы инфраструктуры, метрики, роли или постоянные панели без конкретного сценария. Существующие агенты, терминал и настройки остаются вспомогательными возможностями.
+## Scope
 
-## Реализация и планы
+A stack is the unit of the interface: its directory, its files, its running services. Keep the
+directness of the original Dockge - pick a stack, understand its state, do the one thing you came
+for.
 
-Проверено по исходникам 2026-09-11. При изменении соответствующих модулей обновляйте этот раздел.
+The target scenario: point at a Git repository, choose a branch and a compose file, check the
+settings, deploy. On an update the user sees what changed, understands the consequence, and
+chooses which version of each file to apply and which local edit to keep.
 
-- Реализованы управление Compose-стеками, редактор файлов, выбор Compose/env-файлов, работа с секретами, агенты, терминальные сессии, история состояния и предварительный просмотр обновления образов.
-- Создание стека поддерживает вставку Compose и автоматическое преобразование `docker run`, отчет о переносе параметров, возврат исходной команды, выбор агента и сохранение без запуска. Не теряйте эти сценарии при переработке формы.
-- `backend/stack-source.ts` читает происхождение каталога, ветку, локальные правки и отставание от последнего известного upstream. Сетевой `fetch` не выполняется: сведения не доказывают актуальность удаленного репозитория.
-- `Stack.update()` в `backend/stack.ts` выполняет `docker compose pull` и при необходимости `up`. Это обновление образов, а не исходников из Git.
-- `backend/stack-git.ts` и Git-обработчик реализуют клонирование, явный fetch, сравнение версий и выбор каждого файла. `/new` содержит Git/Compose; `/stack/:stackName/git/:endpoint?` показывает сравнение. Применение проверяет Compose, повторно сверяет файлы, сохраняет точные байты выбранных версий и отдельно сообщает результат развертывания. Локальный выбор остается отличием от Git.
-- Git пока поддерживает только fast-forward, обычные файлы и Compose/env в корне. Нет подмодулей, символических ссылок и объединения разошедшихся веток; staged-правки требуют завершения вне панели. Лимиты: 1000 файлов, 1 МБ на файл, 20 МБ всего. Предпросмотр живет 10 минут в памяти; после перезапуска нужна новая проверка. Ручной итог редактируется в сравнении до записи для открытых текстовых файлов; скрытые и бинарные файлы выбираются целиком. Исходный текст, UTF-8, суммарный размер и повторная сверка файлов проверяются перед записью. При ошибке записи выполняется откат; аварийное завершение процесса может потребовать восстановления из `.git/dockge-recovery-*`.
-- Сохранение исходного текста Compose уже имеет реализацию и регрессионные тесты. Это обязательный контракт, а не повод переписывать редактор с нуля.
-- Реализован выбранный пользователем "Знакомый Dockge": список стеков слева, общий обзор стабильности на главной, прямые переходы к обзору стека, файлам и журналу. Создание открывается отдельной страницей по кнопке, вставке или перетаскиванию; пустой терминал скрыт. Выбор сервера в шапке фильтрует список и стабильность по существующим агентам. Первый показ рабочей области ожидает профиль и начальные списки, переподключение сохраняет страницу. `docs/design-system.md` описывает текущую компоновку.
-- Тема по умолчанию системная (`prefers-color-scheme`), доступны светлая и темная. Выбор хранится на устройстве и доступен до входа; системные изменения применяются без перезагрузки.
-- better-auth обслуживает несколько учетных записей. Открытая регистрация отключена; первый владелец создается одноразовым кодом из каталога данных. Владелец создает пользователей, отзывает доступ и сбрасывает пароли. Роли проверяются для каждого Socket.IO события и вложенного вызова агента. У наблюдателя нет доступа к файлам, секретам, журналам и терминалам. Оператор с Docker-доступом является доверенным пользователем хоста, а не изолированной ролью. Настройка публичного адреса и HTTPS описана в `docs/authentication.md`.
-- `backend/stability.ts` записывает состояние каждого контейнера по Docker ID не чаще раза в минуту. Uptime берется из `StartedAt`; доступность за 24 часа, 7 и 30 дней считается отдельно по подтвержденным интервалам. После 90 секунд без свежего наблюдения текущие показатели неизвестны. Старая история сохраняется, но неподтвержденные интервалы больше не дают ретроспективные 100%.
+Do not grow this into a general administration panel like Portainer. No infrastructure sections,
+metrics, roles or permanent dashboards without a concrete scenario. Agents, the terminal and the
+settings stay supporting features.
 
-## Реализация после аудита 2026-09-11
+## Commands
 
-- Аудит соответствия Sites и очередность A0-A6: `docs/design/2026-09-11-sites-audit-and-plan.md`. Для визуального сравнения используйте настоящие компоненты с фиксированными данными из `test/visual/`; сцена явно подписана и не подключена к Docker. Наличие элементов не доказывает визуального соответствия; приемка требует парных снимков одинаковых состояний.
-- Реализованы MCP Streamable HTTP, индивидуальные отзываемые ключи, роли и ограничения серверов/стеков. MCP выключен по умолчанию; владелец управляет доступом в настройках с повторной проверкой пароля. Наблюдатель получает только состояние и историю; файлы, журналы и изменения требуют прав оператора. Запись проходит через prepare/apply с ограниченным сроком, проверкой текущих прав и защитой от повторного выполнения. Доступен режим подтверждения владельцем. Межсерверные запросы используют подписанный ограниченный контекст, не браузерную сессию и не пересылку внешнего ключа. Контракт, проверенные способы подключения и ограничения: `docs/mcp.md`, этапы - `docs/plans/2026-09-11-mcp-access-plan.md`. Аннотации инструментов и скрытие кнопок не заменяют серверную проверку.
+```bash
+npm run dev            # backend 5001 + frontend 5000 (dev:backend / dev:frontend separately)
+npm run check          # lint + check-ts + test - run this before handing work over
+npm run lint           # ESLint over **/*.{ts,vue}; npm run fmt fixes what it can
+npm run check-ts       # tsc --noEmit (strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes)
+npm run test           # c8 + node:test, coverage floor 70%
+npm run test:unit      # the same tests without coverage
+npm run test:docker-integration   # needs a live Docker Compose
+npm run test:e2e       # Playwright, a real Chromium and real containers
+npm run test:visual    # reference screenshots; :approve re-approves them deliberately
+npm run build:frontend # builds into frontend-dist/
 
-## Сохранность файлов и состояния Git
+node --import tsx --test test/backend/util-stack.test.ts                       # one file
+node --import tsx --test --test-name-pattern "envsubst" test/common/util-common.test.ts  # one test
+```
 
-- Чтение, просмотр состояния, запуск, остановка и обновление образов не должны попутно менять Compose/env-файлы пользователя.
-- Не пересобирайте YAML целиком из обычного объекта: сохраняйте комментарии, порядок, кавычки, anchors, extensions, специальные теги и нетронутые фрагменты текста. Сохранение без правок должно сохранять исходные байты.
-- Запись допустима для явной правки пользователя или выбранного результата сравнения. Метаданные панели храните отдельно от Compose, следуя `backend/stack-config.ts`; не добавляйте служебные поля автоматически.
-- Разделяйте файлы на диске, последнюю проверенную версию Git и фактически развернутую версию. Сохранение файла не означает успешное развертывание.
-- Изменения Git не являются аварией контейнеров. Локальные правки не всегда являются конфликтом: выбор требуется, когда изменения нельзя безопасно объединить.
-- Перед заменой файлов показывайте сравнение и итоговый выбор. Не используйте неявные `reset --hard`, `clean`, stash или перезапись рабочей копии.
-- Предусматривайте отмену до записи, восстановление исходных файлов при неудаче записи и повторную проверку файлов перед применением. Откат файлов не означает откат данных контейнеров.
-- После сохранения локальной версии показывайте, что она продолжает отличаться от Git. Не отмечайте такую копию как полностью синхронизированную.
-- Не показывайте секреты и учетные данные из Git URL в diff, списках, журналах и макетах. Для демонстраций используйте вымышленные данные.
+`.c8rc.json` sets the 70% floor for lines, statements, functions and branches. Do not lower a
+threshold to make a check pass.
 
-## Интерфейс
+An application change needs lint, TypeScript, tests for the behaviour it touched, and a build. CI
+also runs coverage, Docker, the browser suite and `npm run update-docker -- --dry-run`. For a
+documentation change pick checks in proportion, and never report a check you did not run.
 
-- Первый экран отвечает: что работает, что требует действия, как открыть или добавить стек.
-- Одно главное действие на текущий этап; редкие и опасные действия раскрываются по запросу. Compose-файл и журналы выбранного стека должны открываться напрямую.
-- Терминал показывается при открытой сессии или выполнении команды. Пустая консоль не должна постоянно занимать рабочую область.
-- Состояния называйте словами; цвет дополняет подпись. Различайте остановку, ошибку, неизвестное состояние и доступное обновление.
-- Git-сценарий: проверить изменения -> сравнить файлы -> выбрать результат -> проверить Compose -> применить и развернуть -> показать фактический результат.
-- В сравнении используйте стороны "На сервере" и "Из Git", с веткой/коммитом и именем файла. Подписи называют результат: "Оставить на сервере", "Взять из Git", "Изменить результат".
-- По запросу вариантов делайте разные компоновки и переходы, а не только разные палитры. До выбора пользователя не внедряйте один из предложенных макетов в приложение.
-- При переработке интерфейса сопоставляйте реальные действия, условия их доступности и состояния ошибок с макетами. Отдельно обозначайте отсутствующие сценарии и будущие возможности; наличие демонстрационной кнопки не означает функциональную полноту. Текущая сверка: `docs/design/2026-09-08-functional-coverage.md`.
-- Обеспечивайте клавиатурную навигацию, узкий экран, локальные шрифты и `prefers-reduced-motion`. Используйте общие токены и локализацию вместо отдельных цветов и строк в компонентах.
+Isolate data through `DOCKGE_DATA_DIR`, `DOCKGE_STACKS_DIR` and the E2E parameters. Never run tests
+against the user's own database or stack directory. `docker ps` on a development machine can list
+someone else's stacks: do not touch them while testing.
 
-## Структура
+## Where things live
 
-- `backend/` - Express, Socket.IO, аутентификация, SQLite/Knex, агенты, Docker и файловые операции.
-- `frontend/src/` - Vue 3, страницы, компоненты, стили, локализация; `frontend/public/` - ресурсы.
-- `common/` - общие типы, разбор Compose, состояния и вспомогательные функции.
-- `test/backend/`, `test/common/`, `test/frontend/` - тесты на `node:test`.
-- `test/docker/` - настоящий Docker; `test/e2e/` - Playwright, setup и teardown.
-- `extra/`, `docker/`, `.github/workflows/` - обслуживание, образы и CI.
-- `docs/design-system.md` - существующее оформление; `docs/plans/` - планы, которые необходимо сверять с кодом.
+| Path | What is there |
+| --- | --- |
+| `backend/dockge-server.ts` | assembly point: Express, Socket.IO, handler registration, the 10 second cron |
+| `backend/socket-handlers/` | events without the agent proxy: settings, agent CRUD, users; `agent-proxy-socket-handler.ts` routes the `"agent"` event |
+| `backend/agent-socket-handlers/` | agent-compatible events: stacks, git, terminals, stability |
+| `backend/stack.ts`, `stack-config.ts`, `stack-source.ts`, `stack-git.ts` | the stack as a directory, file path resolution, sources, git |
+| `backend/auth.ts`, `auth-access.ts`, `agent-auth.ts` | Better Auth, sessions, `doubleCheckPassword`, agent access |
+| `backend/mcp-*.ts` | MCP server, policy, keys, delegated operations (see `docs/mcp.md`) |
+| `backend/stability.ts` | container state history, uptime and availability |
+| `backend/terminal.ts` | node-pty wrapper, the static `terminalMap` |
+| `backend/child-process.ts` | promise wrapper over spawn for docker / docker compose |
+| `backend/database.ts`, `backend/migrations/` | Knex + SQLite: users, settings and agents only |
+| `backend/util-server.ts` | `DockgeSocket`, `checkLogin`, `callbackResult` / `callbackError` |
+| `common/` | shared by front and back: `util-common.ts` (statuses, terminal names, envsubst), `compose-status.ts`, `compose-editor.ts`, `stack-files.ts` (the file name allow-list), `availability.ts`, `agent-socket.ts` |
+| `frontend/src/mixins/socket.ts` | the state layer: connection, session, `stackList`, `emitAgent` |
+| `frontend/src/pages/`, `components/`, `layouts/` | Vue 3 SFCs on the options API |
+| `frontend/src/styles/tokens.scss` | design tokens (light on `:root`, dark on `body.dark`); `vars.scss` mirrors them for legacy code |
+| `frontend/src/i18n.ts`, `frontend/src/lang/` | the language list and the catalogues; see `frontend/src/lang/README.md` |
+| `test/backend`, `test/common`, `test/frontend` | unit tests against real files and processes; `test/helpers/database.ts` has `withDatabase()` |
+| `test/docker/`, `test/e2e/`, `test/visual/` | Docker integration, Playwright, reference screenshots |
+| `extra/` | scripts: `reset-account.ts`, `update-dockge.ts`, `deploy-stack.ts`, `seed-review.ts` |
+| `docker/`, `.github/workflows/` | images and CI |
+| `docs/` | see the documentation map below |
 
-## Разработка и проверки
+## Architecture in short
 
-Версии Node.js в `package.json`: `22.23.2` или `24.19.0`; `.nvmrc` фиксирует `24.19.0`. Для воспроизводимой установки используйте `npm ci` и существующий lockfile.
+- **The API is Socket.IO**, not REST: every event has an ack callback `{ ok, msg?, msgi18n? }`. A
+  handler does `checkLogin` first, then validates every argument, then `callbackResult` /
+  `callbackError`.
+- **Multi-agent**: the front end calls `emitAgent(endpoint, event, ...)`, the server routes it
+  locally, to every endpoint (`ALL_ENDPOINTS`) or into an outgoing socket.io-client connection from
+  `AgentManager` (one per browser socket). A new feature touching stacks or terminals has to be an
+  agent handler, or it only ever works locally.
+- **Stacks are files, not database rows**: a directory under `DOCKGE_STACKS_DIR` (`/opt/stacks` by
+  default). Status comes from a single `docker ps` and is aggregated fail-closed in
+  `common/compose-status.ts`.
+- **Editing compose preserves the user's file**: `analyseComposeSource` / `canEditStructurally` /
+  `applyStructuredEdit` in `common/compose-editor.ts`. Text is rewritten only on an explicit edit.
+- **Secrets** are files with `0600` permissions; only metadata ever leaves the server, and
+  `revealSecret` / `saveSecret` / `deleteSecret` require `doubleCheckPassword`.
+- **Authentication**: Better Auth is mounted on `/api/auth/*` before the body parsers, the session
+  lives in an `httpOnly` cookie, and the socket receives `userID` at the handshake. Public signup is
+  off; the first owner is created from a one-use code in the data directory. The owner creates
+  users, revokes access and resets passwords. Roles are checked on every Socket.IO event and every
+  nested agent call. A viewer has no access to files, secrets, logs or terminals.
+- **Stability**: `backend/stability.ts` records each container's state by Docker ID at most once a
+  minute. Uptime comes from `StartedAt`; availability over 24 hours, 7 and 30 days is computed from
+  confirmed intervals only. After 90 seconds without a fresh observation the current figures are
+  unknown rather than assumed good.
+- **MCP** is off by default. Keys are individual and revocable, scoped to servers and stacks;
+  writes go through prepare/apply with a deadline, a re-check of the caller's rights and replay
+  protection. Cross-server calls use a signed limited context, never the browser session and never a
+  forwarded external key. Tool annotations and hidden buttons are not a substitute for a server-side
+  check.
 
-- `npm run dev` - Vite на 5000 и сервер на 5001; отдельно: `dev:frontend`, `dev:backend`.
-- `npm run lint` - ESLint; `npm run fmt` изменяет файлы, исправляя замечания.
-- `npm run check-ts` - TypeScript.
-- `npm run test:unit` - модульные тесты; `npm test` / `npm run coverage` - те же тесты с покрытием.
-- `.c8rc.json`: порог 70% для строк, выражений, функций и ветвей в заданной области. Не ослабляйте пороги ради прохождения проверки.
-- `npm run check` - lint, TypeScript и тесты с покрытием; сборка запускается отдельно.
-- `npm run build:frontend` - сборка в `frontend-dist/`.
-- `npm run test:docker-integration` - реальные операции Docker в тестовых стеках.
-- `npm run test:e2e` - браузерные проверки с сервером и Docker; сначала прочитайте `playwright.config.ts`, setup и teardown.
+## Files and Git state
 
-Для изменений приложения обязательны lint, TypeScript, тесты по затронутому поведению и сборка. CI также проверяет покрытие, Docker, браузерные сценарии и `npm run update-docker -- --dry-run`. Для документации и временных макетов выбирайте проверки соразмерно изменению; не выдавайте непроведенные проверки за успешные.
+- Reading, showing state, starting, stopping and updating images must never modify the user's
+  compose or env files as a side effect.
+- Do not rebuild YAML from a plain object: keep comments, order, quoting, anchors, extensions,
+  special tags and untouched text. Saving without an edit must produce the same bytes.
+- Writing is allowed for an explicit user edit or a chosen comparison result. Keep panel metadata
+  out of the compose file, as `backend/stack-config.ts` does, and never add service fields
+  automatically.
+- Keep three things apart: the files on disk, the last checked Git version, and what is actually
+  deployed. Saving a file is not a deployment.
+- A Git difference is not a container failure, and a local edit is not automatically a conflict:
+  ask for a choice when changes cannot be merged safely.
+- Show the comparison and the resulting choice before replacing files. No implicit `reset --hard`,
+  `clean`, stash or overwrite of the working copy.
+- Allow cancelling before the write, restore the originals when a write fails, and re-check the
+  files before applying. Rolling files back does not roll container data back.
+- After saving a local version, keep showing that it still differs from Git.
+- Never show secrets or credentials from a Git URL in a diff, a list, a log or a mockup. Use
+  invented data for demonstrations.
 
-При изменении сохранения Compose проверяйте `test/backend/compose-source-preservation.test.ts`, `test/common/compose-editor.test.ts` и затронутые файловые сценарии. Для UI проверяйте переходы в браузере, настольный и узкий экраны. Не пишите тесты, которые только повторяют разметку временного макета.
+Git currently supports fast-forward only, regular files, and compose/env files at the root. No
+submodules, no symlinks, no merging diverged branches. Limits: 1000 files, 1 MB per file, 20 MB in
+total. A preview lives 10 minutes in memory. On a failed write there is a rollback; a crash may
+require recovery from `.git/dockge-recovery-*`.
 
-Изолируйте данные через `DOCKGE_DATA_DIR`, `DOCKGE_STACKS_DIR` и параметры E2E. Не запускайте тесты против пользовательской базы и каталогов. Список Docker может содержать сторонние стеки даже при отдельном каталоге: не управляйте ими в ходе проверки.
+## Interface
 
-## Docker и локальные данные
+- The first screen answers: what is running, what needs attention, how to open or add a stack.
+- One main action per step; rare and dangerous actions are revealed on request. The compose file and
+  the logs of the selected stack open directly.
+- The terminal appears when a session is open or a command is running. An empty console does not
+  occupy the work area.
+- Name states in words; colour supports the label. Distinguish stopped, failed, unknown and
+  update-available.
+- The Git flow: check changes -> compare files -> choose the result -> validate compose -> apply and
+  deploy -> show what actually happened. The comparison sides are "on the server" and "from Git".
+- Keyboard navigation, narrow screens, local fonts and `prefers-reduced-motion` are requirements.
+  Use the shared tokens and the translation catalogues, not per-component colours and strings.
+- When reworking the interface, match real actions, their availability and their error states
+  against the mockups. A demonstration button is not functional completeness.
 
-- Штатный контейнерный запуск разработки: `./local.sh` с `docker-compose.local.yml`. Скрипт пересоздает контейнеры `dockge2-local`: сначала выясните, не используется ли окружение.
-- Локальный том зависимостей обновляется при изменении lockfile или версии/платформы Node.js. Для отдельной базы используйте `DOCKGE_LOCAL_DATA_DIR`; для стеков - `DOCKGE_LOCAL_STACKS_DIR`. Переменная `DOCKGE_MCP_DELEGATION_CONFIG` передается обеими Compose-конфигурациями; файл размещается в примонтированном каталоге данных, см. `docs/mcp.md`.
-- `docker-compose.yml` - конфигурация этого репозитория; `compose.yaml` - пример upstream. Всегда указывайте нужный `-f` явно.
-- Пути стеков внутри и снаружи контейнера должны совпадать. Не меняйте пользовательские каталоги и env-файлы для демонстрации дизайна.
-- Не запускайте `build:docker` и release-скрипты как обычную проверку: часть выполняет `--push` в реестры upstream. Сначала прочитайте команду.
+## Conventions
 
-## Стиль и изменения
+- Four spaces (two in YAML), LF, UTF-8, final newline, double quotes, semicolons,
+  `array-bracket-spacing: always`, JSDoc on public and non-obvious methods. `camelCase` in TS,
+  `snake_case` for SQLite columns, `kebab-case` for CSS. `.editorconfig` and ESLint decide the rest.
+- Settings live in the UI (the `setting` table). Environment variables are for startup only:
+  `DOCKGE_STACKS_DIR`, `DOCKGE_PORT`, `DOCKGE_DATA_DIR`, `DOCKGE_SSL_*`, `DOCKGE_ENABLE_CONSOLE`,
+  `DOCKGE_TRUSTED_ORIGINS`, `DOCKGE_TRUST_PROXY`, `DOCKGE_SECURE_COOKIES`, `DOCKGE_AUTH_SECRET`.
+- Backend dependencies go in `dependencies`, front end and tooling in `devDependencies`.
+- No HTML inside a translation string - markup goes through `<i18n-t>`. `en.json` is the source of
+  truth and `ru.json` is kept complete.
+- **Never add an event that lets the browser run arbitrary git, shell or Docker commands.** Stack
+  file names are safe relative paths only: no `..`, no absolute paths, no symlinks.
+- Never commit keys, passwords, local data or test sessions. Leave other people's uncommitted work
+  alone. Report vulnerabilities through `SECURITY.md`, not a public issue.
 
-Следуйте `.editorconfig` и ESLint: четыре пробела, LF, UTF-8, финальный перевод строки, двойные кавычки и точки с запятой. YAML использует два пробела. Имена: `camelCase` для JS/TS, `snake_case` для SQLite, `kebab-case` для CSS. Для публичных и неочевидных методов добавляйте JSDoc.
+## Docker and local data
 
-Отвечайте по-русски, используйте понятные подписи и смысловые абзацы. Для многошаговой работы ведите список задач, отмечайте прогресс и проверяйте каждый результат перед завершением.
+- The standard containerised development run is `./local.sh` with `docker-compose.local.yml`. It
+  recreates the `dockge2-local` project, so find out first whether that environment is in use.
+- The dependency volume is refreshed when the lockfile or the Node version or platform changes. Use
+  `DOCKGE_LOCAL_DATA_DIR` for a separate database and `DOCKGE_LOCAL_STACKS_DIR` for stacks.
+  `DOCKGE_MCP_DELEGATION_CONFIG` is passed by both compose configurations; the file goes in the
+  mounted data directory, see `docs/mcp.md`.
+- `docker-compose.yml` is the production configuration of this repository. Always pass `-f`
+  explicitly.
+- Stack paths inside and outside the container have to be identical. Do not change a user's
+  directories or env files to demonstrate a design.
+- `build:docker` and the release scripts push to a registry. They are not a routine check: read the
+  command before running it.
 
-Не коммитьте ключи, пароли, локальные данные и тестовые сессии. Сохраняйте чужие незакоммиченные изменения. Для PR прочитайте `CONTRIBUTING.md` и шаблон, опишите итоговое поведение и проверки, приложите изображения при изменениях UI. Уязвимости направляйте через процедуру в `SECURITY.md`.
+## Documentation map
+
+| File | What it records |
+| --- | --- |
+| `README.md` | install, update, rollback, reverse proxy, FAQ |
+| `CONTRIBUTING.md` | what kind of change is accepted and how to submit it |
+| `SECURITY.md` | how to report a vulnerability |
+| `docs/authentication.md` | accounts, sessions, proxy configuration |
+| `docs/mcp.md` | the MCP contract, limits and verified clients |
+| `docs/design-system.md` | tokens and the current layout |
+| `frontend/src/lang/README.md` | which languages, and how to translate |
+| `docs/plans/2026-08-26-dockge2-master-plan.md` | the running journal of requirements and decisions - read it before a feature |
+| `docs/plans/`, `docs/design/` | historical plans and audits, in Russian. They record what was decided and why; the code is the current state, not these |

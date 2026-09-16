@@ -1,15 +1,25 @@
-# Доступ ИИ через MCP
+# AI access through MCP
 
-MCP включается владельцем в "Настройки -> Доступ ИИ / MCP". По умолчанию endpoint выключен. Каждый ИИ-клиент получает отдельный ключ с ответственным пользователем, сроком, ролью и явным набором пар сервер/стек. Ключ не является паролем браузера или учетными данными Docker/Git.
+MCP is turned on by the owner in Settings -> AI access / MCP. The endpoint is off by default. Every
+AI client gets its own key with a responsible user, an expiry, a role and an explicit set of
+server/stack pairs. A key is not a browser password and not Docker or Git credentials.
 
-## Подключение
+## Connecting
 
-1. Войдите обычной учетной записью владельца. Отключенная браузерная аутентификация не заменяет сессию для управления MCP.
-2. Укажите точный внешний адрес `https://dockge.example/mcp`, включите MCP и подтвердите паролем. HTTP разрешен только для loopback. Reverse proxy должен передавать исходный Host, совпадающий с настроенным адресом. Внешние Origin отклоняются; отсутствие Origin у машинного клиента допустимо при действующем ключе.
-3. Нажмите "Создать ключ". По умолчанию это наблюдатель на 30 дней; допустимый срок 1-90 дней. Выберите ответственного пользователя и конкретные стеки. Секрет показывается один раз, хранится в базе только SHA-256 от случайного 32-байтового секрета с публичным идентификатором.
-4. Передавайте ключ только в `Authorization: Bearer <key>`. Не помещайте его в URL, аргументы инструментов или Git-репозиторий.
+1. Sign in with a normal owner account. Disabled browser authentication does not substitute for a
+   session when managing MCP.
+2. Enter the exact external address `https://dockge.example/mcp`, enable MCP and confirm with the
+   password. HTTP is allowed for loopback only. The reverse proxy has to pass through the original
+   `Host` and it has to match the configured address. Foreign origins are rejected; a machine client
+   with no `Origin` at all is accepted when its key is valid.
+3. Press "Create key". The default is a viewer for 30 days; 1 to 90 days is allowed. Choose the
+   responsible user and the specific stacks. The secret is shown once. The database stores only the
+   SHA-256 of a random 32 byte secret together with a public identifier.
+4. Pass the key only in `Authorization: Bearer <key>`. Never in a URL, in tool arguments or in a Git
+   repository.
 
-Пример для Node.js с установленным `@modelcontextprotocol/sdk@1.30.0`. Секрет и URL задаются в окружении процесса клиента; реальные значения не сохраняйте в этом примере:
+An example for Node.js with `@modelcontextprotocol/sdk@1.30.0` installed. The secret and the URL come
+from the client process environment; do not put real values in this example:
 
 ```javascript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -26,29 +36,45 @@ console.log(result);
 await client.close();
 ```
 
-Проверена именно связка TypeScript SDK 1.30.0, Bearer и Streamable HTTP, включая настоящие процессы Dockge. Установленный SDK согласует протокол **2025-11-25**. Это не заявление о поддержке протокола 2026-07-28 или OAuth 2.1. OAuth/discovery, stdio и конкретные настольные клиенты не реализованы и не проверены. На HTTP GET сервер отвечает 405, SSE-поток и протокольные сессии не создаются. Основание: [спецификация Streamable HTTP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) и [исходники официального SDK](https://github.com/modelcontextprotocol/typescript-sdk).
+What has been verified is exactly this combination: TypeScript SDK 1.30.0, Bearer and Streamable
+HTTP, against real Dockge processes. That SDK negotiates protocol **2025-11-25**. This is not a claim
+of support for protocol 2026-07-28 or for OAuth 2.1. OAuth and discovery, stdio, and any particular
+desktop client are neither implemented nor verified. An HTTP GET is answered with 405; no SSE stream
+and no protocol sessions are created. Sources: the
+[Streamable HTTP specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+and the [official SDK](https://github.com/modelcontextprotocol/typescript-sdk).
 
-## Права
+## Rights
 
-| Инструмент или действие | Дополнительное право оператора |
+| Tool or action | Extra operator right |
 | --- | --- |
-| `servers_list`, `stacks_list`, `containers_list`, `container_status`, `stability_get` | Доступны наблюдателю в его области |
+| `servers_list`, `stacks_list`, `containers_list`, `container_status`, `stability_get` | available to a viewer within its scope |
 | `container_logs` | `logs:read` |
 | `container_start`, `container_stop`, `container_restart` | `containers:control` |
 | `stack_start`, `stack_stop`, `stack_restart` | `stacks:control` |
 | `stack_files_read` | `files:read` |
 | `stack_files_write` | `files:write` |
 | `git_preview`, `git_preview_result` | `git:read` |
-| `git_apply` | `git:apply`; для развертывания дополнительно `deploy` |
+| `git_apply` | `git:apply`, plus `deploy` to deploy |
 | `stack_deploy`, `stack_images_update`, `git_clone` | `deploy` |
 
-Изменяющие действия из таблицы выполняются через `operation_prepare` и `operation_apply`. Непосредственное обращение к отсутствующему инструменту не обходит проверку. Наблюдатель не получает файлы, env, журналы, raw inspect, произвольные команды, ключи или операции другого субъекта. Назначение пользователю более высокой роли не повышает потолок старого ключа. Понижение, блокировка, отзыв, истечение срока и сокращение области проверяются повторно перед выполнением и выдачей результата.
+The changing actions in that table run through `operation_prepare` and `operation_apply`. Calling a
+tool that does not exist does not bypass the check. A viewer never receives files, env, logs, raw
+inspect output, arbitrary commands, keys, or another subject's operations. Giving a user a higher
+role does not raise the ceiling of an existing key. A demotion, a suspension, a revocation, an expiry
+and a narrowed scope are all re-checked before execution and before the result is handed back.
 
-Оператор с правом записи Compose или развертывания является доверенным пользователем Docker-хоста. Область стеков не является песочницей: Compose может запросить монтирования и привилегии. Shell/exec, произвольные Docker/Git команды, удаление стеков/томов, prune и администрирование пользователей не предоставляются.
+An operator that can write compose or deploy is a trusted user of the Docker host. A stack scope is
+not a sandbox: a compose file can ask for mounts and privileges. Shell and exec, arbitrary Docker or
+Git commands, deleting stacks or volumes, prune, and user administration are not offered at all.
 
-Управляемый стек связан с экземпляром каталога через отдельные метаданные. Пересозданный каталог с прежним именем получает новый идентификатор, а старый ключ не наследует доступ. Для `git_clone` владелец сначала резервирует имя в настройках MCP и явно включает его идентификатор в область ключа. Резервирование не создает каталог. Клонирование не перезаписывает существующий путь.
+A managed stack is tied to a directory instance through separate metadata. A directory recreated
+under the same name gets a new identifier, and an old key does not inherit access to it. For
+`git_clone` the owner first reserves the name in the MCP settings and explicitly puts its identifier
+in the key's scope. Reserving does not create the directory, and cloning never overwrites an existing
+path.
 
-## Подготовка, подтверждение и результат
+## Prepare, confirm, result
 
 ```json
 {
@@ -56,24 +82,45 @@ await client.close();
   "arguments": {
     "action": "stack_restart",
     "request_id": "maintenance-001",
-    "parameters": { "server_id": "local", "stack_id": "<UUID из stacks_list>" }
+    "parameters": { "server_id": "local", "stack_id": "<UUID from stacks_list>" }
   }
 }
 ```
 
-Ответ содержит `operation_id`, `parameters_hash`, объект, действие и срок. Затем `operation_apply` принимает только этот ID и хеш. Для удаленного сервера передайте также `server_id` на верхнем уровне `operation_apply` и `operation_status`.
+The response carries `operation_id`, `parameters_hash`, the subject, the action and a deadline.
+`operation_apply` then accepts only that ID and that hash. For a remote server, also pass `server_id`
+at the top level of `operation_apply` and `operation_status`.
 
-Ключ оператора может выполнять разрешенные действия автоматически либо требовать подтверждения владельцем. В последнем режиме откройте ожидающую операцию на **сервере исполнения**, повторно введите пароль, просмотрите конкретные изменения и подтвердите. Содержимое сравнения может содержать чувствительные данные Compose: оно выдается только владельцу после пароля, не сохраняется в журнал и не возвращается наблюдателю. Скрытые и бинарные изменения не разрешаются к применению ключом с режимом подтверждения, если невозможно показать содержательное сравнение. Для клонирования с подтверждением сначала используйте `deploy:false`, затем отдельное `stack_deploy` с просмотром фактического Compose.
+An operator key can either perform its allowed actions automatically or require the owner to confirm.
+In the second mode, open the pending operation **on the executing server**, enter the password again,
+read the actual changes and confirm. A comparison can contain sensitive compose data: it is shown
+only to the owner after the password, is never written to the log, and is never returned to a viewer.
+A hidden or binary change cannot be applied by a key in confirmation mode, because no meaningful
+comparison can be shown. To clone with confirmation, use `deploy:false` first and then a separate
+`stack_deploy` after reading the actual compose.
 
-Подготовленные параметры и сравнения живут в памяти 10 минут. После перезапуска подготовка и просмотр больше не применимы. Идемпотентный `request_id` привязан к ключу и хешу параметров в базе: повтор не запускает второй restart/deploy, другие параметры отклоняются. После разрыва соединения проверяйте `operation_status`. Выполнявшаяся во время аварии операция может иметь неизвестный итог; автоматического повторного запуска нет.
+Prepared parameters and comparisons live 10 minutes in memory. After a restart a preparation or a
+preview no longer applies. An idempotent `request_id` is bound in the database to the key and the
+parameter hash: a repeat does not start a second restart or deploy, and different parameters are
+rejected. After a dropped connection, check `operation_status`. An operation that was running during
+a crash may have an unknown outcome; nothing is retried automatically.
 
-Git-проверка делает fetch, поэтому тоже требует prepare/apply. Завершенный `git_preview` возвращает `preview_id`; `git_preview_result` читает сравнение этого ключа. `git_apply` принимает полный выбор файлов и точный текст ручного результата. Исходный Git workflow повторно сверяет дерево, выбранные файлы, Compose и индекс. Сохранение и развертывание возвращаются отдельно (`saved`, `deployed`). При неудачном развертывании сохраненные файлы остаются сохраненными; данные контейнеров не откатываются.
+A Git check performs a fetch, so it also goes through prepare/apply. A finished `git_preview` returns
+a `preview_id`, and `git_preview_result` reads that key's comparison. `git_apply` takes the full file
+selection and the exact text of a manual result. The underlying Git workflow re-checks the tree, the
+selected files, the compose file and the index. Saving and deploying are reported separately (`saved`,
+`deployed`). If the deployment fails the saved files stay saved; container data is not rolled back.
 
-Чтение файла возвращает SHA-256 исходных байтов. `stack_files_write` требует этот хеш, сохраняет точный UTF-8 текст, комментарии и форматирование, не пересобирает YAML и не записывает соседние env-файлы. Это сохранение без запуска; проверка запуска выполняется при отдельном развертывании. Измененный после подготовки файл отклоняется.
+Reading a file returns the SHA-256 of its original bytes. `stack_files_write` requires that hash,
+stores the exact UTF-8 text with its comments and formatting, does not rebuild the YAML and does not
+touch neighbouring env files. That is a save without a start; the start is validated by a separate
+deployment. A file changed after the preparation is rejected.
 
-## Серверы исполнения
+## Executing servers
 
-Это отдельный подписанный канал Ed25519, а не существующая привилегированная браузерная сессия агента. Внешний Bearer-ключ не пересылается. На каждой стороне нужен файл, указанный через `DOCKGE_MCP_DELEGATION_CONFIG`, принадлежащий пользователю процесса, с правами `0600`:
+This is a separate signed Ed25519 channel, not the existing privileged browser session of an agent.
+The external Bearer key is never forwarded. Each side needs a file named by
+`DOCKGE_MCP_DELEGATION_CONFIG`, owned by the process user, with permissions `0600`:
 
 ```json
 {
@@ -94,20 +141,48 @@ Git-проверка делает fetch, поэтому тоже требует 
 }
 ```
 
-При запуске через Compose укажите `DOCKGE_MCP_DELEGATION_CONFIG=/app/data/mcp-delegation.json` в env-файле и положите конфигурацию в примонтированный каталог данных. Обе Compose-конфигурации передают эту переменную. Локальная база выбирается через `DOCKGE_LOCAL_DATA_DIR`; `.env.local` явно загружается скриптом `local.sh`.
+Under Compose, set `DOCKGE_MCP_DELEGATION_CONFIG=/app/data/mcp-delegation.json` in the env file and
+put the configuration in the mounted data directory. Both compose configurations pass the variable
+through. A separate local database is selected with `DOCKGE_LOCAL_DATA_DIR`, and `.env.local` is
+loaded explicitly by `local.sh`.
 
-На второй стороне настройте обратный peer с открытым ключом первой. Приватные ключи создаются и передаются средствами администрирования хоста; интерфейс не экспортирует их. `actions` здесь содержит имена инструментов и конкретных действий, а не строки разрешений ключа. Для оператора дополнительно перечислите `operation_prepare`, `operation_apply`, `operation_status` и конкретное действие, например `stack_restart`. Для сочетания `git_apply` с развертыванием требуется также `stack_deploy` у peer. Права отправленного субъекта пересекаются с текущей локальной ролью ответственного за соединение, списком действий и парой сервер/стек; административная учетная запись соединения не повышает роль наблюдателя.
+On the other side, configure the reverse peer with the first side's public key. Private keys are
+created and distributed by host administration; the interface never exports them. `actions` here
+holds tool and action names, not the permission strings of a key. For an operator, also list
+`operation_prepare`, `operation_apply`, `operation_status` and the specific action, for example
+`stack_restart`. Combining `git_apply` with a deployment also needs `stack_deploy` on the peer. The
+sent subject's rights are intersected with the current local role of the account responsible for the
+connection, with the action list and with the server/stack pair; an administrative account on the
+connection does not promote a viewer.
 
-Подпись связана с отправителем, получателем, объектом, параметрами, ID и коротким сроком. Повтор сообщения отклоняется. Сервер исполнения обращается к отправителю за актуальным состоянием ключа до и после операции и в контрольных точках перед побочным эффектом. Отзыв доверия или отключение одной стороны запрещает дальнейшее выполнение. Отдельное пространство идентификаторов не позволяет ключу другого peer подменить локальную операцию.
+The signature binds the sender, the receiver, the subject, the parameters, the ID and a short
+deadline. A replayed message is rejected. The executing server asks the sender for the current state
+of the key before and after the operation and at checkpoints before any side effect. Revoking trust or
+disabling either side stops further execution. A separate identifier namespace prevents another
+peer's key from standing in for a local operation.
 
-## Пределы и эксплуатация
+## Limits and operation
 
-- Не более 100 стеков и 20 серверов на ключ, без wildcard. Только управляемые стеки; контейнеры вне них не изменяются.
-- На HTTP адрес источника: 60 запросов в минуту, не более 4 одновременных. До 1000 адресов в таблице ограничений. В peer-канале отдельные ограничения параллельности, размера и повторов.
-- MCP тело запроса до 2 МБ, ответ до 256 КиБ. Слишком большой файл или diff может не поместиться в ответ: запрос будет отклонен, а не обрезан незаметно. Файл до 1 МБ, Git до 1000 файлов/20 МБ по исходному workflow. Журналы: до 200 строк, 24 часов и 64 КиБ.
-- Для команд Docker установлены ограничения времени и объема вывода. При длительных операциях отзыв останавливает следующие контрольные точки, но уже совершенное действие автоматически не откатывается.
-- Для развертывания не поддерживаются непроверяемые внешние или вычисляемые файловые входы Compose, build/develop/provider. Такие сценарии отклоняются, пока нельзя надежно привязать подготовку ко всем входам. Обычная остановка, перезапуск, сохранение и Git-проверка не требуют проверки сборки.
-- Журнал обращений хранит метаданные до 30 дней и 10000 записей. В нем нет файлов, env, токенов, ответов журналов и stderr. Owner review хранится только в памяти. Сокращение доступа увеличивает версию политики и делает старые подготовки непригодными. Для расширения доступа создайте новый ключ; старый отзовите отдельно.
-- Чтение статуса использует подтвержденную историю наблюдений. До следующего наблюдения после появления нового идентификатора стека данные могут отсутствовать. Неподтвержденные интервалы не становятся 100% доступностью.
+- At most 100 stacks and 20 servers per key, no wildcards. Managed stacks only; containers outside
+  them are never modified.
+- Per source address over HTTP: 60 requests a minute and at most 4 at once, with up to 1000 addresses
+  in the limit table. The peer channel has its own limits on concurrency, size and retries.
+- An MCP request body is up to 2 MB and a response up to 256 KiB. A file or a diff that does not fit
+  makes the request fail rather than being silently truncated. A file is up to 1 MB, Git up to 1000
+  files and 20 MB by the underlying workflow. Logs: up to 200 lines, 24 hours and 64 KiB.
+- Docker commands have time and output limits. During a long operation a revocation stops the next
+  checkpoints, but what already happened is not rolled back automatically.
+- Deployment does not support compose inputs that cannot be checked - external or computed file
+  inputs, `build`, `develop`, `provider`. Those are rejected until a preparation can be bound
+  reliably to every input. An ordinary stop, restart, save or Git check needs no build validation.
+- The access log keeps metadata for up to 30 days and 10000 records. It holds no files, env, tokens,
+  log responses or stderr. Owner review is kept in memory only. Narrowing access raises the policy
+  version and invalidates older preparations. To widen access, create a new key and revoke the old
+  one separately.
+- Reading status uses confirmed observation history. Between a new stack identifier appearing and the
+  next observation there may be no data. Unconfirmed intervals never turn into 100% availability.
 
-Проверки находятся в `test/backend/mcp-*.test.ts`, `test/docker/mcp-remote.test.ts` и браузерном сценарии управления ключами. Проверены реальный SDK, два изолированных процесса, ограничение удаленной области, отзыв, подтверждение и повтор без второго restart, а также реальный Git fetch/apply с точными байтами. Отдельные внешние клиенты и OAuth не включаются в этот список.
+The checks live in `test/backend/mcp-*.test.ts`, `test/docker/mcp-remote.test.ts` and the browser
+scenario for key management. What is verified: the real SDK, two isolated processes, remote scope
+limiting, revocation, confirmation, a repeat that does not cause a second restart, and a real Git
+fetch and apply with exact bytes. Individual external clients and OAuth are not in that list.
