@@ -27,9 +27,9 @@ if (! exists) {
  * Commit the new version.
  * Only package.json goes in: `commit -a` swept in whatever else was open in the
  * working copy, and the tag below would then name a commit nobody reviewed
- * @param {string} version Version to update to
+ * @param version Version to update to
  */
-function commit(version) {
+function commit(version : string) : void {
     let msg = "Update to " + version;
 
     let res = childProcess.spawnSync("git", [ "commit", "-m", msg, "package.json" ]);
@@ -45,9 +45,9 @@ function commit(version) {
 
 /**
  * Create the tag of a release
- * @param {string} version Version to tag
+ * @param version Version to tag
  */
-function tag(version) {
+function tag(version : string) : void {
     let res = childProcess.spawnSync("git", [ "tag", "-a", tagName(version), "-m", tagName(version) ]);
     console.log(res.stdout.toString().trim());
 
@@ -59,10 +59,10 @@ function tag(version) {
 
 /**
  * Whether the release is already tagged
- * @param {string} version Version to check
- * @returns {boolean} Does the tag already exist
+ * @param version Version to check
+ * @returns Does the tag already exist
  */
-function tagExists(version) {
+function tagExists(version : string) : boolean {
     if (! version) {
         throw new Error("invalid version");
     }
@@ -76,9 +76,9 @@ function tagExists(version) {
  * Tag of a version.
  * Releases are read back from their tags, `v` and all - by the update check here
  * and by anyone reading the list, so the tag is written the same way every time
- * @param {string} version Version to name
- * @returns {string} Tag name
+ * @param version Version to name
+ * @returns Tag name
  */
-function tagName(version) {
+function tagName(version : string) : string {
     return version.startsWith("v") ? version : `v${version}`;
 }
