@@ -23,6 +23,14 @@ const CONSOLE_FONT_SIZE = 14;
 const CONSOLE_FONT_FAMILY = "'IBM Plex Mono', ui-monospace, monospace";
 const CONSOLE_FONT_FACE = "'IBM Plex Mono'";
 
+/**
+ * Сколько ждать консольный шрифт, прежде чем открывать терминал без него.
+ * Шрифт приходит по сети, и ждать его без предела нельзя: на медленном канале
+ * на месте терминала оставалась пустая коробка, потому что открытие так и не
+ * начиналось. Опоздавший шрифт пересчитает сетку сам
+ */
+const CONSOLE_FONT_WAIT_MS = 3000;
+
 export default {
     /**
      * @type {Terminal}
@@ -99,9 +107,20 @@ export default {
         // шрифт к этому моменту не загружен, xterm померяет запасной моноширинный и
         // разложит сетку под него: колонки встанут не по ширине панели, а текст - не по
         // колонкам, и так и останется до первого изменения размера окна
-        this.consoleFontReady().then(() => {
+        const font = this.consoleFontReady();
+
+        font.then(() => {
+            // Шрифт опоздал и терминал открылся запасным: пересчитать сетку под настоящий.
+            // Если терминал еще не открыт, подгонкой закончится само открытие
+            this.updateTerminalSize();
+        });
+
+        // Ожидание ограничено: лучше терминал запасным шрифтом, чем пустое место
+        const waited = new Promise(resolve => setTimeout(resolve, CONSOLE_FONT_WAIT_MS));
+
+        Promise.race([ font, waited ]).then(() => {
             // Пока грузился шрифт, вкладку могли закрыть
-            if (this.$refs.terminal) {
+            if (this.$refs.terminal && !this.terminal) {
                 this.openTerminal();
             }
         });

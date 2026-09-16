@@ -54,8 +54,11 @@ test("a bound secret reaches the container through /run/secrets", { skip }, asyn
             // The compose file now declares the secret and the service reference
             assert.match(stack.composeYAML, /secrets:\n {2}db_password:\n {4}file: \.\/\.secret\.db/);
 
-            await dockerInStack(stack, stack.getComposeOptions("up", "-d"));
-            await dockerInStack(stack, stack.getComposeOptions("wait", "app"));
+            // Контейнер печатает строку и сразу выходит, поэтому дожидаться его отдельной
+            // командой нельзя: `compose wait` в Compose 2 ищет работающие контейнеры и на
+            // уже вышедшем отвечает "no containers for project". Запуск без -d ждет сам -
+            // compose возвращает управление, когда контейнеры остановились
+            await dockerInStack(stack, stack.getComposeOptions("up"));
 
             const logs = await dockerInStack(stack, stack.getComposeOptions("logs", "app"));
             assert.match(logs, new RegExp(expectedHash));
@@ -97,8 +100,7 @@ test("the env file order decides which value compose interpolates", { skip }, as
                 secretBindings: [],
             });
 
-            await dockerInStack(stack, stack.getComposeOptions("up", "-d"));
-            await dockerInStack(stack, stack.getComposeOptions("wait", "app"));
+            await dockerInStack(stack, stack.getComposeOptions("up"));
 
             const logs = await dockerInStack(stack, stack.getComposeOptions("logs", "app"));
             assert.match(logs, /RESULT=override/);
@@ -112,8 +114,7 @@ test("the env file order decides which value compose interpolates", { skip }, as
                 secretBindings: [],
             });
 
-            await dockerInStack(stack, stack.getComposeOptions("up", "-d"));
-            await dockerInStack(stack, stack.getComposeOptions("wait", "app"));
+            await dockerInStack(stack, stack.getComposeOptions("up"));
 
             const reversed = await dockerInStack(stack, stack.getComposeOptions("logs", "app"));
             assert.match(reversed, /RESULT=base/);
