@@ -56,7 +56,7 @@ docker compose -f docker-compose.yml up -d --build
 The panel is now on http://localhost:5001 and asks for a setup code (see [Sign in](#sign-in)).
 
 `docker-compose.yml` is the production configuration and it is documented line by line inside the
-file. Two settings deserve attention before the first start:
+file. Three settings deserve attention before the first start:
 
 - `DOCKGE_STACKS_DIR` (default `/opt/stacks`): an absolute path, and the path on the host and inside
   the container must be identical. The panel runs `docker compose` inside the container, but the
@@ -68,30 +68,30 @@ file. Two settings deserve attention before the first start:
 - `PUID` and `PGID` set the owner of the stack files the panel creates. Both must be set, otherwise
   the files belong to `root`.
 
-## Запуск локально
+A proxy in front of the panel needs two more variables - see
+[behind a reverse proxy](#behind-a-reverse-proxy). Updating means rebuilding the image from the
+checkout, and the previous image stays on the host for a rollback - see
+[how to update](#how-to-update).
 
-Локальная разработка поднимается одной командой из корня репозитория:
+## Development
 
-```bash
-cp .env.example .env   # достаточно один раз
-./local.sh             # ./local.sh -d, если нужен фон
-```
-
-Скрипт пересоздает контейнеры проекта `dockge2-local` по `docker-compose.local.yml`
-и запускает внутри `npm run dev`: Vite на http://localhost:5000 и бэкенд на
-http://localhost:5001, оба с автоперезапуском. Зависимости ставятся в отдельный
-том `node_modules`, каталог стеков по умолчанию - `/tmp/dockge2-stacks`
-(меняется через `DOCKGE_LOCAL_STACKS_DIR`).
-
-Остановить: `docker compose -p dockge2-local -f docker-compose.local.yml down`.
-
-Production-конфигурация лежит в `docker-compose.yml`: образ собирается из этого
-репозитория, поэтому сначала `npm run build:frontend`.
+Local development runs in one container, so the host needs only Docker and a `.env`:
 
 ```bash
-npm run build:frontend
-docker compose -f docker-compose.yml up -d --build
+cp .env.example .env   # once
+./local.sh             # ./local.sh -d to keep it in the background
 ```
+
+The script recreates the `dockge2-local` project from `docker-compose.local.yml` and runs
+`npm run dev` inside it: Vite on http://localhost:5000, the backend on http://localhost:5001, both
+reloading on change. Dependencies live in their own `node_modules` volume, and the stacks directory
+defaults to `/tmp/dockge2-stacks` (`DOCKGE_LOCAL_STACKS_DIR` changes it), so development never
+touches your real `/opt/stacks`.
+
+Stop it with `docker compose -p dockge2-local -f docker-compose.local.yml down`.
+
+`npm run check` - lint, strict types and unit tests - is what a change has to pass before it is
+submitted; the browser tests are `npm run test:e2e`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Sign in
 
@@ -180,8 +180,8 @@ command, not a browser action.
   keeps attached volumes and bind mounts.
 - `--force-recreate` (`npm run update-docker -- --force-recreate`) forces recreation without deleting
   attached data.
-- `--pull always` makes sure a new image is actually checked, and `--wait --wait-timeout 60` fails
-  instead of leaving the update in an undefined state.
+- `docker compose config --quiet` validates the configuration before anything is restarted, and
+  `--wait --wait-timeout 60` fails instead of leaving the update in an undefined state.
 - The command refuses to run with a dirty working copy, and it never runs `docker compose down -v`,
   `docker volume prune`, `git reset --hard` or `git clean -fdx`.
 - Keep `./data` outside the Git checkout in production, for example `/var/lib/dockge2/data`, so that even
