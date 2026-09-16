@@ -14,13 +14,13 @@ test.describe("signing in and out", () => {
         await page.goto("/");
 
         // Without a session the UI shows the login form, not the stack list
-        const email = page.locator("#floatingInput");
-        await expect(page.locator(".form-container")).toBeVisible();
+        const email = page.locator("#login-identifier");
+        await expect(page.locator(".auth-card")).toBeVisible();
         await expect(email).toBeVisible();
         await expect(page.locator(".item", { hasText: E2E_STACK_NAME })).toHaveCount(0);
 
         await email.fill(E2E_ADMIN_EMAIL);
-        await page.locator("#floatingPassword").fill(E2E_ADMIN_PASSWORD);
+        await page.locator("#login-password").fill(E2E_ADMIN_PASSWORD);
         await page.locator("form button[type=submit]").click();
 
         // The dashboard is only reachable with a session behind the socket handshake
@@ -48,8 +48,8 @@ test.describe("signing in and out", () => {
     test("wrong credentials keep the login form and say so", async ({ page }) => {
         await page.goto("/");
 
-        await page.locator("#floatingInput").fill(E2E_ADMIN_EMAIL);
-        await page.locator("#floatingPassword").fill("definitely-not-the-password");
+        await page.locator("#login-identifier").fill(E2E_ADMIN_EMAIL);
+        await page.locator("#login-password").fill("definitely-not-the-password");
 
         const refused = page.waitForResponse((response) => response.url().includes("/sign-in/email"));
         await page.locator("form button[type=submit]").click();
@@ -62,8 +62,8 @@ test.describe("signing in and out", () => {
 
     test("logging out ends the session on the server as well", async ({ page, context }) => {
         await page.goto("/");
-        await page.locator("#floatingInput").fill(E2E_ADMIN_EMAIL);
-        await page.locator("#floatingPassword").fill(E2E_ADMIN_PASSWORD);
+        await page.locator("#login-identifier").fill(E2E_ADMIN_EMAIL);
+        await page.locator("#login-password").fill(E2E_ADMIN_PASSWORD);
         await page.locator("form button[type=submit]").click();
         await expect(page.locator(".item", { hasText: E2E_STACK_NAME })).toBeVisible();
 
@@ -86,7 +86,7 @@ test.describe("signing in and out", () => {
         await page.locator("#logout-btn").click();
 
         // Back at the login form, and the cookie of that session identifies nobody
-        await expect(page.locator("#floatingPassword")).toBeVisible();
+        await expect(page.locator("#login-password")).toBeVisible();
 
         const after = await page.request.get(SESSION_URL, {
             headers: {

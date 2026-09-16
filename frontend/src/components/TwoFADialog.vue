@@ -4,61 +4,60 @@
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title">
-                            {{ $t("Setup 2FA") }}
-                            <span v-if="twoFAStatus == true" class="badge bg-primary">{{ $t("Active") }}</span>
-                            <span v-if="twoFAStatus == false" class="badge bg-primary">{{ $t("Inactive") }}</span>
-                        </h5>
+                        <h2 class="modal-title">{{ $t("Setup 2FA") }}</h2>
+                        <StateChip
+                            v-if="twoFAStatus !== null"
+                            class="two-fa-state"
+                            :state="twoFAStatus ? 'running' : 'stopped'"
+                            :label="$t(twoFAStatus ? 'Active' : 'Inactive')"
+                        />
                         <button :disabled="processing" type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" />
                     </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <div v-if="uri && twoFAStatus == false" class="mx-auto text-center" style="width: 210px;">
-                                <vue-qrcode :key="uri" :value="uri" type="image/png" :quality="1" :color="{ light: '#ffffffff' }" />
-                                <button v-show="!showURI" type="button" class="btn btn-outline-primary btn-sm mt-2" @click="showURI = true">{{ $t("Show URI") }}</button>
-                            </div>
-                            <p v-if="showURI && twoFAStatus == false" class="text-break mt-2">{{ uri }}</p>
 
-                            <div v-if="!(uri && twoFAStatus == false)" class="mb-3">
-                                <label for="current-password" class="form-label">
-                                    {{ $t("Current Password") }}
-                                </label>
-                                <input
-                                    id="current-password"
-                                    v-model="currentPassword"
-                                    type="password"
-                                    class="form-control"
-                                    autocomplete="current-password"
-                                    :disabled="processing"
-                                    required
-                                />
-                            </div>
+                    <div class="modal-body form-stack">
+                        <div v-if="uri && twoFAStatus === false" class="qr">
+                            <vue-qrcode :key="uri" :value="uri" type="image/png" :quality="1" :color="{ light: '#ffffffff' }" />
+                            <button v-show="!showURI" type="button" class="btn btn-sm btn-normal" @click="showURI = true">{{ $t("Show URI") }}</button>
+                            <p v-if="showURI" class="uri">{{ uri }}</p>
+                        </div>
 
-                            <button v-if="uri == null && twoFAStatus == false" class="btn btn-primary" type="button" @click="prepare2FA()">
-                                {{ $t("Enable 2FA") }}
-                            </button>
+                        <div v-if="!(uri && twoFAStatus === false)" class="field">
+                            <label for="current-password" class="form-label">{{ $t("Current Password") }}</label>
+                            <input
+                                id="current-password"
+                                v-model="currentPassword"
+                                type="password"
+                                class="form-control"
+                                autocomplete="current-password"
+                                :disabled="processing"
+                                required
+                            />
+                        </div>
 
-                            <button v-if="twoFAStatus == true" class="btn btn-danger" type="button" :disabled="processing" @click="confirmDisableTwoFA()">
-                                {{ $t("Disable 2FA") }}
-                            </button>
+                        <div v-if="uri === null && twoFAStatus === false" class="actions">
+                            <button class="btn btn-primary" type="button" @click="prepare2FA()">{{ $t("Enable 2FA") }}</button>
+                        </div>
 
-                            <div v-if="uri && twoFAStatus == false" class="mt-3">
-                                <label for="totp-code" class="form-label">{{ $t("twoFAVerifyLabel") }}</label>
-                                <input id="totp-code" v-model="token" type="text" maxlength="6" class="form-control" autocomplete="one-time-code" :disabled="processing" required>
-                            </div>
+                        <div v-if="twoFAStatus === true" class="actions">
+                            <button class="btn btn-normal btn-danger-text" type="button" :disabled="processing" @click="confirmDisableTwoFA()">{{ $t("Disable 2FA") }}</button>
+                        </div>
 
-                            <!-- Shown once: these are the only way back in without the authenticator -->
-                            <div v-if="backupCodes.length > 0" class="mt-3">
-                                <label class="form-label">{{ $t("backupCodes") }}</label>
-                                <p class="form-text">{{ $t("backupCodesHint") }}</p>
-                                <pre class="backup-codes">{{ backupCodes.join("\n") }}</pre>
-                            </div>
+                        <div v-if="uri && twoFAStatus === false" class="field">
+                            <label for="totp-code" class="form-label">{{ $t("twoFAVerifyLabel") }}</label>
+                            <input id="totp-code" v-model="token" type="text" maxlength="6" class="form-control" autocomplete="one-time-code" :disabled="processing" required>
+                        </div>
+
+                        <!-- Показаны один раз: без приложения это единственный путь назад -->
+                        <div v-if="backupCodes.length > 0" class="field">
+                            <span class="form-label">{{ $t("backupCodes") }}</span>
+                            <pre class="backup-codes">{{ backupCodes.join("\n") }}</pre>
+                            <p class="form-text">{{ $t("backupCodesHint") }}</p>
                         </div>
                     </div>
 
-                    <div v-if="uri && twoFAStatus == false" class="modal-footer">
+                    <div v-if="uri && twoFAStatus === false" class="modal-footer">
                         <button type="submit" class="btn btn-primary" :disabled="processing || !token">
-                            <div v-if="processing" class="spinner-border spinner-border-sm me-1"></div>
+                            <div v-if="processing" class="spinner-border spinner-border-sm"></div>
                             {{ $t("Save") }}
                         </button>
                     </div>
@@ -67,7 +66,7 @@
         </div>
     </form>
 
-    <Confirm ref="confirmEnableTwoFA" btn-style="btn-danger" :yes-text="$t('Yes')" :no-text="$t('No')" @yes="save2FA">
+    <Confirm ref="confirmEnableTwoFA" btn-style="btn-primary" :yes-text="$t('Yes')" :no-text="$t('No')" @yes="save2FA">
         {{ $t("confirmEnableTwoFAMsg") }}
     </Confirm>
 
@@ -82,11 +81,13 @@ import Confirm from "./Confirm.vue";
 import { authClient } from "../auth-client";
 import { authErrorMessage } from "../auth-messages";
 import VueQrcode from "vue-qrcode";
+import StateChip from "./StateChip.vue";
 import { toast } from "vue3-toastify";
 
 export default {
     components: {
         Confirm,
+        StateChip,
         VueQrcode,
     },
     props: {},
@@ -232,14 +233,35 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.backup-codes {
-    padding: 0.5rem;
-    border-radius: var(--radius-panel);
-    background-color: var(--surface-raised);
-    font-family: var(--font-mono);
+.two-fa-state {
+    margin-left: var(--gap-sm);
 }
 
-// Текст модального окна: один токен на обе темы вместо правила под тёмную
+// Код для приложения стоит по центру своего блока и не растягивает окно
+.qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--gap-sm);
+}
+
+.uri {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+}
+
+.backup-codes {
+    margin: 0;
+    padding: var(--gap-sm);
+    border-radius: var(--radius-control);
+    background-color: var(--surface-sunken);
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+}
+
+// Текст окна: один токен на обе темы вместо правила под темную
 .modal-dialog {
     .form-text, p {
         color: var(--text-muted);

@@ -1,95 +1,90 @@
 <template>
-    <div>
-        <div v-if="settingsLoaded" class="my-4">
-            <!-- Change Password -->
-            <template v-if="!settings.disableAuth">
-                <p>
-                    {{ $t("Current User") }}: <strong>{{ $root.username }}</strong>
-                    <button v-if="! settings.disableAuth" id="logout-btn" class="btn btn-danger ms-4 me-2 mb-2" @click="$root.logout">{{ $t("Logout") }}</button>
-                </p>
+    <!-- Безопасность разложена по панелям: учетная запись, второй фактор и
+         отключение входа. Каждая говорит, что именно она меняет -->
+    <div v-if="settingsLoaded" class="security">
+        <section v-if="!settings.disableAuth" class="panel">
+            <div class="panel-bar">
+                <h2 class="panel-title"><InterfaceIcon name="lock" />{{ $t("securityAccount") }}</h2>
+                <span class="panel-meta">{{ $root.username }}</span>
+            </div>
 
-                <h5 class="my-4 settings-subheading">{{ $t("Change Password") }}</h5>
-                <form class="mb-3" @submit.prevent="savePassword">
-                    <div class="mb-3">
-                        <label for="current-password" class="form-label">
-                            {{ $t("Current Password") }}
-                        </label>
-                        <input
-                            id="current-password"
-                            v-model="password.currentPassword"
-                            type="password"
-                            class="form-control"
-                            autocomplete="current-password"
-                            required
-                        />
-                    </div>
+            <form class="panel-body form-stack" @submit.prevent="savePassword">
+                <div class="field">
+                    <label for="current-password" class="form-label">{{ $t("Current Password") }}</label>
+                    <input
+                        id="current-password"
+                        v-model="password.currentPassword"
+                        type="password"
+                        class="form-control"
+                        autocomplete="current-password"
+                        required
+                    />
+                </div>
 
-                    <div class="mb-3">
-                        <label for="new-password" class="form-label">
-                            {{ $t("New Password") }}
-                        </label>
-                        <input
-                            id="new-password"
-                            v-model="password.newPassword"
-                            type="password"
-                            class="form-control"
-                            autocomplete="new-password"
-                            required
-                        />
-                    </div>
+                <div class="field">
+                    <label for="new-password" class="form-label">{{ $t("New Password") }}</label>
+                    <input
+                        id="new-password"
+                        v-model="password.newPassword"
+                        type="password"
+                        class="form-control"
+                        autocomplete="new-password"
+                        required
+                    />
+                </div>
 
-                    <div class="mb-3">
-                        <label for="repeat-new-password" class="form-label">
-                            {{ $t("Repeat New Password") }}
-                        </label>
-                        <input
-                            id="repeat-new-password"
-                            v-model="password.repeatNewPassword"
-                            type="password"
-                            class="form-control"
-                            :class="{ 'is-invalid': invalidPassword }"
-                            autocomplete="new-password"
-                            required
-                        />
-                        <div class="invalid-feedback">
-                            {{ $t("passwordNotMatchMsg") }}
-                        </div>
-                    </div>
+                <div class="field">
+                    <label for="repeat-new-password" class="form-label">{{ $t("Repeat New Password") }}</label>
+                    <input
+                        id="repeat-new-password"
+                        v-model="password.repeatNewPassword"
+                        type="password"
+                        class="form-control"
+                        :class="{ 'is-invalid': invalidPassword }"
+                        autocomplete="new-password"
+                        required
+                    />
+                    <div class="invalid-feedback">{{ $t("passwordNotMatchMsg") }}</div>
+                </div>
 
-                    <div>
-                        <button class="btn btn-primary" type="submit" :disabled="processing">
-                            <div v-if="processing" class="spinner-border spinner-border-sm me-1"></div>
-                            {{ $t("Update Password") }}
-                        </button>
-                    </div>
-                </form>
-            </template>
-
-            <div v-if="! settings.disableAuth" class="mt-5 mb-3">
-                <h5 class="my-4 settings-subheading">
-                    {{ $t("Two Factor Authentication") }}
-                </h5>
-                <div class="mb-4">
-                    <button
-                        class="btn btn-primary me-2"
-                        type="button"
-                        @click="$refs.TwoFADialog.show()"
-                    >
-                        {{ $t("2FA Settings") }}
+                <div class="actions">
+                    <button class="btn btn-primary" type="submit" :disabled="processing">
+                        <div v-if="processing" class="spinner-border spinner-border-sm"></div>
+                        {{ $t("Update Password") }}
                     </button>
+                    <button id="logout-btn" class="btn btn-normal btn-danger-text" type="button" @click="$root.logout">{{ $t("Logout") }}</button>
                 </div>
+            </form>
+        </section>
+
+        <section v-if="!settings.disableAuth" class="panel">
+            <div class="panel-bar">
+                <h2 class="panel-title"><ShieldCheck />{{ $t("Two Factor Authentication") }}</h2>
             </div>
 
-            <div class="my-4">
-                <!-- Advanced -->
-                <h5 class="my-4 settings-subheading">{{ $t("Advanced") }}</h5>
-
-                <div class="mb-4">
-                    <button v-if="settings.disableAuth" id="enableAuth-btn" class="btn btn-outline-primary me-2 mb-2" @click="enableAuth">{{ $t("Enable Auth") }}</button>
-                    <button v-if="! settings.disableAuth" id="disableAuth-btn" class="btn btn-primary me-2 mb-2" @click="confirmDisableAuth">{{ $t("Disable Auth") }}</button>
+            <div class="panel-body form-stack">
+                <p class="form-text">{{ $t("securityTwoFactorHint") }}</p>
+                <div class="actions">
+                    <button class="btn btn-normal" type="button" @click="$refs.TwoFADialog.show()">{{ $t("2FA Settings") }}</button>
                 </div>
             </div>
-        </div>
+        </section>
+
+        <section v-if="$root.isAdmin" class="panel">
+            <div class="panel-bar">
+                <!-- Панель называется тем, что в ней делают: "Расширенные" не говорило
+                     ни о входе, ни о том, что кнопка внутри одна -->
+                <h2 class="panel-title"><InterfaceIcon name="key" />{{ $t("securitySignIn") }}</h2>
+            </div>
+
+            <div class="panel-body form-stack">
+                <p class="form-text">{{ $t("securityAdvancedHint") }}</p>
+                <div class="actions">
+                    <button v-if="settings.disableAuth" id="enableAuth-btn" class="btn btn-normal" @click="enableAuth">{{ $t("Enable Auth") }}</button>
+                    <button v-else id="disableAuth-btn" class="btn btn-normal btn-danger-text" @click="confirmDisableAuth">{{ $t("Disable Auth") }}</button>
+                </div>
+            </div>
+        </section>
 
         <TwoFADialog ref="TwoFADialog" />
 
@@ -108,10 +103,8 @@
 
             <p>{{ $t("Please use this option carefully!") }}</p>
 
-            <div class="mb-3">
-                <label for="current-password2" class="form-label">
-                    {{ $t("Current Password") }}
-                </label>
+            <div class="field">
+                <label for="current-password2" class="form-label">{{ $t("Current Password") }}</label>
                 <input
                     id="current-password2"
                     v-model="password.currentPassword"
@@ -127,13 +120,17 @@
 <script>
 import Confirm from "../../components/Confirm.vue";
 import TwoFADialog from "../../components/TwoFADialog.vue";
+import InterfaceIcon from "../InterfaceIcon.vue";
+import ShieldCheck from "../ShieldCheck.vue";
 import { authClient } from "../../auth-client";
 import { authErrorMessage, passwordChangeRequest } from "../../auth-messages";
 
 export default {
     components: {
         Confirm,
-        TwoFADialog
+        TwoFADialog,
+        InterfaceIcon,
+        ShieldCheck,
     },
 
     data() {
@@ -227,3 +224,12 @@ export default {
     },
 };
 </script>
+
+<style lang="scss" scoped>
+// Панели раздела стоят колонкой с тем же шагом, что панели файлов
+.security {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+}
+</style>

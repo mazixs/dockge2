@@ -1,14 +1,14 @@
 import readline from "readline";
 import { Database } from "../backend/database";
 import { DockgeServer } from "../backend/dockge-server";
+import { resetInstanceAccounts } from "../backend/auth-access";
 import { log } from "../backend/log";
 
 /**
- * Remove the account of this Dockge instance, so the setup screen can create a new one.
+ * Remove all accounts locally, so protected setup can issue a replacement owner.
  *
- * Passwords are hashed and managed by the auth library, and this tool deliberately does
- * not touch hashes or sessions: it deletes the account rows and lets the normal setup
- * flow create the next owner. Stacks, settings and agents are left alone.
+ * The command removes credentials, sessions and the one-use setup claim together.
+ * Normal setup creates the next owner after restart. Stacks, settings and agents stay.
  */
 console.log("== Dockge Reset Account Tool ==");
 
@@ -53,33 +53,20 @@ export const main = async () => {
 
         console.log("Account: " + users.map((user) => user.email).join(", "));
         console.log("");
-        console.log("This removes the account and all its sessions. Stacks, settings and agents stay.");
+        console.log("This removes ALL user accounts and their sessions. Stacks, settings and agents stay.");
         console.log("Afterwards Dockge shows the setup screen again, so create the new account there.");
 
         if (!process.env.TEST_BACKEND) {
-            const answer = await ask("Remove the account? [y/N] ");
+            const answer = await ask("Remove ALL user accounts? [y/N] ");
 
             if (answer.trim().toLowerCase() !== "y") {
                 console.log("Nothing was changed.");
                 return;
             }
 
-            // One transaction, because a half removed account is worse than none:
-            // a user row without its credentials cannot sign in and cannot be replaced,
-            // since the setup screen only appears while there is no account at all
-            await knex.transaction(async (trx) => {
-                // Order matters: rows that reference the user go first
-                await trx("session").del();
-                await trx("account").del();
+            await resetInstanceAccounts();
 
-                if (await trx.schema.hasTable("twoFactor")) {
-                    await trx("twoFactor").del();
-                }
-
-                await trx("user").del();
-            });
-
-            console.log("The account was removed. Restart Dockge if it is running, then open the UI.");
+            console.log("All accounts were removed. Restart Dockge, read the new bootstrap-token in its data directory, then open the UI.");
         }
     } catch (e) {
         if (e instanceof Error) {

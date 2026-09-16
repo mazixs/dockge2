@@ -18,6 +18,12 @@ interface AuthClientError {
  * mapped to a key of our own and the English text is only the fallback.
  */
 const AUTH_ERROR_KEYS : Record<string, string> = {
+    INVALID_USERNAME_OR_PASSWORD: "authInvalidCredentials",
+    INVALID_USERNAME: "authInvalidUsername",
+    USERNAME_IS_ALREADY_TAKEN: "authAccountExists",
+    INVALID_BOOTSTRAP_TOKEN: "authInvalidBootstrapToken",
+    EMAIL_PASSWORD_SIGN_UP_DISABLED: "authSetupComplete",
+    SETUP_COMPLETE: "authSetupComplete",
     INVALID_EMAIL_OR_PASSWORD: "authInvalidCredentials",
     INVALID_EMAIL: "authInvalidEmail",
     PASSWORD_TOO_SHORT: "authPasswordTooShort",

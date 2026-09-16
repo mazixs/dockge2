@@ -1,5 +1,5 @@
 import { createAuthClient } from "better-auth/client";
-import { twoFactorClient } from "better-auth/client/plugins";
+import { twoFactorClient, usernameClient } from "better-auth/client/plugins";
 
 /**
  * Where the auth endpoints live.
@@ -38,10 +38,16 @@ function readDevFlag() : boolean {
 export const authClient = createAuthClient({
     baseURL: resolveBaseURL(),
     basePath: "/api/auth",
-    plugins: [ twoFactorClient() ],
+    plugins: [ twoFactorClient(), usernameClient() ],
     fetchOptions: {
         credentials: "include",
     },
 });
 
 export type AuthSession = Awaited<ReturnType<typeof authClient.getSession>>;
+
+/** Create the first owner with the one-use credential held on the server. */
+export function bootstrapOwner(body : { token : string; username : string; email : string; password : string; name : string }) {
+    return authClient.$fetch<{ ok : boolean }>("/bootstrap", { method: "POST",
+        body });
+}

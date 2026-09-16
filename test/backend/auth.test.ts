@@ -4,15 +4,15 @@ import { countUsers, getAuth, getSessionFromHeaders } from "../../backend/auth";
 import { doubleCheckPassword } from "../../backend/util-server";
 import { createTestAccount, makeAuthenticatedSocket, TEST_PASSWORD, withDatabase } from "../helpers/database";
 
-test("the first account is created through the auth endpoints and gets a session cookie", async () => {
+test("an issued account signs in and gets a session cookie", async () => {
     await withDatabase(async () => {
         assert.equal(await countUsers(), 0);
 
-        const response = await getAuth().api.signUpEmail({
+        await createTestAccount();
+        const response = await getAuth().api.signInEmail({
             body: {
                 email: "owner@example.com",
                 password: TEST_PASSWORD,
-                name: "Owner",
             },
             asResponse: true,
         });
@@ -164,11 +164,11 @@ test("a proxy deployment can force the Secure flag on session cookies", async ()
 
     try {
         await withDatabase(async () => {
-            const response = await getAuth().api.signUpEmail({
+            await createTestAccount();
+            const response = await getAuth().api.signInEmail({
                 body: {
                     email: "owner@example.com",
                     password: TEST_PASSWORD,
-                    name: "Owner",
                 },
                 asResponse: true,
             });

@@ -40,6 +40,11 @@ export class MainSocketHandler extends SocketHandler {
         socket.on("getSettings", async (callback) => {
             try {
                 checkLogin(socket);
+                if (socket.userRole && socket.userRole !== "admin") {
+                    callbackResult({ ok: true,
+                        data: { disableAuth: Boolean(await Settings.get("disableAuth")) } }, callback);
+                    return;
+                }
                 const data = await Settings.getSettings("general");
 
                 if (fs.existsSync(path.join(server.stacksDir, "global.env"))) {
