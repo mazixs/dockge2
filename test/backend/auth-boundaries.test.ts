@@ -1,6 +1,7 @@
 import { issueUser } from "../../backend/auth-access";
 import { strict as assert } from "node:assert";
 import test from "node:test";
+import { isHandshakeOriginTrusted } from "../../backend/dockge-server";
 import type { DockgeServer } from "../../backend/dockge-server";
 import {
     CLIENT_IP_HEADER,
@@ -99,6 +100,61 @@ test("the origin of the address the browser asked for is trusted, a foreign one 
     } finally {
         delete process.env.DOCKGE_TRUST_PROXY;
     }
+});
+
+test("a socket handshake behind a proxy is judged by the same trusted origins", async () => {
+    const server = serverStub({ port: 5001 });
+
+    // Direct visit: the browser asked for the very address this process answers on
+    assert.equal(isHandshakeOriginTrusted(server, {
+        host: "192.168.1.10:5001",
+        origin: "http://192.168.1.10:5001",
+    }), true);
+
+    assert.equal(isHandshakeOriginTrusted(server, {
+        host: "192.168.1.10:5001",
+        origin: "http://evil.example.com",
+    }), false);
+
+    // A proxy rewrites Host, so the origin of the public address matches nothing
+    // this process sees. Refusing it left the page loaded and the socket dead
+    const proxied = {
+        host: "localhost",
+        origin: "https://panel.example.com",
+        "x-forwarded-host": "panel.example.com",
+        "x-forwarded-proto": "https",
+    };
+
+    assert.equal(isHandshakeOriginTrusted(server, proxied), false);
+
+    process.env.DOCKGE_TRUST_PROXY = "true";
+
+    try {
+        assert.equal(isHandshakeOriginTrusted(server, proxied), true);
+
+        // The forwarded header of a foreign host still proves nothing about the origin
+        assert.equal(isHandshakeOriginTrusted(server, {
+            ...proxied,
+            origin: "https://evil.example.com",
+        }), false);
+    } finally {
+        delete process.env.DOCKGE_TRUST_PROXY;
+    }
+
+    process.env.DOCKGE_PUBLIC_URL = "https://panel.example.com";
+
+    try {
+        // The public address is configured, so it is trusted without trusting headers
+        assert.equal(isHandshakeOriginTrusted(server, {
+            host: "localhost",
+            origin: "https://panel.example.com",
+        }), true);
+    } finally {
+        delete process.env.DOCKGE_PUBLIC_URL;
+    }
+
+    // An agent or a health check sends no origin, and the session still decides
+    assert.equal(isHandshakeOriginTrusted(server, { host: "localhost:5001" }), true);
 });
 
 test("an extra origin can be configured, and nothing else is added", async () => {
