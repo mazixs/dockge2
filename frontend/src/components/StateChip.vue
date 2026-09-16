@@ -176,7 +176,7 @@ export default {
     padding: 0;
     border: 0;
     background: none;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-muted);
 
     .dot {

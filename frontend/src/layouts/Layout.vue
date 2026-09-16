@@ -254,7 +254,7 @@ export default {
 .brand { display: inline-flex; gap: var(--gap-sm); align-items: center; color: var(--text-strong); text-decoration: none; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: var(--tracking-title); width: calc(var(--sidebar-width) - var(--gap-xl) * 2); flex-shrink: 0; }
 .brand-icon { font-size: var(--text-title-sm); color: var(--accent-text); }
 .header-right { margin-left: auto; display: flex; gap: var(--gap-xl); align-items: center; }
-.connection-state { font-size: var(--text-xs); color: var(--text-muted); display: flex; align-items: center; gap: var(--gap-sm); white-space: nowrap; }
+.connection-state { font-size: var(--text-sm); color: var(--text-muted); display: flex; align-items: center; gap: var(--gap-sm); white-space: nowrap; }
 .connection-state i { background: var(--state-running); width: 6px; height: 6px; border-radius: 50%; }
 .connection-state.offline i { background: var(--state-failed); }
 .profile-trigger { background: transparent; border: none; padding: var(--gap-xs); min-width: 44px; min-height: 44px; }

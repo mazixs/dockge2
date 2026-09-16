@@ -530,7 +530,7 @@ export default {
 .run-time {
     flex: none;
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
 }
 
@@ -665,8 +665,8 @@ export default {
 .log-subtitle {
     margin: 0;
     color: var(--text-faint);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .modal-body {
@@ -728,7 +728,7 @@ export default {
 
 .step-time {
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
     text-align: right;
 }
@@ -757,8 +757,8 @@ export default {
     margin: 0;
     min-width: 0;
     color: var(--text-faint);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .progress-foot svg {

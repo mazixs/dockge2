@@ -322,8 +322,8 @@ export default {
 .eyebrow {
     margin: 0 0 var(--gap-xs);
     color: var(--text-muted);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .subtitle {
@@ -341,8 +341,8 @@ export default {
     border-radius: var(--radius-chip);
     background-color: var(--surface-raised);
     color: var(--text-muted);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .state-label.running {
@@ -359,8 +359,8 @@ export default {
     border-top: 1px solid var(--line-hair);
     border-bottom: 1px solid var(--line-hair);
     color: var(--text-muted);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .change-context > span:last-child {
@@ -380,8 +380,8 @@ export default {
     flex-wrap: wrap;
     gap: var(--gap-md);
     color: var(--text-muted);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 // Что требуется от пользователя прямо сейчас
@@ -396,8 +396,8 @@ export default {
 
     span {
         color: var(--text-muted);
-        font-size: var(--text-xs);
-        line-height: var(--line-xs);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
     }
 }
 
@@ -435,7 +435,7 @@ export default {
 
     > span {
         color: var(--text-faint);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
     }
 }
 
@@ -463,8 +463,8 @@ export default {
 
     strong {
         display: block;
-        font-size: var(--text-xs);
-        line-height: var(--line-xs);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
         overflow-wrap: anywhere;
     }
 
@@ -472,8 +472,8 @@ export default {
         display: block;
         margin-top: 2px;
         color: var(--text-faint);
-        font-size: var(--text-xs);
-        line-height: var(--line-xs);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
     }
 }
 
@@ -495,8 +495,8 @@ export default {
     margin: auto 0 0;
     padding: var(--gap-lg) var(--gap-sm) var(--gap-xs);
     color: var(--text-faint);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .diff-detail {
@@ -520,8 +520,8 @@ export default {
 
     span {
         color: var(--text-muted);
-        font-size: var(--text-xs);
-        line-height: var(--line-xs);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
     }
 }
 
@@ -551,13 +551,13 @@ export default {
     gap: var(--gap-sm);
     padding: var(--gap-sm) var(--gap-md);
     border-bottom: 1px solid var(--line-hair);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 
     > span, code {
         margin-left: auto;
         color: var(--text-muted);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
     }
 
     code {
@@ -668,8 +668,8 @@ pre code {
     label, p {
         margin: 0;
         color: var(--text-muted);
-        font-size: var(--text-xs);
-        line-height: var(--line-xs);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
     }
 }
 
@@ -732,7 +732,7 @@ pre code {
     > span:first-of-type {
         margin-left: auto;
         color: var(--text-muted);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
     }
 
     > span:last-of-type {

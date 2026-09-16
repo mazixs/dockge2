@@ -487,7 +487,7 @@ legend.form-label {
 .peer-name {
     margin-left: var(--gap-sm);
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 }
 
 .peer {
@@ -517,15 +517,15 @@ legend.form-label {
 
 .row-meta {
     color: var(--text-faint);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
     overflow-wrap: anywhere;
 }
 
 .audit-row {
     display: block;
     color: var(--text-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-family: var(--font-mono);
 }
 

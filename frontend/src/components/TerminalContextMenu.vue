@@ -141,7 +141,7 @@ export default {
 
 .menu-message {
     padding: var(--gap-xs) var(--gap-sm);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     opacity: 0.8;
 }
 </style>

@@ -295,7 +295,7 @@ a.item {
     align-items: center;
     gap: var(--gap-xs);
     margin-left: 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-faint);
     flex-wrap: wrap;
 }
@@ -309,7 +309,7 @@ a.item {
 
 .fresh-badge {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--state-running);
     border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
     border-radius: var(--radius-chip);

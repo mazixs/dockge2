@@ -170,7 +170,7 @@ export default {
 .agent-url {
     overflow-wrap: anywhere;
     color: var(--text-muted);
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 </style>

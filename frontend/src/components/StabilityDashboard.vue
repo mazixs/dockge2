@@ -409,7 +409,7 @@ export default defineComponent({
     flex-wrap: wrap;
     gap: var(--gap-md);
     margin-top: var(--gap-sm);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-muted);
 }
 
@@ -482,7 +482,7 @@ export default defineComponent({
 
 .group-count {
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: var(--weight-regular);
 }
 
@@ -511,7 +511,7 @@ export default defineComponent({
 
 .container-table thead th {
     font-weight: var(--weight-regular);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 }
 
 .container-table tr + tr {
@@ -530,7 +530,7 @@ export default defineComponent({
     display: block;
     margin-top: var(--gap-xs);
     color: var(--text-faint);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: var(--weight-regular);
 }
 

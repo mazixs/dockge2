@@ -89,8 +89,8 @@ export default {
 
 .versions {
     margin: 0;
-    font-size: var(--text-xs);
-    line-height: var(--line-xs);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
     color: var(--text-faint);
 }
 

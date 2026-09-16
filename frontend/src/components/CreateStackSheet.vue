@@ -657,7 +657,7 @@ h2 {
 
 .head-note {
     color: var(--text-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     display: flex;
     align-items: center;
     gap: var(--gap-xs);
@@ -711,7 +711,7 @@ h2 {
 
 .sub {
     color: var(--text-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
 }
 
 .path {
@@ -727,7 +727,7 @@ textarea {
     color: var(--text-strong);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
-    line-height: var(--line-xs);
+    line-height: var(--line-sm);
     padding: var(--gap-sm) var(--gap-md);
     resize: vertical;
 
@@ -827,7 +827,7 @@ textarea {
     .kind {
         flex: none;
         font-family: var(--font-mono);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         color: var(--text-muted);
         border: 1px solid var(--line-hair);
         border-radius: var(--radius-chip);
@@ -864,7 +864,7 @@ textarea {
 
     > span {
         color: var(--text-muted);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
     }
 
     input,
