@@ -945,10 +945,12 @@ textarea.form-control {
     font-size: var(--text-sm);
 }
 
-// Метка говорит, что стоит рядом: "Внимание" на главной, "Причина" на стеке
+// Метка говорит, что стоит рядом: "Внимание" на главной, "Причина" на стеке.
+// Выравнивание отдает контейнеру: на широком экране он ставит все по центру,
+// на узком - по верху, где причины занимают несколько строк. Свой
+// `align-self: flex-start` перебивал и то и другое, и метка стояла выше текста
 .attention-badge {
     flex: none;
-    align-self: flex-start;
     display: inline-flex;
     align-items: center;
     gap: var(--gap-sm);
@@ -956,7 +958,7 @@ textarea.form-control {
     border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
     border-radius: var(--radius-chip);
     color: var(--state-attention);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     white-space: nowrap;
 }
 
@@ -1026,46 +1028,45 @@ body.dark {
  * Transitions
  */
 
-// page-change
-.slide-fade-enter-active {
-    transition: all var(--motion-base) var(--motion-ease-in);
+// Смена страницы и раздела настроек.
+//
+// Три вещи здесь были не так. `transition: all` брал в переход и раскладку, и
+// цвет, так что вместе с содержимым ехала и коробка под ним. Смещение в 50px
+// проходило за 160 миллисекунд - это скорость, на которой панель не появляется,
+// а прилетает, и глазу приходится ее догонять. И кривая `ease-in` начинает
+// медленно, а заканчивает быстро: она правильна для ухода, а появление по ней
+// врезается в конечное положение.
+//
+// Теперь переход трогает только прозрачность и сдвиг, сдвиг сокращен до
+// намека на направление, появление идет по затухающей кривой, а уход - быстрее
+// появления, потому что ушедшего ждать незачем.
+.slide-fade-enter-active,
+.slide-fade-right-enter-active,
+.slide-fade-up-enter-active {
+    transition: opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease);
 }
 
-.slide-fade-leave-active {
-    transition: all var(--motion-base) var(--motion-ease-in);
+.slide-fade-leave-active,
+.slide-fade-right-leave-active,
+.slide-fade-up-leave-active {
+    transition: opacity var(--motion-fast) var(--motion-ease-in), transform var(--motion-fast) var(--motion-ease-in);
 }
 
 .slide-fade-enter-from,
 .slide-fade-leave-to {
-    transform: translateY(50px);
+    transform: translateY(8px);
     opacity: 0;
-}
-
-.slide-fade-right-enter-active {
-    transition: all var(--motion-base) var(--motion-ease-in);
-}
-
-.slide-fade-right-leave-active {
-    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-right-enter-from,
 .slide-fade-right-leave-to {
-    transform: translateX(50px);
+    transform: translateX(8px);
     opacity: 0;
-}
-
-.slide-fade-up-enter-active {
-    transition: all var(--motion-base) var(--motion-ease-in);
-}
-
-.slide-fade-up-leave-active {
-    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-up-enter-from,
 .slide-fade-up-leave-to {
-    transform: translateY(-50px);
+    transform: translateY(-8px);
     opacity: 0;
 }
 
