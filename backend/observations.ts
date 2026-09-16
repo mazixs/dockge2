@@ -7,7 +7,8 @@ import { computeAvailability, type Availability, type StatusChange } from "../co
  *
  * Only changes are stored. The ten second cron knows the status of every stack on every
  * tick, but writing all of them would add millions of rows a month while carrying no
- * more information: between two changes the status is, by definition, the same.
+ * more information. Each row also records its last confirmed sample; a delayed scan
+ * or a process restart starts a new interval instead of hiding an observation gap.
  */
 
 /** How long history is kept: the longest window the UI offers is thirty days */
@@ -16,8 +17,11 @@ export const RETENTION_MS = 31 * 24 * 3_600_000;
 /** How often old rows are removed, so pruning does not run on every tick */
 const PRUNE_EVERY_MS = 6 * 3_600_000;
 
-/** Last known status per stack, so an unchanged status writes nothing */
-const lastStatus = new Map<string, number>();
+/** Last known interval per stack; unchanged samples update its end without adding rows. */
+const lastStatus = new Map<string, { id : number; status : number; at : number }>();
+
+/** The ten second scan can miss one tick without joining a longer outage. */
+const MAX_SCAN_GAP_MS = 30_000;
 
 let lastPruneAt = 0;
 
@@ -32,29 +36,37 @@ function keyOf(stackName : string, endpoint : string) : string {
 }
 
 /**
- * Record the status of a stack when it differs from the last recorded one.
+ * Confirm the current interval or start a new interval after a status change or gap.
  * @param stackName Stack name
  * @param endpoint Agent endpoint, empty for the local host
  * @param status Numeric status
  * @param now Current time, injectable for tests
- * @returns True when a row was written
+ * @returns True when a new interval was inserted
  */
 export async function recordStatus(stackName : string, endpoint : string, status : number, now = Date.now()) : Promise<boolean> {
     const key = keyOf(stackName, endpoint);
 
-    if (lastStatus.get(key) === status) {
-        return false;
-    }
-
+    const previous = lastStatus.get(key);
     try {
-        await Database.getKnex()("stack_observation").insert({
+        const knex = Database.getKnex();
+        if (previous && now >= previous.at && now - previous.at <= MAX_SCAN_GAP_MS) {
+            const updated = await knex("stack_observation").where({ id: previous.id }).update({ observed_until: now });
+            if (updated && previous.status === status) {
+                previous.at = now;
+                return false;
+            }
+        }
+        const [ id ] = await knex("stack_observation").insert({
             stack_name: stackName,
             endpoint,
             status,
             observed_at: now,
+            observed_until: now,
         });
 
-        lastStatus.set(key, status);
+        lastStatus.set(key, { id: Number(id),
+            status,
+            at: now });
         return true;
     } catch (e) {
         // History is a convenience, not a promise: a failed write must not break the list
@@ -99,7 +111,7 @@ export async function recordScan(
 export async function pruneOldObservations(now = Date.now()) : Promise<number> {
     try {
         return await Database.getKnex()("stack_observation")
-            .where("observed_at", "<", now - RETENTION_MS)
+            .where("observed_until", "<", now - RETENTION_MS)
             .delete();
     } catch (e) {
         if (e instanceof Error) {
@@ -128,14 +140,14 @@ export async function readChanges(stackName : string, endpoint : string, windowM
         const knex = Database.getKnex();
 
         const inside = await knex("stack_observation")
-            .select("status", "observed_at")
+            .select("status", "observed_at", "observed_until")
             .where({ stack_name: stackName,
                 endpoint })
             .andWhere("observed_at", ">=", from)
             .orderBy("observed_at", "asc");
 
         const before = await knex("stack_observation")
-            .select("status", "observed_at")
+            .select("status", "observed_at", "observed_until")
             .where({ stack_name: stackName,
                 endpoint })
             .andWhere("observed_at", "<", from)
@@ -145,6 +157,7 @@ export async function readChanges(stackName : string, endpoint : string, windowM
         return [ ...before, ...inside ].map((row) => ({
             status: Number(row.status),
             at: Number(row.observed_at),
+            until: Number(row.observed_until ?? row.observed_at),
         }));
     } catch (e) {
         if (e instanceof Error) {

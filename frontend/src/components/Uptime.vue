@@ -12,7 +12,7 @@
 
 <script>
 import StateChip from "./StateChip.vue";
-import { ATTENTION, statusNameShort, statusStateName } from "../../../common/util-common";
+import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, statusStateName } from "../../../common/util-common";
 
 export default {
     components: {
@@ -55,7 +55,12 @@ export default {
         },
 
         statusName() {
-            return this.$t(statusNameShort(this.stack?.status));
+            const labels = { [CREATED_FILE]: "pagesNotDeployed",
+                [CREATED_STACK]: "pagesStopped",
+                [RUNNING]: "pagesRunning",
+                [EXITED]: "pagesFailed",
+                [ATTENTION]: "pagesAttention" };
+            return this.$t(labels[this.stack?.status] || "pagesUnknown");
         },
 
         needsAttention() {
@@ -63,7 +68,7 @@ export default {
         },
 
         /**
-         * Почему стек требует внимания; подсказка дополняет строку внимания, а не заменяет её
+         * Почему стек требует внимания; подсказка дополняет строку внимания, а не заменяет ее
          * @returns {string} Список причин, пустой если объяснять нечего
          */
         issueText() {
