@@ -18,9 +18,16 @@ export default defineComponent({
     },
 
     async created() {
-        if (this.language !== "en") {
-            await this.changeLang(this.language);
+        // Английский уже загружен статически, догружать его нечем. Но язык и
+        // направление страницы ставятся в любом случае: без них <html> уходит
+        // к пользователю без атрибута lang, а это читает и экранный диктор,
+        // и поиск, и CSS
+        if (this.language === "en") {
+            setPageLocale();
+            return;
         }
+
+        await this.changeLang(this.language);
     },
 
     methods: {

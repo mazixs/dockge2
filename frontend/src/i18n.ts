@@ -2,39 +2,28 @@ import { createI18n } from "vue-i18n";
 import { setI18nLocale } from "./i18n-locale";
 import en from "./lang/en.json";
 
+/**
+ * Языки, которые предлагает переключатель интерфейса.
+ *
+ * Набор ограничен самыми распространенными языками мира: незаконченный перевод
+ * дороже отсутствующего, потому что выглядит рабочим. Название пишется на самом
+ * языке - человек ищет в списке свое слово, а не английское.
+ *
+ * Каждому коду обязан соответствовать `lang/<код>.json`: список - единственный
+ * источник того, что видно в переключателе, а файла с переводом он не проверяет.
+ * Строка без файла доходит до пользователя и роняет переключение.
+ */
 const languageList: Record<string, string> = {
-    "bg-BG": "Български",
-    "es": "Español",
-    "de": "Deutsch",
-    "fr": "Français",
-    "pl-PL": "Polski",
-    "pt": "Português",
-    "pt-BR": "Português-Brasil",
-    "sl": "Slovenščina",
-    "tr": "Türkçe",
-    "zh-CN": "简体中文",
-    "zh-TW": "繁體中文(台灣)",
-    "ur": "Urdu",
-    "ko-KR": "한국어",
-    "ru": "Русский",
-    "cs-CZ": "Čeština",
     "ar": "العربية",
-    "th": "ไทย",
-    "it-IT": "Italiano",
-    "sv-SE": "Svenska",
-    "uk-UA": "Українська",
-    "da": "Dansk",
+    "de": "Deutsch",
+    "es": "Español",
+    "fr": "Français",
+    "id": "Bahasa Indonesia",
     "ja": "日本語",
-    "nl": "Nederlands",
-    "ro": "Română",
-    "id": "Bahasa Indonesia (Indonesian)",
-    "vi": "Tiếng Việt",
-    "hu": "Magyar",
-    "ca": "Català",
-    "ga": "Gaeilge",
-    "de-CH": "Schwiizerdütsch",
-    "mag": "मगही",
-    "mai": "मैथिली",
+    "pt": "Português",
+    "ru": "Русский",
+    "ur": "اردو",
+    "zh-CN": "简体中文",
 };
 
 const messages: Record<string, Record<string, string>> = {
@@ -51,7 +40,10 @@ for (let lang in languageList) {
     };
 }
 
-const rtlLangs = [ "fa", "ar-SY", "ur", "ar" ];
+// Языки с письмом справа налево. Только те, что есть в `languageList`:
+// код, которого нельзя выбрать, направление не меняет и лишь путает того,
+// кто по этому списку судит о поддержке
+const rtlLangs = [ "ar", "ur" ];
 
 /**
  * Locale to start with: the stored choice, then the browser language, then English.
