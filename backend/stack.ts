@@ -661,14 +661,17 @@ export class Stack {
      * Fill the availability of every stack over the last day.
      *
      * One query per stack is enough here: the history holds only status changes, so a
-     * stack that has been running for a month answers with a single row.
+     * stack that has been running for a month answers with a single row. The queries
+     * are started together rather than one after the other - they do not depend on each
+     * other, and awaiting each in turn made the first screen wait for as many database
+     * round trips as there are stacks.
      * @param stackList Stacks of this scan
      * @returns void
      */
     static async fillAvailability(stackList : Map<string, Stack>) : Promise<void> {
         const day = 24 * 3_600_000;
 
-        for (const stack of stackList.values()) {
+        await Promise.all([ ...stackList.values() ].map(async (stack) => {
             try {
                 stack._availability = await readAvailability(stack.name, "", day);
             } catch (e) {
@@ -677,7 +680,7 @@ export class Stack {
                     log.debug("getStackList", `Cannot read the history of ${stack.name}: ${e.message}`);
                 }
             }
-        }
+        }));
     }
 
     /**
@@ -691,9 +694,11 @@ export class Stack {
      * @returns void
      */
     protected static async fillStackDetails(stackList : Map<string, Stack>) : Promise<void> {
-        for (const stack of stackList.values()) {
+        // Started together for the same reason as the availability above: every stack
+        // is described from its own directory and none of them waits on another
+        await Promise.all([ ...stackList.values() ].map(async (stack) => {
             if (!stack.isManagedByDockge) {
-                continue;
+                return;
             }
 
             try {
@@ -712,7 +717,7 @@ export class Stack {
                     log.debug("getStackList", `Cannot describe ${stack.name}: ${e.message}`);
                 }
             }
-        }
+        }));
     }
 
     /**

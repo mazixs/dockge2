@@ -27,7 +27,12 @@
                              ссылок и читался как еще один переход -->
                         <li><router-link to="/" class="dropdown-item">{{ $t("stacksTab") }}</router-link></li>
                         <li v-if="$root.canManageStacks"><router-link to="/console" class="dropdown-item">{{ $t("console") }}</router-link></li>
-                        <li v-if="$root.canManageStacks"><button class="dropdown-item" @click="scanFolder">{{ $t("scanFolder") }}</button></li>
+                        <li v-if="$root.canManageStacks">
+                            <button class="dropdown-item" type="button" :disabled="scanning" @click.stop.prevent="scanFolder">
+                                <span v-if="scanning" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                                {{ scanning ? $t("scanFolderRunning") : $t("scanFolder") }}
+                            </button>
+                        </li>
                         <li><hr class="dropdown-divider" /></li>
                         <li><router-link to="/settings/appearance" class="dropdown-item">{{ $t("Settings") }}</router-link></li>
                         <li v-if="$root.isAdmin"><router-link to="/settings/users" class="dropdown-item">{{ $t("familiarUsers") }}</router-link></li>
@@ -71,6 +76,13 @@ export default {
         ThemePicker,
         ServerSwitcher,
         Login,
+    },
+
+    data() {
+        return {
+            /** Whether a rescan of the stacks directory is still running */
+            scanning: false,
+        };
     },
 
     computed: {
@@ -198,9 +210,38 @@ export default {
             return /^\s*(sudo\s+)?docker\s+run\b/.test(text) || /^\s*services\s*:/m.test(text);
         },
 
+        /**
+         * Re-read the stacks directory.
+         *
+         * The scan walks the directory, asks Docker about every project and reads the
+         * history of each one, so on a busy machine it takes a noticeable moment. It
+         * used to give no sign of any of that: the menu closed, nothing moved, and a
+         * toast saying "Updated" arrived later without saying what was updated. The
+         * item now stays put and spins while it works, and the result names the number
+         * of stacks the scan ended up with, which is the one thing the reader pressed
+         * it to find out.
+         * @returns {void}
+         */
         scanFolder() {
+            if (this.scanning) {
+                return;
+            }
+
+            this.scanning = true;
+
             this.$root.emitAgent(ALL_ENDPOINTS, "requestStackList", (res) => {
-                this.$root.toastRes(res);
+                this.scanning = false;
+
+                if (!res?.ok) {
+                    this.$root.toastRes(res);
+                    return;
+                }
+
+                const found = Object.keys(this.$root.completeStackList ?? {}).length;
+                this.$root.toastRes({ ok: true,
+                    msgi18n: true,
+                    msg: { key: "scanFolderDone",
+                        values: { count: found } } });
             });
         },
     },
