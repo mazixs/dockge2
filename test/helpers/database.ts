@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { DockgeServer } from "../../backend/dockge-server";
+import { issueUser } from "../../backend/auth-access";
 import { initAuth, getAuth, resetAuth } from "../../backend/auth";
 import { Database } from "../../backend/database";
 import { Settings } from "../../backend/settings";
@@ -66,18 +67,22 @@ export async function withDatabase<T>(callback: (fixture: DatabaseFixture) => Pr
 
 /**
  * Create the account of this Dockge instance and return its session cookie.
- * The account is created through better-auth, so the password is hashed the same way
- * the running application does it.
+ * The account uses the owner issuance path and better-auth password hashing,
+ * then signs in through the real better-auth endpoint.
  * @param email Address of the account
  * @param password Password of the account
  * @returns Cookie header value carrying the session
  */
 export async function createTestAccount(email = "owner@example.com", password = TEST_PASSWORD) : Promise<string> {
-    const response = await getAuth().api.signUpEmail({
+    await issueUser({ email,
+        password,
+        username: "owner",
+        name: "Owner",
+        role: "admin" });
+    const response = await getAuth().api.signInEmail({
         body: {
             email,
             password,
-            name: "Owner",
         },
         asResponse: true,
     });

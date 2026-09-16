@@ -2,7 +2,8 @@ import Database from "better-sqlite3";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { fromNodeHeaders } from "better-auth/node";
-import { twoFactor } from "better-auth/plugins";
+import { twoFactor, username } from "better-auth/plugins";
+import { accessPlugin, initializeAccess, normalizeRole } from "./auth-access";
 import type { IncomingHttpHeaders } from "http";
 import { Database as DockgeDatabase } from "./database";
 import { log } from "./log";
@@ -63,7 +64,7 @@ function resolveSecureCookies(server : DockgeServer) : boolean {
         return false;
     }
 
-    return Boolean(server.isSSL());
+    return Boolean(server.isSSL()) || Boolean(process.env.DOCKGE_PUBLIC_URL && new URL(process.env.DOCKGE_PUBLIC_URL).protocol === "https:");
 }
 
 /** Header our own middleware fills with the address the connection really came from */
@@ -106,6 +107,9 @@ export interface RequestOrigins {
  */
 export function resolveTrustedOrigins(server : DockgeServer, request : RequestOrigins = {}) : string[] {
     const origins = new Set<string>();
+    if (process.env.DOCKGE_PUBLIC_URL) {
+        origins.add(new URL(process.env.DOCKGE_PUBLIC_URL).origin);
+    }
 
     for (const origin of (process.env.DOCKGE_TRUSTED_ORIGINS ?? "").split(",")) {
         if (origin.trim() !== "") {
@@ -168,8 +172,8 @@ export function requestOrigins(request? : Request) : RequestOrigins {
 
 /**
  * Number of accounts that exist.
- * Dockge is a single owner panel: the first account is created during setup and
- * further sign-ups are refused, otherwise anyone could register on an exposed panel.
+ * Setup creates the first owner; later accounts are issued by an owner.
+ * Public signup stays disabled, including before setup.
  * @returns Account count
  */
 export async function countUsers() : Promise<number> {
@@ -184,13 +188,24 @@ export async function countUsers() : Promise<number> {
  * @returns Auth instance
  */
 export async function initAuth(server : DockgeServer) : Promise<Auth> {
+    if (process.env.DOCKGE_PUBLIC_URL) {
+        const publicURL = new URL(process.env.DOCKGE_PUBLIC_URL);
+        if (![ "http:", "https:" ].includes(publicURL.protocol) || publicURL.username || publicURL.password || publicURL.pathname !== "/" || publicURL.search || publicURL.hash) {
+            throw new Error("DOCKGE_PUBLIC_URL must be an HTTP(S) origin without credentials or a path");
+        }
+        if (publicURL.protocol === "https:" && /^(false|0)$/i.test((process.env.DOCKGE_SECURE_COOKIES ?? "").trim())) {
+            throw new Error("HTTPS public URL requires secure cookies");
+        }
+    }
     const secret = await resolveSecret();
     const auth = buildAuth(server, secret);
 
+    const hadRoles = await DockgeDatabase.getKnex().schema.hasColumn("user", "role");
     const { runMigrations } = await getMigrations(auth.options);
     await runMigrations();
 
     instance = auth;
+    await initializeAccess(server.config.dataDir, hadRoles);
 
     // The auth connection opens its own write ahead log, which holds the same pages
     DockgeDatabase.restrictSQLiteAccess();
@@ -219,14 +234,25 @@ function buildAuth(server : DockgeServer, secret : string) {
         database: authDatabase,
         secret,
         basePath: AUTH_BASE_PATH,
-        baseURL: server.getBaseURL(),
+        baseURL: process.env.DOCKGE_PUBLIC_URL || server.getBaseURL(),
         trustedOrigins: (request) => resolveTrustedOrigins(server, requestOrigins(request)),
         emailAndPassword: {
             enabled: true,
+            disableSignUp: true,
             minPasswordLength: 10,
             // Nothing sends mail from a self hosted panel
             requireEmailVerification: false,
             autoSignIn: true,
+        },
+        user: {
+            additionalFields: {
+                role: { type: "string",
+                    defaultValue: "viewer",
+                    input: false },
+                suspended: { type: "boolean",
+                    defaultValue: false,
+                    input: false },
+            },
         },
         session: {
             expiresIn: SESSION_EXPIRES_IN_SECONDS,
@@ -257,30 +283,34 @@ function buildAuth(server : DockgeServer, secret : string) {
                 // of the required length, and it leaves room for a person who mistypes
                 "/sign-in/email": { window: 60,
                     max: 10 },
+                "/sign-in/username": { window: 60,
+                    max: 10 },
+                "/bootstrap": { window: 60,
+                    max: 3 },
                 "/sign-up/email": { window: 60,
                     max: 3 },
                 "/two-factor/verify-totp": { window: 60,
                     max: 5 },
             },
         },
-        plugins: [
-            twoFactor({
-                issuer: "Dockge",
-            }),
-        ],
         databaseHooks: {
-            user: {
+            session: {
                 create: {
-                    before: async () => {
-                        if (await countUsers() > 0) {
-                            throw new Error("This Dockge instance already has an account");
-                        }
-
-                        return undefined;
+                    before: async (session) => {
+                        const user = await DockgeDatabase.getKnex()("user").where("id", session.userId).first();
+                        return user && !user.suspended ? undefined : false;
                     },
                 },
             },
         },
+        plugins: [
+            accessPlugin(),
+            username(),
+            twoFactor({
+                issuer: "Dockge",
+            }),
+        ],
+
     });
 }
 
@@ -335,13 +365,16 @@ export interface SocketIdentity {
 
     /** True when the client is signed in only because authentication is disabled */
     autoLogin? : boolean;
+
+    /** Effective permissions read from the database */
+    role? : import("./auth-access").UserRole;
 }
 
 /**
  * Decide who a socket belongs to.
  *
  * A valid session cookie wins. Without one, an instance that deliberately disabled
- * authentication acts as its single account, which is how a reverse proxy setup works.
+ * authentication acts as an active owner account, which is how a reverse proxy setup works.
  * Everything else stays anonymous and has to sign in.
  * @param headers Headers of the handshake request
  * @returns Identity of the client
@@ -350,16 +383,23 @@ export async function resolveSocketIdentity(headers : IncomingHttpHeaders) : Pro
     const session = await getSessionFromHeaders(headers);
 
     if (session?.user) {
-        return { userID: session.user.id };
+        const user = await DockgeDatabase.getKnex()("user").where("id", session.user.id).first();
+        if (user && !user.suspended) {
+            return { userID: user.id,
+                role: normalizeRole(user.role) };
+        }
+        return {};
     }
 
     if (await Settings.get("disableAuth")) {
-        const user = await DockgeDatabase.getKnex()("user").first();
+        const user = await DockgeDatabase.getKnex()("user").where({ role: "admin",
+            suspended: 0 }).first();
 
         if (user) {
             return {
                 userID: user.id,
                 autoLogin: true,
+                role: "admin",
             };
         }
     }

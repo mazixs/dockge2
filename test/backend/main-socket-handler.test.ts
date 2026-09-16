@@ -194,7 +194,7 @@ test("composerize converts a docker run command for a signed in client", async (
 test("преобразование снимает только сгенерированное имя проекта", async () => {
     // Конвертер сообщает о неподдержанном флаге комментарием над строкой name,
     // и прежняя обрезка первой строки убирала сообщение, оставляя в файле
-    // пользователя «name: <your project name>»
+    // пользователя "name: <your project name>"
     const withComment = "# -P\nname: <your project name>\nservices:\n    nginx:\n        image: nginx\n";
     const stripped = stripGeneratedProjectName(withComment);
 
@@ -207,7 +207,7 @@ test("преобразование снимает только сгенерир�
     assert.equal(stripGeneratedProjectName(plain), plain);
 });
 
-test("composerize отдаёт компоуз без служебного имени проекта", async () => {
+test("composerize отдает компоуз без служебного имени проекта", async () => {
     await withDatabase(async ({ stacksDir }) => {
         const cookie = await createTestAccount();
         const socket = new TestSocket(cookie);

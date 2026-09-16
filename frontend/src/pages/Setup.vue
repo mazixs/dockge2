@@ -1,59 +1,77 @@
 <template>
-    <div class="form-container" data-cy="setup-form">
-        <div class="form">
-            <form @submit.prevent="submit">
-                <div class="brand">
-                    <object width="48" height="48" data="/icon.svg" aria-hidden="true" />
-                    <span class="wordmark">Dockge</span>
-                </div>
+    <!-- Первый запуск: та же карточка, что у входа. Поля идут в том порядке,
+         в каком их заполняют: сначала язык, потом ключ, потом сама запись -->
+    <div class="auth-screen" data-cy="setup-form">
+        <div class="auth-card">
+            <div class="auth-brand">
+                <object width="32" height="32" data="/icon.svg" aria-hidden="true" />
+                <BrandMark />
+            </div>
 
-                <!-- Первый запуск: экран говорит, что здесь заводится, и что заводится один раз -->
-                <h1 class="title">{{ $t("setupTitle") }}</h1>
-                <p class="hint">{{ $t("setupHint") }}</p>
+            <div class="auth-head">
+                <h1>{{ $t("setupTitle") }}</h1>
+                <p class="auth-lede">{{ $t("setupHint") }}</p>
+            </div>
 
-                <div class="form-floating">
-                    <select id="language" v-model="$root.language" class="form-select">
+            <form class="auth-form form-stack" @submit.prevent="submit">
+                <div class="field">
+                    <label for="setup-language" class="form-label">{{ $t("Language") }}</label>
+                    <select id="setup-language" v-model="$root.language" class="form-select">
                         <option v-for="language in availableLanguages" :key="language.code" :value="language.code">
                             {{ language.name }}
                         </option>
                     </select>
-                    <label for="language" class="form-label">{{ $t("Language") }}</label>
                 </div>
 
-                <div class="form-floating mt-3">
-                    <input id="floatingInput" v-model="email" type="email" class="form-control" placeholder="you@example.com" autocomplete="username" required data-cy="email-input">
-                    <label for="floatingInput">{{ $t("Email") }}</label>
+                <div class="field">
+                    <label for="bootstrap-token" class="form-label">{{ $t("authBootstrapToken") }}</label>
+                    <input id="bootstrap-token" v-model="token" type="password" class="form-control" autocomplete="off" required :disabled="processing">
+                    <p class="form-text">{{ $t("authBootstrapHint") }}</p>
                 </div>
 
-                <div class="form-floating mt-3">
-                    <input id="floatingPassword" v-model="password" type="password" class="form-control" :placeholder="$t('Password')" autocomplete="new-password" :minlength="minPasswordLength" required data-cy="password-input">
-                    <label for="floatingPassword">{{ $t("Password") }}</label>
-                </div>
-                <p class="form-text text-start">{{ $t("passwordMinLengthHint") }}</p>
-
-                <div class="form-floating mt-3">
-                    <input id="repeat" v-model="repeatPassword" type="password" class="form-control" :placeholder="$t('Repeat Password')" autocomplete="new-password" :minlength="minPasswordLength" required data-cy="password-repeat-input">
-                    <label for="repeat">{{ $t("Repeat Password") }}</label>
+                <div class="field">
+                    <label for="setup-username" class="form-label">{{ $t("authUsername") }}</label>
+                    <input id="setup-username" v-model="username" type="text" class="form-control" autocomplete="username" pattern="[a-zA-Z0-9_.]{3,30}" required :disabled="processing">
+                    <p class="form-text">{{ $t("authUsernameHint") }}</p>
                 </div>
 
-                <button class="w-100 btn btn-primary mt-3" type="submit" :disabled="processing" data-cy="submit-setup-form">
+                <div class="field">
+                    <label for="setup-email" class="form-label">{{ $t("Email") }}</label>
+                    <input id="setup-email" v-model="email" type="email" class="form-control" placeholder="you@example.com" autocomplete="email" required :disabled="processing" data-cy="email-input">
+                </div>
+
+                <div class="field">
+                    <label for="setup-password" class="form-label">{{ $t("Password") }}</label>
+                    <input id="setup-password" v-model="password" type="password" class="form-control" autocomplete="new-password" :minlength="minPasswordLength" required :disabled="processing" data-cy="password-input">
+                    <p class="form-text">{{ $t("passwordMinLengthHint") }}</p>
+                </div>
+
+                <div class="field">
+                    <label for="setup-repeat" class="form-label">{{ $t("Repeat Password") }}</label>
+                    <input id="setup-repeat" v-model="repeatPassword" type="password" class="form-control" autocomplete="new-password" :minlength="minPasswordLength" required :disabled="processing" data-cy="password-repeat-input">
+                </div>
+
+                <button class="btn btn-primary" type="submit" :disabled="processing" data-cy="submit-setup-form">
                     {{ $t("Create") }}
                 </button>
             </form>
         </div>
     </div>
 </template>
-
 <script>
-import { authClient } from "../auth-client";
+import BrandMark from "../components/BrandMark.vue";
+import { bootstrapOwner } from "../auth-client";
 import { authErrorMessage } from "../auth-messages";
 import { availableLanguages } from "../i18n";
 
 export default {
+    components: { BrandMark },
     data() {
         return {
             processing: false,
             email: "",
+            username: "",
+            token: "",
             password: "",
             repeatPassword: "",
         };
@@ -74,9 +92,6 @@ export default {
         minPasswordLength() {
             return 10;
         },
-    },
-    watch: {
-
     },
     mounted() {
         // TODO: Check if it is a database setup
@@ -109,12 +124,12 @@ export default {
             }
 
             try {
-                // The account is created through the auth endpoint, which signs the
-                // browser in and sets the session cookie in the same request
-                const { error } = await authClient.signUp.email({
+                const { error } = await bootstrapOwner({
+                    token: this.token,
+                    username: this.username,
                     email: this.email,
                     password: this.password,
-                    name: this.email,
+                    name: this.username,
                 });
 
                 if (error) {
@@ -122,8 +137,11 @@ export default {
                     return;
                 }
 
-                await this.$root.reconnectSocket();
-                await this.$root.refreshSession();
+                this.token = "";
+                const login = await this.$root.signIn(this.username, this.password);
+                if (!login.ok) {
+                    this.$root.toastError(login.msg);
+                }
                 this.$router.push("/");
             } finally {
                 this.processing = false;
@@ -132,68 +150,3 @@ export default {
     },
 };
 </script>
-
-<style lang="scss" scoped>
-.form-container {
-    display: flex;
-    align-items: center;
-    padding-top: 40px;
-    padding-bottom: 40px;
-}
-
-.form-floating {
-    > .form-select {
-        padding-left: 1.3rem;
-        padding-top: 1.525rem;
-        line-height: 1.35;
-
-        ~ label {
-            padding-left: 1.3rem;
-        }
-    }
-
-    > label {
-        padding-left: 1.3rem;
-    }
-
-    > .form-control {
-        padding-left: 1.3rem;
-    }
-}
-
-.form {
-
-    width: 100%;
-    max-width: 330px;
-    padding: 15px;
-    margin: auto;
-    text-align: center;
-}
-
-.brand {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--gap-sm);
-}
-
-.wordmark {
-    font-size: var(--text-xl);
-    font-weight: 600;
-    color: var(--text-strong);
-}
-
-.title {
-    margin: var(--gap-lg) 0 var(--gap-xs);
-    font-size: var(--text-md);
-    font-weight: 600;
-    color: var(--text-strong);
-}
-
-// Объяснение в одну строку: почему учётная запись одна и что она значит
-.hint {
-    margin: 0 0 var(--gap-lg);
-    font-size: var(--text-sm);
-    color: var(--text-muted);
-}
-</style>

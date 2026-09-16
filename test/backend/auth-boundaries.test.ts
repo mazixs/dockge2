@@ -1,3 +1,4 @@
+import { issueUser } from "../../backend/auth-access";
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import type { DockgeServer } from "../../backend/dockge-server";
@@ -313,26 +314,23 @@ test("the auth secret is generated once and survives a restart", async () => {
 
 test("a password shorter than the policy is refused", async () => {
     await withDatabase(async () => {
-        const short = await getAuth().api.signUpEmail({
-            body: {
-                email: "owner@example.com",
-                password: "short",
-                name: "Owner",
-            },
-            asResponse: true,
-        });
-
-        assert.equal(short.ok, false);
+        await assert.rejects(issueUser({
+            username: "owner",
+            email: "owner@example.com",
+            name: "Owner",
+            role: "admin",
+            password: "short",
+        }), /authPasswordLength/);
     });
 });
 
 test("the session cookie says how long it lives, and TLS adds the secure flag", async () => {
     await withDatabase(async () => {
-        const response = await getAuth().api.signUpEmail({
+        await createTestAccount();
+        const response = await getAuth().api.signInEmail({
             body: {
                 email: "owner@example.com",
                 password: TEST_PASSWORD,
-                name: "Owner",
             },
             asResponse: true,
         });
@@ -342,11 +340,11 @@ test("the session cookie says how long it lives, and TLS adds the secure flag", 
     });
 
     await withDatabase(async () => {
-        const response = await getAuth().api.signUpEmail({
+        await createTestAccount();
+        const response = await getAuth().api.signInEmail({
             body: {
                 email: "owner@example.com",
                 password: TEST_PASSWORD,
-                name: "Owner",
             },
             asResponse: true,
         });

@@ -27,7 +27,7 @@
 - Read: `package-lock.json`
 - Read: `.github/workflows/ci.yml`
 - Read: `backend/database.ts`, `backend/models/*.ts`, `frontend/vite.config.ts`
-- Create: `docs/superpowers/plans/2026-08-25-dependency-stack-review.md`
+- Create: `docs/plans/2026-08-25-dependency-stack-review.md`
 
 **Interfaces:**
 - Consumes: текущий manifest, lock-файл, исходные результаты `npm ci`, lint, проверки TypeScript, сборки и аудита.
