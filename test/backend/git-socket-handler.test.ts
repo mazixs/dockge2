@@ -110,9 +110,26 @@ test("invalid requests and unauthenticated sockets cannot start Git operations",
 });
 
 test("the central role gate reserves all Git content and mutations for trusted operators", () => {
-    for (const event of [ "gitCloneStack", "gitPreviewUpdate", "gitApplyUpdate" ]) {
+    for (const event of [ "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate" ]) {
         assert.equal(roleAllowsEvent("viewer", event, true), false);
         assert.equal(roleAllowsEvent("operator", event, true), true);
         assert.equal(roleAllowsEvent("admin", event, true), true);
     }
+});
+
+test("listing branches reaches the remote only for a signed-in caller with a usable address", async (t) => {
+    const f = await handler(t);
+    const listBranches = t.mock.method(StackGitWorkflow.prototype, "listBranches", async () => [ "main", "develop" ]);
+
+    const response = await call(f.agent, "gitListBranches", "  https://example.invalid/repo.git  ");
+    assert.equal(response.ok, true);
+    assert.deepEqual(response.branches, [ "main", "develop" ]);
+    assert.deepEqual(listBranches.mock.calls[0]?.arguments, [ "https://example.invalid/repo.git" ]);
+
+    for (const invalid of [ null, 42, "", "   " ]) {
+        assert.equal((await call(f.agent, "gitListBranches", invalid)).ok, false);
+    }
+    f.socket.userID = "";
+    assert.equal((await call(f.agent, "gitListBranches", "https://example.invalid/repo.git")).ok, false);
+    assert.equal(listBranches.mock.callCount(), 1);
 });

@@ -469,3 +469,26 @@ test("clone returns a hash of the intended source bytes, not a later directory s
     await fs.writeFile(path.join(destination, "readme.txt"), "changed after clone\n");
     assert.notEqual(await f.workflow.filesHash(destination), result.filesHash);
 });
+
+test("listing branches reports every head of the remote and refuses an unusable address", async (t) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dockge-git-branches-"));
+    t.after(async () => fs.rm(root, { recursive: true,
+        force: true }));
+    const upstream = path.join(root, "upstream");
+    await fs.mkdir(upstream);
+    git(upstream, "init", "-b", "main");
+    git(upstream, "config", "user.email", "fixture@example.invalid");
+    git(upstream, "config", "user.name", "Fixture");
+    await fs.writeFile(path.join(upstream, "compose.yaml"), compose);
+    git(upstream, "add", ".");
+    git(upstream, "commit", "-m", "initial");
+    git(upstream, "branch", "release/2026-09");
+    git(upstream, "tag", "v1");
+
+    const workflow = new StackGitWorkflow({ allowLocalTransport: true,
+        validate: async () => undefined });
+    // Tags are not branches: --refs keeps them out, so the list stays choosable
+    assert.deepEqual((await workflow.listBranches(upstream)).sort(), [ "main", "release/2026-09" ]);
+    await assert.rejects(() => workflow.listBranches("--upload-pack=touch /tmp/pwned"));
+    await assert.rejects(() => new StackGitWorkflow({ validate: async () => undefined }).listBranches(upstream));
+});

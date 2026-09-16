@@ -161,7 +161,7 @@ export function accessPlugin() {
 
 const VIEWER_EVENTS = new Set([ "requestStackList", "serviceStatusList", "stackAvailability", "stabilityOverview" ]);
 const OPERATOR_EVENTS = new Set([
-    ...VIEWER_EVENTS, "gitCloneStack", "gitPreviewUpdate", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
+    ...VIEWER_EVENTS, "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
     "restartStack", "updateStack", "downStack", "stackUpdatePreview", "abortCompose", "getStackFiles",
     "setStackFiles", "saveEnvFile", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
     "bindSecret", "unbindSecret", "dockerStats", "startService", "stopService", "restartService",
