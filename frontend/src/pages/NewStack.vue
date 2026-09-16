@@ -2,29 +2,31 @@
     <div class="git-ui page create-page">
         <router-link class="back-link" to="/">← {{ $t("gitUiBackStacks") }}</router-link>
 
-        <div class="page-head">
-            <div>
-                <h1>{{ $t("newStack") }}</h1>
-                <p class="page-lede">{{ $t("gitUiNewDescription") }}</p>
-            </div>
+        <div class="page-head create-head">
+            <span class="create-mark" aria-hidden="true"><InterfaceIcon name="box" /></span>
+            <h1>{{ $t("newStack") }}</h1>
+            <p class="page-lede">{{ $t("gitUiNewDescription") }}</p>
         </div>
 
-        <!-- Источник выбирается в шапке панели: два способа завести стек - одна
-             пара кнопок, а не два разных экрана -->
+        <!-- Порядок блоков карточки: сначала шаг, на котором стоит пользователь,
+             потом способ завести стек, потом сама форма. Шаг - рамка для всего
+             остального, поэтому он не может стоять ниже выбора источника -->
         <section v-if="!result" class="panel create-card" :aria-busy="busy">
-            <div class="panel-bar">
+            <div class="create-top">
+                <ol class="create-steps" :aria-label="$t('gitUiCreationSteps')">
+                    <li :class="{ active: currentStep === 1, done: currentStep === 2 }"><b>1</b>{{ $t("gitUiSource") }}</li>
+                    <li :class="{ active: currentStep === 2 }"><b>2</b>{{ $t("gitUiReviewLaunch") }}</li>
+                </ol>
+
                 <div class="source-tabs" role="tablist" :aria-label="$t('gitUiSource')">
                     <button id="new-git-tab" type="button" role="tab" :aria-selected="sourceTab === 'git'" aria-controls="new-git-panel" :tabindex="sourceTab === 'git' ? 0 : -1" :disabled="busy || composeBusy" @click="sourceTab = 'git'" @keydown.right.prevent="selectTab('compose')" @keydown.left.prevent="selectTab('compose')"><InterfaceIcon name="git" />{{ $t("gitUiFromGit") }}</button>
                     <button id="new-compose-tab" type="button" role="tab" :aria-selected="sourceTab === 'compose'" aria-controls="new-compose-panel" :tabindex="sourceTab === 'compose' ? 0 : -1" :disabled="busy || composeBusy" @click="sourceTab = 'compose'" @keydown.right.prevent="selectTab('git')" @keydown.left.prevent="selectTab('git')"><InterfaceIcon name="file" />{{ $t("gitUiPasteCompose") }}</button>
                 </div>
+
+                <p class="tabs-note">{{ $t("gitUiComposeAcceptsDockerRun") }}</p>
             </div>
 
             <div v-show="sourceTab === 'git'" id="new-git-panel" class="panel-body" role="tabpanel" aria-labelledby="new-git-tab">
-                <ol class="create-steps" :aria-label="$t('gitUiCreationSteps')">
-                    <li :class="{ active: step === 1, done: step === 2 }"><b>1</b>{{ $t("gitUiSource") }}</li>
-                    <li :class="{ active: step === 2 }"><b>2</b>{{ $t("gitUiReviewLaunch") }}</li>
-                </ol>
-
                 <div v-if="failure" class="notice failure" role="alert">
                     <p>{{ failure }}</p>
                     <router-link v-if="uncertain" class="btn btn-sm btn-normal" :to="stackPath(name.trim())">{{ $t("gitUiOpenStack") }}</router-link>
@@ -54,7 +56,7 @@
 
                     <footer class="form-footer">
                         <span class="form-text">{{ $t("gitUiNothingStarted") }}</span>
-                        <button class="btn btn-primary" :disabled="!sourceReady" type="submit">{{ $t("gitUiContinue") }}</button>
+                        <button class="btn btn-primary" :disabled="!sourceReady" type="submit">{{ $t("gitUiContinue") }} <span aria-hidden="true">→</span></button>
                     </footer>
                 </form>
 
@@ -139,6 +141,15 @@ export default {
             return this.$root.canManageStacks && !this.busy && !this.uncertain && this.sourceReady
                 && /^[a-z0-9][a-z0-9_-]*$/.test(this.name.trim()) && Boolean(this.composeFile.trim());
         },
+        // Дорожка шагов стоит над выбором источника, поэтому номер шага нужен
+        // и для вставки Compose: там единственная форма, и второй шаг наступает
+        // тогда, когда она уже разворачивает стек
+        currentStep() {
+            if (this.sourceTab === "compose") {
+                return this.composeBusy ? 2 : 1;
+            }
+            return this.step;
+        },
         serverName() {
             const agent = this.$root.agentList[this.endpoint];
             return this.endpoint ? agent?.name || agent?.url : this.$t("thisServer");
@@ -210,29 +221,73 @@ export default {
 <style lang="scss" scoped>
 @import "../styles/git-pages";
 
-// Создание стека читается в одну колонку: страница не растягивается на всю
-// ширину рабочей области, иначе поля уезжают от подписей
-.create-page {
-    max-width: 760px;
+// Создание стека читается в одну колонку по центру рабочей области: узкая
+// форма, прижатая к левому краю широкого экрана, читается как обрезанная
+.create-card {
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
 }
 
-// Выбор источника - пара кнопок в шапке панели, а не вкладки поверх нее
+// Знак, имя экрана и строка объяснения стоят на одной оси с формой
+.create-head {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--gap-sm);
+    margin-bottom: var(--gap-xl);
+    text-align: center;
+
+    .page-lede {
+        margin: 0;
+    }
+}
+
+.create-mark {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-card);
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--icon-lg);
+}
+
+// Шаг и выбор источника - одна шапка карточки над формой
+.create-top {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--gap-md);
+    padding: var(--gap-md) var(--gap-md) 0;
+}
+
+// Выбор источника - сегментный переключатель во всю ширину: два равноправных
+// пути должны и выглядеть равноправными
 .source-tabs {
     display: flex;
     gap: var(--gap-xs);
     min-width: 0;
+    padding: var(--gap-xs);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-control);
+    background-color: var(--surface-sunken);
 
     button {
         display: inline-flex;
+        flex: 1;
         align-items: center;
+        justify-content: center;
         gap: var(--gap-xs);
         min-height: var(--control-height);
-        padding: 0 var(--gap-md);
+        padding: 0 var(--gap-sm);
         border: 1px solid transparent;
-        border-radius: var(--radius-control);
+        border-radius: var(--radius-chip);
         background: transparent;
         color: var(--text-muted);
         font-size: var(--text-sm);
+        white-space: nowrap;
         transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
     }
 
@@ -241,10 +296,20 @@ export default {
     }
 
     button[aria-selected="true"] {
-        border-color: var(--line-control);
+        border-color: var(--line-hair);
         background-color: var(--surface-raised);
         color: var(--text-strong);
+        font-weight: var(--weight-medium);
     }
+}
+
+// Про распознавание docker run узнать больше неоткуда: вкладка называется
+// "Вставить Compose", а команду она тоже принимает
+.tabs-note {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .panel-body {
@@ -259,14 +324,14 @@ export default {
     gap: var(--gap-lg);
 }
 
-// Шаги: где пользователь сейчас и что будет дальше
+// Шаги: где пользователь сейчас и что будет дальше. Между ними линия, иначе
+// это не дорожка, а две несвязанные надписи по углам карточки
 .create-steps {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
     gap: var(--gap-md);
     margin: 0;
-    padding: 0 0 var(--gap-md);
-    border-bottom: 1px solid var(--line-hair);
+    padding: 0;
     list-style: none;
     color: var(--text-faint);
     font-size: var(--text-sm);
@@ -276,6 +341,20 @@ export default {
         display: flex;
         align-items: center;
         gap: var(--gap-sm);
+        min-width: 0;
+    }
+
+    // Линия принадлежит первому шагу, а не отдельному элементу списка:
+    // в дорожке ровно два пункта, и лишний li сломал бы ее для чтения с экрана
+    li:first-child {
+        flex: 1;
+    }
+
+    li:first-child::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background-color: var(--line-hair);
     }
 
     b {
@@ -344,8 +423,8 @@ export default {
 
     span, small {
         color: var(--text-muted);
-        font-size: var(--text-xs);
-        line-height: var(--line-xs);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
     }
 }
 
@@ -360,15 +439,6 @@ export default {
 }
 
 @media (max-width: 720px) {
-    // Имя способа не переносится: строка в две линии делала одну кнопку выше
-    // другой, и пара переставала читаться как переключатель
-    .source-tabs button {
-        flex: 1;
-        justify-content: center;
-        padding: 0 var(--gap-sm);
-        white-space: nowrap;
-    }
-
     .field-pair {
         grid-template-columns: minmax(0, 1fr);
     }
