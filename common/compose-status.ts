@@ -175,9 +175,16 @@ export function fromDockerPs(raw : DockerPsRaw) : ComposePsEntry & { project : s
 }
 
 /**
- * Read the services that the compose file explicitly marks as one-shot
+ * Read the services of a compose file that finish rather than keep running.
+ *
+ * Besides the explicit markings, one thing in a compose file says so on its own:
+ * `depends_on` with `condition: service_completed_successfully`. A service is only
+ * ever waited on that way because it is expected to do its work and exit, which is
+ * exactly what a migration or a seeding job does. Without reading it, such a job
+ * showed up as a stopped service the moment it succeeded, and the panel offered to
+ * restart the thing that had just done its job correctly.
  * @param composeYAML Compose file content
- * @returns Service names marked as one-shot
+ * @returns Service names that are not expected to keep running
  */
 export function readOneShotServices(composeYAML : string) : Set<string> {
     const oneShot = new Set<string>();
@@ -221,6 +228,24 @@ export function readOneShotServices(composeYAML : string) : Set<string> {
             }
         } else if (Array.isArray(labels) && labels.includes(`${ONE_SHOT_LABEL}=${ONE_SHOT_VALUE}`)) {
             oneShot.add(name);
+        }
+    }
+
+    // Whatever anything waits on with `service_completed_successfully` is a job by
+    // definition: nothing waits that way for a service meant to stay up
+    for (const rawService of Object.values(services)) {
+        const dependsOn = (rawService as { depends_on? : unknown } | null)?.depends_on;
+
+        if (!dependsOn || typeof dependsOn !== "object" || Array.isArray(dependsOn)) {
+            continue;
+        }
+
+        for (const [ name, rawCondition ] of Object.entries(dependsOn as Record<string, unknown>)) {
+            const condition = (rawCondition as { condition? : unknown } | null)?.condition;
+
+            if (condition === "service_completed_successfully" && name in services) {
+                oneShot.add(name);
+            }
         }
     }
 

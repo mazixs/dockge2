@@ -244,6 +244,33 @@ test("one-shot services are read from the compose file, not guessed from names",
     assert.deepEqual(readComposeServices("not: yaml: ["), []);
 });
 
+test("a service waited on with service_completed_successfully is a job", () => {
+    // The shape of a migration: the app refuses to start until it has finished, which
+    // is a statement that it is meant to finish. Marked or not, it is not a service
+    // that stopped - and treating it as one put "migrate: stopped" on the first screen
+    // of a stack where everything had gone exactly right
+    const inferred = readOneShotServices(`services:
+  app:
+    image: nginx
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+  migrate:
+    image: alpine
+  db:
+    image: mariadb
+`);
+    assert.deepEqual([ ...inferred ].sort(), [ "migrate" ]);
+
+    // The short form carries no condition, so it says nothing about the lifecycle
+    assert.deepEqual([ ...readOneShotServices("services:\n  app:\n    image: nginx\n    depends_on:\n      - db\n  db:\n    image: mariadb\n") ], []);
+
+    // A condition naming something that is not a service of this file is ignored
+    assert.deepEqual([ ...readOneShotServices("services:\n  app:\n    image: nginx\n    depends_on:\n      ghost:\n        condition: service_completed_successfully\n") ], []);
+});
+
 test("docker ps output of the whole host is mapped to compose entries", () => {
     const entry = fromDockerPs({
         State: "exited",
