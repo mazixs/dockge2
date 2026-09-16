@@ -445,9 +445,22 @@ export default {
     gap: var(--gap-sm);
     flex-wrap: wrap;
 
+    // Кнопка звучит как ссылка в подсказке, а не как действие формы: рамка
+    // сделала бы ее заметнее поля, к которому она относится
     .btn {
         padding: 0;
         min-height: 0;
+        border: 0;
+        background: none;
+        color: var(--accent-text);
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
+        text-decoration: underline;
+    }
+
+    .btn:disabled {
+        color: var(--text-faint);
+        text-decoration: none;
     }
 }
 
