@@ -21,11 +21,19 @@
              внимания", а полоса называет их по именам и с причиной -->
         <AttentionStrip />
 
-        <!-- Счет состояний: одна полоса на весь парк, по ней видно, куда смотреть -->
+        <!-- Счет состояний: одна полоса на весь парк, по ней видно, куда смотреть.
+             Каждое число - ссылка на тот же срез в списке стеков слева: увидеть,
+             что одиннадцать остановлено, и не иметь возможности спросить "какие
+             именно" - это половина ответа -->
         <div class="counts" aria-live="polite">
-            <span v-for="state in states" :key="state" :class="[ `count-${state}`, { zero: counts[state] === 0 } ]">
+            <router-link
+                v-for="state in states" :key="state"
+                :to="{ path: '/', query: { filter: state } }"
+                :class="[ `count-${state}`, { zero: counts[state] === 0 } ]"
+                :title="$t('stabilityCountLink', { state: $t(`stabilityState_${state}`) })"
+            >
                 <strong>{{ counts[state] }}</strong> {{ $t(`stabilityState_${state}`) }}
-            </span>
+            </router-link>
         </div>
 
         <details class="history-details">
@@ -354,11 +362,25 @@ export default defineComponent({
     border-bottom: 1px solid var(--line-hair);
 }
 
-.counts > span {
+.counts > a {
     display: flex;
     align-items: baseline;
     gap: var(--gap-sm);
+    padding: var(--gap-xs) var(--gap-sm);
+    margin: calc(var(--gap-xs) * -1) calc(var(--gap-sm) * -1);
+    border-radius: var(--radius-control);
     font-size: var(--text-sm);
+    text-decoration: none;
+    transition: background-color var(--motion-fast) var(--motion-ease);
+}
+
+.counts > a:hover {
+    background: var(--surface-sunken);
+}
+
+.counts > a:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
 }
 
 .counts strong {
@@ -566,7 +588,7 @@ export default defineComponent({
 // где все в порядке: оранжевое "0 Требуют внимания" читалось как предупреждение.
 // Цвет остается - он же легенда полос истории ниже, - но приглушен: любая замена
 // на серый оказывалась в одной из тем заметнее живого "Остановлены"
-.counts > span.zero {
+.counts > a.zero {
     opacity: 0.5;
 }
 

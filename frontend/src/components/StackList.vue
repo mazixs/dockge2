@@ -87,7 +87,7 @@
 import Confirm from "../components/Confirm.vue";
 import EmptyState from "../components/EmptyState.vue";
 import StackListItem from "../components/StackListItem.vue";
-import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
+import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../../common/util-common";
 
 export default {
     components: {
@@ -215,12 +215,18 @@ export default {
             const all = Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint);
 
             return [
+                { key: "running",
+                    label: this.$t("filterRunning"),
+                    count: all.filter((stack) => stack.status === RUNNING).length },
                 { key: "attention",
                     label: this.$t("filterAttention"),
                     count: all.filter((stack) => stack.status === ATTENTION).length },
                 { key: "stopped",
                     label: this.$t("filterStopped"),
                     count: all.filter((stack) => stack.status === EXITED || stack.status === CREATED_FILE || stack.status === CREATED_STACK).length },
+                { key: "unknown",
+                    label: this.$t("filterUnknown"),
+                    count: all.filter((stack) => stack.status === UNKNOWN).length },
                 { key: "updates",
                     label: this.$t("filterUpdates"),
                     count: all.filter((stack) => (stack.source?.behind ?? 0) > 0).length },
@@ -282,10 +288,14 @@ export default {
          */
         matchesFilter(stack) {
             switch (this.activeFilter) {
+                case "running":
+                    return stack.status === RUNNING;
                 case "attention":
                     return stack.status === ATTENTION;
                 case "stopped":
                     return stack.status === EXITED || stack.status === CREATED_FILE || stack.status === CREATED_STACK;
+                case "unknown":
+                    return stack.status === UNKNOWN;
                 case "updates":
                     return (stack.source?.behind ?? 0) > 0;
                 default:
