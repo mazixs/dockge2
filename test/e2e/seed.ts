@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "../../backend/child-process";
 import { Database } from "../../backend/database";
@@ -82,23 +82,27 @@ services:
     } as never);
 
     if (await countUsers() === 0) {
-        const response = await auth.api.signUpEmail({
-            body: {
+        const response = await auth.handler(new Request("http://localhost:5001/api/auth/bootstrap", {
+            method: "POST",
+            headers: { "content-type": "application/json",
+                origin: "http://localhost:5001" },
+            body: JSON.stringify({
+                token: process.env.DOCKGE_BOOTSTRAP_TOKEN || (await readFile(path.join(dataDir, "bootstrap-token"), "utf8")).trim(),
+                username: "e2e.owner",
                 email: E2E_ADMIN_EMAIL,
                 // Known password: revealing a secret is guarded by a password check
                 password: E2E_ADMIN_PASSWORD,
                 name: "E2E owner",
-            },
-            asResponse: true,
-        });
+            }),
+        }));
 
         if (!response.ok) {
             throw new Error(`Could not create the e2e account: ${response.status}`);
         }
     }
 
-    // История состояний: без неё доступность честно молчит, а спек не сможет проверить
-    // ни «без сбоев», ни процент со сбоем. Значения кладутся как настоящие строки.
+    // История состояний: без нее доступность честно молчит, а спек не сможет проверить
+    // ни "без сбоев", ни процент со сбоем. Значения кладутся как настоящие строки.
     const now = Date.now();
     const hour = 3_600_000;
 
@@ -107,20 +111,24 @@ services:
         { stack_name: E2E_STACK_NAME,
             endpoint: "",
             status: RUNNING,
-            observed_at: now - 72 * hour },
+            observed_at: now - 72 * hour,
+            observed_until: now },
         // Сутки работы с часовым сбоем: 95,8% и один случай
         { stack_name: E2E_ATTENTION_STACK,
             endpoint: "",
             status: RUNNING,
-            observed_at: now - 48 * hour },
+            observed_at: now - 48 * hour,
+            observed_until: now - 3 * hour },
         { stack_name: E2E_ATTENTION_STACK,
             endpoint: "",
             status: ATTENTION,
-            observed_at: now - 3 * hour },
+            observed_at: now - 3 * hour,
+            observed_until: now - 2 * hour },
         { stack_name: E2E_ATTENTION_STACK,
             endpoint: "",
             status: RUNNING,
-            observed_at: now - 2 * hour },
+            observed_at: now - 2 * hour,
+            observed_until: now },
     ]);
 
     Settings.stopCacheCleaner();
@@ -142,12 +150,22 @@ services:
         maxBuffer: 4 * 1024 * 1024,
         timeoutMs: 300_000,
     });
-    await spawn("docker", [
-        "compose", "-p", E2E_ATTENTION_STACK, "-f", path.join(stacksDir, E2E_ATTENTION_STACK, "compose.yaml"), "wait", "init",
-    ], {
-        encoding: "utf-8",
-        timeoutMs: 300_000,
-    });
+    // Compose wait omits services that exited before it starts; Docker waits on retained IDs.
+    const init = await spawn("docker", [
+        "compose", "-p", E2E_ATTENTION_STACK, "-f", path.join(stacksDir, E2E_ATTENTION_STACK, "compose.yaml"), "ps", "--all", "--quiet", "init",
+    ], { encoding: "utf-8",
+        maxBuffer: 1024,
+        timeoutMs: 30_000 });
+    const containerId = init.stdout?.toString().trim() ?? "";
+    if (!/^[a-f0-9]{64}$/.test(containerId)) {
+        throw new Error("The isolated init container was not found");
+    }
+    const completed = await spawn("docker", [ "wait", containerId ], { encoding: "utf-8",
+        maxBuffer: 1024,
+        timeoutMs: 300_000 });
+    if (completed.stdout?.toString().trim() !== "0") {
+        throw new Error("The isolated init container did not exit successfully");
+    }
 }
 
 await seed();

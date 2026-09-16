@@ -1,21 +1,23 @@
 <template>
     <div>
         <div v-if="valid">
-            <ul v-if="isArrayInited" class="list-group">
-                <li v-for="(value, index) in array" :key="index" class="list-group-item">
-                    <select v-model="array[index]" class="no-bg domain-input">
+            <ul v-if="isArrayInited" class="value-list">
+                <li v-for="(value, index) in array" :key="index" class="value-row">
+                    <select v-model="array[index]" class="value-input">
                         <option value="">{{ $t(`Select a network...`) }}</option>
                         <option v-for="option in options" :key="option" :value="option">{{ option }}</option>
                     </select>
 
-                    <font-awesome-icon icon="times" class="action remove ms-2 me-3 text-danger" @click="remove(index)" />
+                    <button class="value-remove" type="button" :aria-label="$t('removeListItem', [ displayName ])" @click="remove(index)">
+                        <font-awesome-icon icon="times" />
+                    </button>
                 </li>
             </ul>
 
-            <button class="btn btn-normal btn-sm mt-3" @click="addField">{{ $t("addListItem", [ displayName ]) }}</button>
+            <button class="btn btn-normal btn-sm add-value" @click="addField">{{ $t("addListItem", [ displayName ]) }}</button>
         </div>
-        <div v-else>
-            Long syntax is not supported here. Please use the YAML editor.
+        <div v-else class="form-text">
+            {{ $t("LongSyntaxNotSupported") }}
         </div>
     </div>
 </template>
@@ -102,27 +104,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
-
-.list-group {
-    background-color: var(--surface-panel);
-
-    li {
-        display: flex;
-        align-items: center;
-        padding: 10px 0 10px 10px;
-
-        .domain-input {
-            flex-grow: 1;
-            background-color: transparent;
-            border: none;
-            color: var(--text-strong);
-            outline: none;
-
-            &::placeholder {
-                color: var(--text-faint);
-            }
-        }
-    }
+// Список и кнопка удаления описаны в main.scss: вид одинаков у портов, сетей
+// и переменных, поэтому здесь остается только шаг до кнопки добавления
+.add-value {
+    margin-top: var(--gap-md);
 }
 </style>

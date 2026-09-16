@@ -1,6 +1,6 @@
 <template>
-    <span class="state-chip" :class="[ `state-${state}`, { 'fixed-width': fixedWidth, compact, 'dot-only': dotOnly } ]" :title="chipTitle">
-        <!-- Точка несёт цвет, слово рядом - смысл: один цвет смысл не несёт.
+    <span class="state-chip" :class="[ `state-${state}`, { 'fixed-width': fixedWidth, compact, 'dot-only': dotOnly, busy } ]" :title="chipTitle">
+        <!-- Точка несет цвет, слово рядом - смысл: один цвет смысл не несет.
              В строке списка слово прячется от глаз, но не от чтения с экрана:
              там же, в строке, состояние названо словами в колонке доступности -->
         <span class="dot" aria-hidden="true"></span>
@@ -13,7 +13,7 @@
 /**
  * Чип состояния - единственный вид, которым в интерфейсе показывается состояние.
  * Стек, сервис и отдельный контейнер обязаны выглядеть одинаково, поэтому вид
- * живёт здесь, а не повторяется в каждом экране.
+ * живет здесь, а не повторяется в каждом экране.
  */
 export default {
     props: {
@@ -39,7 +39,7 @@ export default {
         },
         /**
          * Тихий вид для строки списка: точка и слово мелким, без рамки и заливки.
-         * Слово остаётся - цвет не имеет права быть единственным носителем смысла.
+         * Слово остается - цвет не имеет права быть единственным носителем смысла.
          */
         compact: {
             type: Boolean,
@@ -53,7 +53,15 @@ export default {
             type: Boolean,
             default: false,
         },
-        /** Подсказка с подробностями; текст обязан быть доступен и без неё */
+        /**
+         * Над этим сейчас идет работа: точка дышит. Движение говорит "подожди"
+         * там, где слово уже сказало, что именно происходит
+         */
+        busy: {
+            type: Boolean,
+            default: false,
+        },
+        /** Подсказка с подробностями; текст обязан быть доступен и без нее */
         title: {
             type: String,
             default: "",
@@ -74,7 +82,7 @@ export default {
 
 <style lang="scss" scoped>
 .state-chip {
-    // Цвет состояния берётся один раз, дальше только через эту переменную:
+    // Цвет состояния берется один раз, дальше только через эту переменную:
     // так тема меняет чип сама, без правил внутри body.dark.
     --chip-state: var(--state-unknown);
 
@@ -84,11 +92,23 @@ export default {
     padding: 2px var(--gap-sm);
     border-radius: var(--radius-pill);
     font-size: var(--text-sm);
-    line-height: 1.4;
+    line-height: var(--line-sm);
     color: var(--text-strong);
     background-color: color-mix(in srgb, var(--chip-state) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--chip-state) 40%, transparent);
     white-space: nowrap;
+}
+
+// Подпись чипа - самостоятельное имя состояния, а не часть фразы, поэтому
+// начинается с заглавной. Правило живет здесь, а не в словаре: те же слова
+// ("запускается") в строке хода стоят внутри предложения и заглавной там быть
+// не должно, а держать ради регистра второй набор строк - удвоение словаря
+.label {
+    display: inline-block;
+
+    &::first-letter {
+        text-transform: uppercase;
+    }
 }
 
 .dot {
@@ -97,6 +117,24 @@ export default {
     border-radius: var(--radius-pill);
     background-color: var(--chip-state);
     flex: none;
+}
+
+// Работа дышит: неподвижная точка не отличалась бы от готового состояния.
+// Движение - украшение, поэтому при запрете анимации остается слово
+.state-chip.busy .dot {
+    animation: chip-pulse 1.6s var(--motion-ease) infinite;
+}
+
+@keyframes chip-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--chip-state) 45%, transparent); }
+    70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--chip-state) 0%, transparent); }
+    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--chip-state) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .state-chip.busy .dot {
+        animation: none;
+    }
 }
 
 .warn-icon {

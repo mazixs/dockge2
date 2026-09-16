@@ -1,43 +1,36 @@
 <template>
-    <div>
-        <h1 v-show="show" class="mb-3">
-            {{ $t("Settings") }}
-        </h1>
+    <!-- Настройки собраны как рабочая область стека: имя страницы, слева список
+         разделов, справа колонка панелей. Разделы не вложены в общую коробку -
+         панель внутри панели читалась бы как два уровня одного раздела -->
+    <div class="page settings-page">
+        <router-link v-if="$root.isMobile && currentPage" to="/settings" class="back-to-menu">
+            <font-awesome-icon icon="chevron-left" />{{ $t("familiarAllSettings") }}
+        </router-link>
 
-        <div class="shadow-box shadow-box-settings">
-            <div class="row">
-                <div v-if="showSubMenu" class="settings-menu col-lg-3 col-md-5">
-                    <router-link
-                        v-for="(item, key) in subMenus"
-                        :key="key"
-                        :to="`/settings/${key}`"
-                    >
-                        <div class="menu-item">
-                            {{ item.title }}
-                        </div>
+        <h1 v-show="show">{{ $t("Settings") }}</h1>
+
+        <div class="settings-layout">
+            <nav v-if="showSubMenu" class="settings-menu" :aria-label="$t('Settings')">
+                <template v-for="(group, groupIndex) in menuGroups" :key="groupIndex">
+                    <hr v-if="groupIndex > 0" class="menu-split" />
+                    <router-link v-for="item in group" :key="item.key" :to="`/settings/${item.key}`" class="menu-item">
+                        {{ item.title }}
                     </router-link>
+                </template>
 
-                    <!-- Logout Button -->
-                    <!-- Only on narrow screens: the header dropdown carries it elsewhere -->
-                    <a v-if="$root.loggedIn && !$root.authDisabled" class="logout d-lg-none" @click.prevent="$root.logout">
-                        <div class="menu-item">
-                            <font-awesome-icon icon="sign-out-alt" />
-                            {{ $t("Logout") }}
-                        </div>
-                    </a>
-                </div>
-                <div class="settings-content col-lg-9 col-md-7">
-                    <div v-if="currentPage" class="settings-content-header">
-                        {{ subMenus[currentPage].title }}
-                    </div>
-                    <div class="mx-3">
-                        <router-view v-slot="{ Component }">
-                            <transition name="slide-fade" appear>
-                                <component :is="Component" />
-                            </transition>
-                        </router-view>
-                    </div>
-                </div>
+                <!-- Выход стоит здесь только на узком экране: на широком он в шапке -->
+                <a v-if="$root.loggedIn && !$root.authDisabled" class="menu-item logout d-lg-none" @click.prevent="$root.logout">
+                    <font-awesome-icon icon="sign-out-alt" />{{ $t("Logout") }}
+                </a>
+            </nav>
+
+            <div class="settings-content">
+                <p v-if="currentPage && !subMenus[currentPage]" class="alert alert-warning" role="alert">{{ $t("familiarRestricted") }}</p>
+                <router-view v-else v-slot="{ Component }">
+                    <transition name="slide-fade" appear>
+                        <component :is="Component" />
+                    </transition>
+                </router-view>
             </div>
         </div>
     </div>
@@ -75,22 +68,34 @@ export default {
 
         subMenus() {
             return {
-                general: {
-                    title: this.$t("general"),
-                },
-                appearance: {
-                    title: this.$t("Appearance"),
-                },
-                security: {
-                    title: this.$t("Security"),
-                },
-                globalEnv: {
-                    title: this.$t("GlobalEnv"),
-                },
-                about: {
-                    title: this.$t("About"),
-                },
+                appearance: { title: this.$t("Appearance") },
+                security: { title: this.$t("Security") },
+                ...(this.$root.isAdmin ? {
+                    general: { title: this.$t("general") },
+                    users: { title: this.$t("familiarUsers") },
+                    agents: { title: this.$t("dockgeAgent", 2) },
+                    mcp: { title: this.$t("mcpTitle") },
+                    globalEnv: { title: this.$t("GlobalEnv") },
+                    about: { title: this.$t("About") },
+                } : {}),
             };
+        },
+
+        /**
+         * Разделы идут тремя группами: сначала то, что настраивает себе каждый,
+         * потом сервер, потом справка. Линия между группами отвечает на вопрос,
+         * почему список не отсортирован по алфавиту
+         * @returns {Array<Array<{key: string, title: string}>>} Группы разделов
+         */
+        menuGroups() {
+            const groups = [[ "appearance", "security" ], [ "general", "users", "agents", "mcp", "globalEnv" ], [ "about" ]];
+
+            return groups
+                .map((keys) => keys
+                    .filter((key) => this.subMenus[key])
+                    .map((key) => ({ key,
+                        title: this.subMenus[key].title })))
+                .filter((group) => group.length > 0);
         },
     },
 
@@ -120,9 +125,15 @@ export default {
         /** Load settings from server */
         loadSettings() {
             this.$root.getSocket().emit("getSettings", (res) => {
-                this.settings = res.data;
+                if (!res?.ok) {
+                    this.$root.toastRes(res);
+                    return;
+                }
+                this.settings = res.data ?? {};
+                // Проверка обновлений выключена, пока владелец не включил ее сам:
+                // это исходящий запрос на GitHub, и панель не делает его молча
                 if (this.settings.checkUpdate === undefined) {
-                    this.settings.checkUpdate = true;
+                    this.settings.checkUpdate = false;
                 }
                 this.settingsLoaded = true;
             });
@@ -178,63 +189,98 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.shadow-box-settings {
-    padding: 20px;
-    min-height: calc(100vh - 155px);
-}
-
-footer {
-    color: var(--text-faint);
+.back-to-menu {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    color: var(--text-muted);
     font-size: var(--text-sm);
-    margin-top: 20px;
-    padding-bottom: 30px;
-    text-align: center;
+    text-decoration: none;
+
+    &:hover {
+        color: var(--text-strong);
+    }
 }
 
+.settings-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: var(--gap-xl);
+    align-items: start;
+}
+
+// Список разделов - та же рейка, что список стеков: выбранный отмечен
+// заливкой и акцентным словом, а не рамкой
 .settings-menu {
-    a {
-        text-decoration: none !important;
-    }
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+    position: sticky;
+    top: var(--gap-lg);
+}
 
-    .menu-item {
-        border-radius: var(--radius-control);
-        margin: 0.5em;
-        padding: 0.7em 1em;
-        cursor: pointer;
-        border-left-width: 0;
-        transition: all ease-in-out 0.1s;
-    }
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-height: var(--control-height);
+    padding: var(--gap-xs) var(--gap-md);
+    border-radius: var(--radius-control);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 
-    .menu-item:hover {
-        background: var(--surface-raised);
-    }
-
-    // Выбранный раздел виден не только фоном: слева акцентная полоса
-    .active .menu-item {
-        background: var(--surface-raised);
-        border-left: 3px solid var(--accent);
-        border-top-left-radius: 0;
-        border-bottom-left-radius: 0;
+    &:hover {
+        background-color: var(--surface-raised);
+        color: var(--text-strong);
     }
 }
 
-.settings-content {
-    .settings-content-header {
-        width: calc(100% + 20px);
-        border-bottom: 1px solid var(--line-hair);
-        margin-top: -20px;
-        margin-right: -20px;
-        padding: 12.5px 1em;
-        font-size: var(--text-xl);
+.menu-item.active,
+.menu-item.router-link-active {
+    background-color: var(--surface-raised);
+    color: var(--accent-text);
+    font-weight: var(--weight-medium);
+}
 
-        .mobile & {
-            padding: 15px 0 0 0;
-            border-bottom: 0;
-        }
-    }
+// Линия между группами разделов: тонкая, в ширину рейки, без отступов вокруг
+// пунктов - иначе она читалась бы как рамка блока
+.menu-split {
+    margin: var(--gap-sm) var(--gap-md);
+    border: 0;
+    border-top: 1px solid var(--line-hair);
+    opacity: 1;
 }
 
 .logout {
-    color: var(--state-failed) !important;
+    color: var(--state-failed);
 }
+
+// Панели раздела стоят колонкой с тем же шагом, что панели файлов. Ширина
+// ограничена: в разделах только формы и списки, а форма шире 560 px не бывает,
+// и растянутая на всю область панель оставляла справа полосу пустоты внутри себя
+.settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+    min-width: 0;
+    max-width: 720px;
+}
+
+.alert {
+    margin: 0;
+}
+
+@media (max-width: 992px) {
+    .settings-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settings-menu {
+        position: static;
+    }
+}
+
 </style>

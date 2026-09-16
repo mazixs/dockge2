@@ -1,82 +1,68 @@
 import { defineComponent } from "vue";
+import { normaliseTheme, readThemePreference, resolveTheme } from "../theme-preference";
+
+const media = window.matchMedia("(prefers-color-scheme: dark)");
 
 export default defineComponent({
     data() {
         return {
-            system: (window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light",
-            userTheme: localStorage.theme,
-            statusPageTheme: "light",
-            forceStatusPageTheme: false,
-            path: "",
-            styleElapsedTime: localStorage.styleElapsedTime || "",
-            userHeartbeatBar: localStorage.userHeartbeatBar || "",
-            heartbeatBarTheme: localStorage.heartbeatBarTheme || "",
+            system: media.matches ? "dark" : "light",
+            userTheme: readThemePreference(() => window.localStorage),
         };
     },
-
     computed: {
         theme() {
-            if (this.userTheme === "auto") {
-                return this.system;
-            }
-            return this.userTheme;
+            return resolveTheme(this.userTheme, this.system === "dark");
         },
-
         isDark() {
             return this.theme === "dark";
-        }
+        },
     },
-
     watch: {
-        "$route.fullPath"(path) {
-            this.path = path;
+        userTheme(value) {
+            try {
+                localStorage.setItem("theme", normaliseTheme(value));
+            } catch {
+                // An in-memory choice remains useful when browser storage is blocked.
+            }
         },
-
-        userTheme(to, from) {
-            localStorage.theme = to;
+        theme() {
+            this.applyTheme();
         },
-
-        styleElapsedTime(to, from) {
-            localStorage.styleElapsedTime = to;
+    },
+    beforeMount() {
+        this.applyTheme();
+    },
+    mounted() {
+        media.addEventListener("change", this.onSystemTheme);
+        window.addEventListener("storage", this.onThemeStorage);
+    },
+    beforeUnmount() {
+        media.removeEventListener("change", this.onSystemTheme);
+        window.removeEventListener("storage", this.onThemeStorage);
+    },
+    methods: {
+        /** Follow operating system changes through the resolved preference. */
+        onSystemTheme(event : MediaQueryListEvent) {
+            this.system = event.matches ? "dark" : "light";
         },
-
-        theme(to, from) {
-            document.body.classList.remove(from);
-            document.body.classList.add(this.theme);
+        /** Keep multiple tabs on the same explicit device preference. */
+        onThemeStorage(event : StorageEvent) {
+            if (event.key === "theme" || event.key === null) {
+                this.userTheme = readThemePreference(() => window.localStorage);
+            }
+        },
+        /** Apply the same palette to application and native controls. */
+        applyTheme() {
+            document.body.classList.toggle("dark", this.theme === "dark");
+            document.body.classList.toggle("light", this.theme === "light");
+            document.documentElement.style.colorScheme = this.theme;
+            document.documentElement.dataset.bsTheme = this.theme;
             this.updateThemeColorMeta();
         },
-
-        userHeartbeatBar(to, from) {
-            localStorage.heartbeatBarTheme = to;
-        },
-
-        heartbeatBarTheme(to, from) {
-            document.body.classList.remove(from);
-            document.body.classList.add(this.heartbeatBarTheme);
-        }
-    },
-
-    mounted() {
-        // Default Dark
-        if (! this.userTheme) {
-            this.userTheme = "dark";
-        }
-
-        document.body.classList.add(this.theme);
-        this.updateThemeColorMeta();
-    },
-
-    methods: {
-        /**
-         * Update the theme color meta tag
-         * @returns {void}
-         */
         updateThemeColorMeta() {
-            if (this.theme === "dark") {
-                document.querySelector("#theme-color")?.setAttribute("content", "#161B22");
-            } else {
-                document.querySelector("#theme-color")?.setAttribute("content", "#5cdd8b");
-            }
-        }
-    }
+            const color = getComputedStyle(document.body).getPropertyValue("--surface-base").trim();
+            document.querySelector("#theme-color")?.setAttribute("content", color);
+        },
+    },
 });

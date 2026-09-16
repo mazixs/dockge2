@@ -3,7 +3,7 @@
         <div class="stats-title">
             {{ stat.Name }}
         </div>
-        <div class="d-flex justify-content-between stats gap-2 mt-1">
+        <div class="stats">
             <div class="stat">
                 <div class="stat-label">
                     {{ $t('CPU') }}
@@ -54,37 +54,42 @@ export default {
 <style lang="scss" scoped>
 .stats-container {
     container-type: inline-size;
+}
 
-    .stats {
-        container-type: inline-size;
+// Четыре меры в строку, пока строка помещается; в узкой колонке они
+// становятся столбцом пар "мера: значение"
+.stats {
+    container-type: inline-size;
+    display: flex;
+    justify-content: space-between;
+    gap: var(--gap-sm);
+    margin-top: var(--gap-xs);
+    color: var(--text-faint);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+
+    .stat {
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap-xs);
+    }
+
+    @container (width < 420px) {
+        flex-direction: column;
 
         .stat {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
+            flex-direction: row;
+            gap: var(--gap-xs);
         }
 
-        @container (width < 420px) {
-            flex-direction: column;
-
-            .stat {
-                flex-direction: row;
-            }
-
-            .stat-label::after {
-                content: ':'
-            }
+        .stat-label::after {
+            content: ":";
         }
     }
 }
 
-.stats {
-    font-size: var(--text-sm);
-    color: var(--text-faint);
-}
-
 .stat-label {
-    font-weight: bold;
+    font-weight: var(--weight-strong);
 }
 
 .stats-title {

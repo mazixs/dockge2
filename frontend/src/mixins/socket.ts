@@ -4,9 +4,12 @@ import { defineComponent } from "vue";
 import { authClient } from "../auth-client";
 import { authErrorMessage, isTotpCode } from "../auth-messages";
 import { Terminal } from "@xterm/xterm";
+import { createSessionBootstrap, reduceSessionBootstrap, sessionConnectionReady, type SessionBootstrapEvent } from "../session-bootstrap";
 import { AgentSocket } from "../../../common/agent-socket";
 
 let socket : Socket;
+let initializationDeadline : ReturnType<typeof setTimeout> | undefined;
+let sessionRefresh : { generation : number; socketID : string | undefined; userID : string; promise : Promise<boolean> } | undefined;
 
 let terminalMap : Map<string, Terminal> = new Map();
 
@@ -52,6 +55,7 @@ export default defineComponent({
             },
             info: {} as SocketInfo,
             loggedIn: false,
+            sessionBootstrap: createSessionBootstrap(),
             allowLoginDialog: false,
 
             /** True when this instance runs with authentication switched off */
@@ -62,6 +66,8 @@ export default defineComponent({
             /** Когда последний раз приходил список стеков */
             stackListAt: 0,
             username: null as string | null,
+            userID: null as string | null,
+            userRole: "viewer" as "admin" | "operator" | "viewer",
             composeTemplate: "",
 
             stackList: {} as StackList,
@@ -77,6 +83,21 @@ export default defineComponent({
         };
     },
     computed: {
+        appReady() : boolean {
+            return this.loggedIn && this.sessionBootstrap.ready;
+        },
+        sessionBootstrapping() : boolean {
+            return !this.appReady && !this.allowLoginDialog && !this.sessionBootstrap.anonymous && !this.sessionBootstrap.error;
+        },
+        sessionBootstrapError() : string {
+            return this.sessionBootstrap.error;
+        },
+        isAdmin() : boolean {
+            return this.loggedIn && this.userRole === "admin";
+        },
+        canManageStacks() : boolean {
+            return this.loggedIn && this.userRole !== "viewer";
+        },
 
         agentCount() {
             return Object.keys(this.agentList).length;
@@ -197,9 +218,7 @@ export default defineComponent({
                 url = location.protocol + "//" + location.host;
             }
 
-            let connectingMsgTimeout = setTimeout(() => {
-                this.socketIO.connecting = true;
-            }, 1500);
+            this.socketIO.connecting = true;
 
             // withCredentials sends the session cookie during the handshake, which is how
             // the server identifies this client. No token is kept in the browser.
@@ -218,16 +237,23 @@ export default defineComponent({
             socket.on("connect", () => {
                 console.log("Connected to the socket server");
 
-                clearTimeout(connectingMsgTimeout);
                 this.socketIO.connecting = false;
+                this.applySessionBootstrap({ type: "connected" });
+                const generation = this.sessionBootstrap.generation;
+                clearTimeout(initializationDeadline);
+                initializationDeadline = setTimeout(() => {
+                    if (!sessionConnectionReady(this.sessionBootstrap)) {
+                        this.applySessionBootstrap({ type: "failed",
+                            generation,
+                            message: "authConnectionFailed" });
+                    }
+                }, 30000);
 
                 this.socketIO.connectCount++;
                 this.socketIO.connected = true;
                 this.socketIO.showReverseProxyGuide = false;
 
-                // The server tells us through `needAuth` or by acting as a logged in
-                // client, so the UI only has to read the session for its display name
-                this.refreshSession();
+                // A transport connection does not yet identify its user or load its inventory.
 
                 this.socketIO.firstConnect = false;
             });
@@ -236,6 +262,7 @@ export default defineComponent({
                 console.log("disconnect");
                 this.socketIO.connectionErrorMsg = `${this.$t("Lost connection to the socket server. Reconnecting...")}`;
                 this.socketIO.connected = false;
+                clearTimeout(initializationDeadline);
             });
 
             socket.on("connect_error", (err: Error) => {
@@ -245,6 +272,9 @@ export default defineComponent({
                 this.socketIO.connected = false;
                 this.socketIO.firstConnect = false;
                 this.socketIO.connecting = false;
+                this.applySessionBootstrap({ type: "failed",
+                    generation: this.sessionBootstrap.generation,
+                    message: "authConnectionFailed" });
             });
 
             // Custom Events
@@ -253,18 +283,41 @@ export default defineComponent({
                 this.info = info;
             });
 
+            socket.on("authIdentity", (identity: { userID: string; role: "admin" | "operator" | "viewer" }) => {
+                if (this.userID && this.userID !== identity.userID) {
+                    this.clearData();
+                }
+                this.applySessionBootstrap({ type: "identity",
+                    userID: identity.userID });
+                this.userID = identity.userID;
+                this.userRole = identity.role;
+                this.loggedIn = true;
+                this.allowLoginDialog = false;
+                void this.refreshSession();
+            });
+
             socket.on("autoLogin", () => {
                 // Authentication is disabled in the settings
                 this.authDisabled = true;
                 this.loggedIn = true;
                 this.allowLoginDialog = false;
-                this.afterLogin();
+                this.username ||= this.$t("usersRole_admin");
+                if (this.userID) {
+                    this.applySessionBootstrap({ type: "profile",
+                        generation: this.sessionBootstrap.generation,
+                        userID: this.userID });
+                }
             });
 
             socket.on("needAuth", () => {
+                this.applySessionBootstrap({ type: "anonymous" });
+                clearTimeout(initializationDeadline);
                 this.authDisabled = false;
                 this.loggedIn = false;
                 this.username = null;
+                this.userID = null;
+                this.userRole = "viewer";
+                this.clearData();
                 this.allowLoginDialog = true;
             });
 
@@ -292,10 +345,12 @@ export default defineComponent({
                 const res = args[0] as SocketResponse | undefined;
                 if (res?.ok && res.stackList && typeof res.stackList === "object") {
                     const stackList = res.stackList as StackList;
-                    // Когда список пришёл: шапка честно говорит, насколько он свежий
+                    // Когда список пришел: шапка честно говорит, насколько он свежий
                     this.stackListAt = Date.now();
                     if (!res.endpoint) {
                         this.stackList = stackList;
+                        this.applySessionBootstrap({ type: "stacks",
+                            generation: this.sessionBootstrap.generation });
                     } else {
                         if (!this.allAgentStackList[res.endpoint]) {
                             this.allAgentStackList[res.endpoint] = {
@@ -333,6 +388,11 @@ export default defineComponent({
             socket.on("agentList", (res: { ok?: boolean; agentList: Record<string, AgentInfo> }) => {
                 if (res.ok) {
                     this.agentList = res.agentList;
+                    for (const endpoint of Object.keys(res.agentList)) {
+                        this.agentStatusList[endpoint] ??= endpoint ? "connecting" : "online";
+                    }
+                    this.applySessionBootstrap({ type: "agents",
+                        generation: this.sessionBootstrap.generation });
                 }
             });
 
@@ -354,27 +414,85 @@ export default defineComponent({
          * @returns {Promise<boolean>} Whether a session exists
          */
         async refreshSession() : Promise<boolean> {
-            const { data, error } = await authClient.getSession();
-
-            if (data?.user) {
-                this.authDisabled = false;
-                this.loggedIn = true;
-                this.username = data.user.name || data.user.email;
-                this.allowLoginDialog = false;
-                this.afterLogin();
-                return true;
-            }
-
-            // An instance with authentication switched off has no session by design,
-            // and a failed request must not throw the user out of a working session
-            if (this.authDisabled || error) {
+            const generation = this.sessionBootstrap.generation;
+            const userID = this.sessionBootstrap.confirmedUserID;
+            const socketID = socket.id;
+            if (!userID) {
                 return false;
             }
+            if (sessionRefresh?.generation === generation && sessionRefresh.socketID === socketID && sessionRefresh.userID === userID) {
+                return sessionRefresh.promise;
+            }
+            const isCurrentConnection = () => socket.connected && socket.id === socketID && generation === this.sessionBootstrap.generation && userID === this.sessionBootstrap.confirmedUserID;
+            const request = (async () => {
+                try {
+                    const { data, error } = await authClient.getSession();
+                    if (!isCurrentConnection()) {
+                        return false;
+                    }
+                    if (data?.user?.id === userID) {
+                        this.authDisabled = false;
+                        this.username = data.user.username || data.user.name || data.user.email;
+                        this.applySessionBootstrap({ type: "profile",
+                            generation,
+                            userID });
+                        return true;
+                    }
+                    // A cookie-less reverse-proxy deployment is confirmed by autoLogin.
+                    // HTTP profile results never undo the socket's authoritative identity.
+                    if (error && !this.authDisabled) {
+                        this.applySessionBootstrap({ type: "failed",
+                            generation,
+                            message: "authConnectionFailed" });
+                    }
+                    return false;
+                } catch {
+                    if (isCurrentConnection() && !this.authDisabled) {
+                        this.applySessionBootstrap({ type: "failed",
+                            generation,
+                            message: "authConnectionFailed" });
+                    }
+                    return false;
+                }
+            })();
+            sessionRefresh = { generation,
+                socketID,
+                userID,
+                promise: request };
+            return request;
+        },
 
-            this.loggedIn = false;
-            this.username = null;
-            this.allowLoginDialog = true;
-            return false;
+        /** Publish the first complete snapshot once, and keep it mounted on reconnect. */
+        applySessionBootstrap(event : SessionBootstrapEvent) {
+            const wasReady = sessionConnectionReady(this.sessionBootstrap);
+            this.sessionBootstrap = reduceSessionBootstrap(this.sessionBootstrap, event);
+            if (!wasReady && sessionConnectionReady(this.sessionBootstrap)) {
+                clearTimeout(initializationDeadline);
+                this.afterLogin();
+            }
+        },
+
+        /** Wait for actual initialization evidence, with a bounded failure timeout. */
+        waitForSessionReady(timeoutMs = 30000) : Promise<boolean> {
+            const generation = this.sessionBootstrap.generation;
+            return new Promise((resolve) => {
+                const finish = (ready : boolean) => {
+                    clearTimeout(timer);
+                    stop();
+                    resolve(ready);
+                };
+                const check = () => {
+                    const state = this.sessionBootstrap;
+                    if (state.generation !== generation || state.anonymous || state.error) {
+                        finish(false);
+                    } else if (sessionConnectionReady(state)) {
+                        finish(true);
+                    }
+                };
+                const stop = this.$watch(() => this.sessionBootstrap, check);
+                const timer = setTimeout(() => finish(false), timeoutMs);
+                check();
+            });
         },
 
         /**
@@ -386,10 +504,12 @@ export default defineComponent({
          * @returns {Promise<object>} Result with `ok`, `msg` and `twoFactorRequired`
          */
         async signIn(email : string, password : string) : Promise<SocketResponse> {
-            const { data, error } = await authClient.signIn.email({
-                email,
-                password,
-            });
+            const identifier = email.trim();
+            const { data, error } = identifier.includes("@")
+                ? await authClient.signIn.email({ email: identifier,
+                    password })
+                : await authClient.signIn.username({ username: identifier,
+                    password });
 
             if (error) {
                 return {
@@ -436,9 +556,7 @@ export default defineComponent({
         },
 
         /**
-         * Hand the fresh session to the socket and remember who is signed in.
-         * Doing it here rather than in the `connect` handler keeps the login form from
-         * staying on screen while a second request is still in flight.
+         * Hand the fresh session to the socket and await its complete initial snapshot.
          * @returns {Promise<object>} Result with `ok` and `msg`
          */
         async finishSignIn() : Promise<SocketResponse> {
@@ -451,9 +569,9 @@ export default defineComponent({
                 };
             }
 
-            await this.refreshSession();
-
-            return { ok: true };
+            const ready = await this.waitForSessionReady();
+            return ready ? { ok: true } : { ok: false,
+                msg: this.sessionBootstrapError || "authConnectionFailed" };
         },
 
         /**
@@ -504,6 +622,8 @@ export default defineComponent({
                 };
             }
 
+            this.applySessionBootstrap({ type: "anonymous" });
+            clearTimeout(initializationDeadline);
             this.authDisabled = false;
             this.loggedIn = false;
             this.username = null;
@@ -540,6 +660,12 @@ export default defineComponent({
          * @returns {void}
          */
         clearData() {
+            this.userRole = "viewer";
+            this.userID = null;
+            for (const terminal of terminalMap.values()) {
+                terminal.clear();
+            }
+            terminalMap.clear();
             this.stackList = {};
             this.allAgentStackList = {};
             this.agentList = {};

@@ -8,7 +8,7 @@ const stackDir = path.join(stacksDir, E2E_FILES_STACK);
 
 test.describe("choosing stack files and handling secrets", () => {
     test("the compose file and the env order are stored and used", async ({ page }) => {
-        await page.goto(`/compose/${E2E_FILES_STACK}`);
+        await page.goto(`/stack/${E2E_FILES_STACK}/files`);
 
         // Several compose files in the directory means the UI has to ask
         await expect(page.getByText("This directory holds several compose files")).toBeVisible();
@@ -35,7 +35,7 @@ test.describe("choosing stack files and handling secrets", () => {
     });
 
     test("a secret stays masked until the password is given", async ({ page }) => {
-        await page.goto(`/compose/${E2E_FILES_STACK}`);
+        await page.goto(`/stack/${E2E_FILES_STACK}/files`);
 
         const secretRow = page.locator(".secret", { hasText: ".secret.db" });
         await expect(secretRow).toBeVisible();
@@ -65,7 +65,7 @@ test.describe("choosing stack files and handling secrets", () => {
     });
 
     test("binding a secret edits only the selected compose file", async ({ page }) => {
-        await page.goto(`/compose/${E2E_FILES_STACK}`);
+        await page.goto(`/stack/${E2E_FILES_STACK}/files`);
 
         // Make sure this test does not depend on the order of tests. The save button is
         // disabled when nothing changed, so the selection is only saved when needed.
@@ -81,7 +81,7 @@ test.describe("choosing stack files and handling secrets", () => {
 
         const secretRow = page.locator(".secret", { hasText: ".secret.db" });
         await secretRow.locator("input.secret-name").fill("db_password");
-        await secretRow.locator("select.secret-services").selectOption("app");
+        await secretRow.locator(".secret-services").getByLabel("app").check();
         await secretRow.getByRole("button", { name: "Bind" }).click();
 
         await expect(secretRow).toContainText("db_password");

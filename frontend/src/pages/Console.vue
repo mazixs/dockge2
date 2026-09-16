@@ -1,29 +1,45 @@
 <template>
     <transition name="slide-fade" appear>
-        <div v-if="!processing">
-            <h1 class="mb-3">{{ $t("console") }}</h1>
+        <div v-if="!processing" class="page page-fill">
+            <h1>{{ $t("console") }}</h1>
 
-            <Terminal v-if="enableConsole" class="terminal" :rows="20" mode="mainTerminal" name="console" :endpoint="endpoint"></Terminal>
+            <!-- Консоль сервера - та же панель, что терминал стека: имя в шапке,
+                 черная поверхность только внутри тела. Шапка называет сервер, а не
+                 повторяет имя страницы: консоль бывает и на агенте, и слово
+                 "Консоль" дважды подряд ничего не добавляет -->
+            <section v-if="enableConsole" class="panel">
+                <div class="panel-bar">
+                    <h2 class="panel-title"><InterfaceIcon name="terminal" />{{ serverLabel }}</h2>
+                </div>
 
-            <!-- Консоль выключена: экран объясняет, почему её нет и чем она включается -->
+                <div class="panel-console">
+                    <Terminal class="console-terminal" :rows="20" mode="mainTerminal" name="console" :endpoint="endpoint"></Terminal>
+                </div>
+            </section>
+
+            <!-- Консоль выключена: экран объясняет, почему ее нет и чем она
+                 включается. Кнопки здесь нет намеренно - в интерфейсе консоль
+                 не включается, только переменной окружения при запуске -->
             <EmptyState
                 v-else
                 class="console-off"
                 :title="$t('consoleDisabledTitle')"
                 :hint="$t('consoleDisabledHint')"
-            >
-                <router-link to="/settings">{{ $t("openSettings") }}</router-link>
-            </EmptyState>
+            />
         </div>
     </transition>
 </template>
 
 <script>
+import Terminal from "../components/Terminal.vue";
 import EmptyState from "../components/EmptyState.vue";
+import InterfaceIcon from "../components/InterfaceIcon.vue";
 
 export default {
     components: {
+        Terminal,
         EmptyState,
+        InterfaceIcon,
     },
     data() {
         return {
@@ -35,6 +51,15 @@ export default {
         endpoint() {
             return this.$route.params.endpoint || "";
         },
+
+        /** Чей это сервер: консоль открывается и на своей машине, и на агенте */
+        serverLabel() {
+            if (!this.endpoint) {
+                return this.$root.info.primaryHostname || "localhost";
+            }
+
+            return this.$root.endpointDisplayFunction(this.endpoint) || this.endpoint;
+        },
     },
     mounted() {
         this.$root.emitAgent(this.endpoint, "checkMainTerminal", (res) => {
@@ -42,15 +67,13 @@ export default {
             this.processing = false;
         });
     },
-    methods: {
-
-    }
 };
 </script>
 
 <style scoped lang="scss">
-.terminal {
-    height: 410px;
+// Высоту тела дает `.page-fill`; здесь только то, что терминал занимает его целиком
+.console-terminal {
+    height: 100%;
 }
 
 // Пустой экран занимает место терминала, поэтому и выглядит как панель, а не

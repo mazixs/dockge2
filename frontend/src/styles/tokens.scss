@@ -2,113 +2,210 @@
 //
 // Единственный источник цвета, плотности и шрифтов для новых компонентов:
 // они читают только эти свойства и никогда не объявляют цвет внутри правила
-// темы. Тёмная тема основная, светлая - тот же набор имён другими значениями.
+// темы. Темная тема основная, светлая - тот же набор имен другими значениями.
 //
-// Контраст проверен расчётом WCAG 2.1 (см. docs/design-system.md): текст 11,9,
-// приглушённый 5,6, бледный 4,5, состояния 5,0-9,0, белый на акценте 4,6,
-// граница контрола 3,1. Значения ниже порога в систему не попадают.
+// Контраст проверяется в test/frontend/design-tokens.test.ts.
+//
+// Роль текста задается тройкой размер + интерлиньяж + начертание: одного кегля
+// мало, потому что при разном интерлиньяже одинаковые 14px дают разную
+// плотность строк, а именно плотность отличала реализацию от эталона.
 //
 // Тема переключается классом на body (см. frontend/src/mixins/theme.ts):
-// :root несёт светлые значения, body.dark - тёмные.
+// :root несет светлые значения, body.dark - темные.
 
 :root {
     // --- шрифты ---
-    // Одно семейство в трёх весах: узкого начертания с русской кириллицей у
-    // IBM Plex нет, а пара «два похожих санса» читается хуже одного семейства.
+    // Одно семейство в трех весах: узкого начертания с русской кириллицей у
+    // IBM Plex нет, а пара "два похожих санса" читается хуже одного семейства.
     --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
     // --- шкала кегля ---
     --text-xs: 12px;    // подписи под полем, единицы измерения
-    --text-sm: 13px;    // таблицы, чипы, второстепенное
-    --text-base: 14px;  // основной текст интерфейса
+    --text-sm: 14px;    // таблицы, чипы, второстепенное
+    --text-base: 16px;  // основной текст интерфейса
     --text-md: 16px;    // заголовок секции
-    --text-lg: 20px;    // имя стека
-    --text-xl: 26px;    // заголовок страницы
+    --text-lg: 22px;    // имя стека
+    --text-title-sm: 26px; // заголовок страницы на узком экране
+    --text-xl: 30px;    // заголовок страницы
+    --text-code: 13px;  // содержимое файла, вывод команды, diff
+
+    // --- интерлиньяж: по одному на каждый кегль, чтобы строки не разъезжались ---
+    --line-xs: 18px;
+    --line-sm: 20px;
+    --line-base: 24px;
+    --line-md: 24px;
+    --line-lg: 30px;
+    --line-title-sm: 32px;
+    --line-xl: 36px;
+    --line-code: 21px;
+
+    // --- начертания: три веса, искусственный bold не используется ---
+    --weight-regular: 400;
+    --weight-medium: 500;  // заголовок секции, активная вкладка, имя в строке
+    --weight-strong: 600;  // только заголовок страницы и знак в шапке
+
+    // Отрицательный трекинг нужен крупному кеглю, положительный - капители
+    --tracking-title: -.7px;
+    --tracking-eyebrow: 1.5px;
+
+    --header-height: 65px;
+    --sidebar-width: 236px;
+    --source-width: 265px;
 
     // --- плотность ---
     --row-height: 40px;          // строка списка стеков
     --row-height-dense: 34px;    // строка таблицы сервисов
     --control-height: 32px;      // кнопка, поле, переключатель на настольном
+    --control-height-sm: 24px;   // мелкий контрол в шапке блока: выбор окна, бирка-кнопка
     --control-height-touch: 44px; // то же на узком экране
+    --field-height: 42px;        // строка значения и главная кнопка экрана: выше плотного контрола
     --gap-xs: 4px;
     --gap-sm: 8px;
     --gap-md: 12px;
-    --gap-lg: 20px;
+    --gap-lg: 20px;   // отличие от шкалы плана 4/8/12/16/24: шаг уже стоит в раскладке
+    --gap-xl: 24px;   // между блоками секции
+    --gap-2xl: 32px;  // между секциями страницы
+    --gap-3xl: 40px;  // поля рабочей области
+
+    // --- значки: один контур, три размера ---
+    --icon-sm: 16px;  // внутри строки текста
+    --icon-md: 18px;  // кнопка, переход
+    --icon-lg: 20px;  // заголовок панели
 
     // --- радиусы ---
     --radius-chip: 3px;
     --radius-control: 5px;
     --radius-panel: 7px;
-    --radius-pill: 999px; // только для настоящих пилюль: бейдж состояния, счётчик
+    --radius-card: 10px;  // карточка формы и инициал стека
+    --radius-pill: 999px; // только для настоящих пилюль: бейдж состояния, счетчик
+
+    // --- движение: длительность отдельно от кривой, чтобы их можно было смешивать ---
+    --motion-fast: 100ms;   // наведение, нажатие
+    --motion-base: 160ms;   // раскрытие, смена вкладки
+    --motion-slow: 240ms;   // выезд панели, боковой список
+    --motion-ease: cubic-bezier(.25, .46, .45, .94);
+    --motion-ease-in: cubic-bezier(.54, .78, .55, .97);
+
+    // --- слои: числа совпадают с Bootstrap, чтобы модальные окна не спорили ---
+    --layer-sticky: 1;
+    --layer-header: 1030;
+    --layer-dock: 1040;
+    --layer-modal: 1055;
+    --layer-toast: 1080;
 
     // --- поверхности, светлая тема ---
-    --surface-base: #eef2f6;
+    --surface-base: #f4f6f8;
+    --surface-sidebar: #edf1f5;
     --surface-panel: #ffffff;
-    --surface-raised: #e7edf3;
-    --surface-sunken: #dce4ec;
+    --surface-raised: #e8eef1;
+    --surface-sunken: #e0e7ec;
     --line-hair: #d4dce5;   // разделители таблиц и секций
-    --line-control: #878c92; // граница кнопки и поля: 3,01:1 к фону
+    --line-control: #838c94; // Контраст проверяется в test/frontend/design-tokens.test.ts.
 
     // --- текст, светлая тема ---
-    --text-strong: #16202b; // 15,1:1
-    --text-muted: #4f6070;  // 6,6:1
-    --text-faint: #626f7d;  // 4,56:1, ниже 12px не применять
+    --text-strong: #202b38; // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --text-muted: #53616f;  // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --text-faint: #576778;  // Контраст проверяется в test/frontend/design-tokens.test.ts.
     --text-on-accent: #ffffff;
 
     // --- акцент: только интерактив, никогда не состояние ---
-    --accent: #2b5be0;      // белый текст на нём 5,71:1
-    --accent-text: #2b5be0; // акцент как цвет текста на фоне панели
-    --accent-soft: rgba(43, 91, 224, .1);
+    --accent: #515fb3;      // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --accent-text: #515fb3; // акцент как цвет текста на фоне панели
+    --accent-soft: rgba(81, 95, 179, .09);
 
     // --- состояния стека и сервиса: одно значение на один смысл ---
-    --state-running: #17864f;
+    // Состояние бывает и текстом - словом рядом со счетчиком, приговором
+    // стабильности, строкой правки Git, - поэтому порог у него текстовый:
+    // 4.5 на каждой поверхности системы, а не 3 как у одной заливки
+    --state-running: #1f7349;
     --state-attention: #8a5a08;
-    --state-stopped: #5f6d7b;
-    --state-unknown: #6f4fd8;
-    --state-failed: #b83b2f;
+    --state-stopped: #596774;
+    --state-unknown: #6c4bd7;
+    --state-failed: #b63a2e;
+    // Git-правки - не авария контейнера, поэтому у них своя роль, а не --state-attention
+    --state-changes: #8d5a12;
 
     // --- служебное ---
     --shadow-panel: 0 1px 2px rgba(18, 26, 34, .06), 0 10px 28px rgba(18, 26, 34, .06);
     // Притемнение под слоем: цвет, а не backdrop-filter, потому что фильтр
     // поддерживается неровно и в светлой теме почти не виден
     --scrim: rgba(16, 22, 30, .5);
-    // Консоль всегда тёмная - её рисует xterm, а тема меняет только рамку вокруг
+    // Консоль всегда темная - ее рисует xterm, а тема меняет только рамку вокруг
+    --stack-green-bg: #deede4;
+    --stack-green-text: #347757;
+    --stack-purple-bg: #ece5f5;
+    --stack-purple-text: #8155a4;
+    --stack-blue-bg: #e4eef5;
+    --stack-blue-text: #4c7f9d;
+    --stack-teal-bg: #daede8;
+    --stack-teal-text: #287d69;
+    --stack-gray-bg: #ebedf1;
+    --stack-gray-text: #606b7c;
     --surface-console: #0b0e12;
+    // Консоль темная в обеих темах, поэтому текст на ней не следует за темой:
+    // без этой пары подпись на консольной поверхности уходит в нечитаемое
+    --text-on-console: #dfe5ee;
+    --surface-console-selection: rgba(157, 172, 249, .32);
     --focus-ring: 2px solid var(--accent-text);
     --focus-offset: 2px;
 }
 
 body.dark {
-    // --- поверхности, тёмная тема ---
-    --surface-base: #0e1116;
-    --surface-panel: #151a21;
-    --surface-raised: #1b2129;
-    --surface-sunken: #222b35;
-    --line-hair: #232b35;
-    --line-control: #59626b; // 3,05:1 к фону
+    // --- поверхности, темная тема ---
+    --surface-base: #111419;
+    --surface-sidebar: #161a21;
+    --surface-panel: #191d24;
+    --surface-raised: #222630;
+    --surface-sunken: #161a21;
+    --line-hair: #30343e;
+    --line-control: #687a8e; // Контраст проверяется в test/frontend/design-tokens.test.ts.
 
-    // --- текст, тёмная тема ---
-    --text-strong: #ccd6e2; // 11,9:1
-    --text-muted: #8493a3;  // 5,56:1
-    --text-faint: #778390;  // 4,52:1, ниже 12px не применять
-    --text-on-accent: #ffffff;
+    // --- текст, темная тема ---
+    --text-strong: #e4e9f1; // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --text-muted: #a3afc0;  // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --text-faint: #96a2b3;  // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --text-on-accent: #151927;
 
     // --- акцент ---
-    --accent: #466ee3;      // белый текст на нём 4,57:1
-    --accent-text: #8fadff; // как текст на панели: 6,4:1
-    --accent-soft: rgba(70, 110, 227, .16);
+    --accent: #9dacf9;      // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --accent-text: #9dacf9; // Контраст проверяется в test/frontend/design-tokens.test.ts.
+    --accent-soft: rgba(157, 172, 249, .08);
 
     // --- состояния ---
-    --state-running: #46c98b;
+    --state-running: #53c994;
     --state-attention: #e9a13b;
-    --state-stopped: #7d8b9c;
+    --state-stopped: #8390a0;
     --state-unknown: #a78bfa;
-    --state-failed: #e2685e;
+    --state-failed: #e26a60;
+    --state-changes: #edbf7b;
 
     --shadow-panel: 0 1px 2px rgba(0, 0, 0, .5), 0 14px 34px rgba(0, 0, 0, .35);
     --scrim: rgba(0, 0, 0, .62);
+    --stack-green-bg: #274538;
+    --stack-green-text: #a7d3b9;
+    --stack-purple-bg: #363246;
+    --stack-purple-text: #c2b1e8;
+    --stack-blue-bg: #263948;
+    --stack-blue-text: #a1cbe3;
+    --stack-teal-bg: #203d3c;
+    --stack-teal-text: #a0d4ce;
+    --stack-gray-bg: #30333e;
+    --stack-gray-text: #a9afc3;
     --surface-console: #0b0e12;
+    --text-on-console: #dfe5ee;
+    --surface-console-selection: rgba(157, 172, 249, .32);
+}
+
+// Движение - украшение, а не способ показать состояние: при запрете анимации
+// интерфейс обязан оставаться работоспособным, поэтому длительности гасятся
+// в самом источнике значений, а не в каждом компоненте отдельно.
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --motion-fast: 0ms;
+        --motion-base: 0ms;
+        --motion-slow: 0ms;
+    }
 }
 
 // Видимый фокус нужен всему, что можно нажать: без него клавиатурная навигация
@@ -123,9 +220,17 @@ body.dark {
 @media (max-width: 900px) {
     :root {
         --control-height: var(--control-height-touch);
+        // Мелкий контрол на пальце не мельче обычного: 24 px под пальцем не
+        // нажимается, а рядом с ним нет ничего, ради чего стоило бы экономить
+        --control-height-sm: var(--control-height-touch);
         --row-height: 60px;
         --row-height-dense: 48px;
+        --field-height: var(--control-height-touch);
         --text-sm: 14px;
         --text-base: 15px;
+        // Базовый кегль на телефоне меньше, а строка та же: короткая строка
+        // при 15px иначе выглядит теснее, чем на настольном экране
+        --line-base: 23px;
+        --gap-3xl: var(--gap-lg);
     }
 }

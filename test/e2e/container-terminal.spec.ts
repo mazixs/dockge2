@@ -28,7 +28,7 @@ test.describe("switching the container shell", () => {
         // bash sets BASH_VERSION, the ash shell of the image does not
         await openTerminal(page, "bash");
         await page.locator(".xterm-screen").click();
-        await page.keyboard.type("echo shell-is-[$BASH_VERSION]");
+        await page.keyboard.type("echo shell-is-[$BASH_VERSION]", { delay: 25 });
         await page.keyboard.press("Enter");
 
         await expect.poll(() => terminalText(page), { timeout: 15_000 })
@@ -36,7 +36,7 @@ test.describe("switching the container shell", () => {
 
         await openTerminal(page, "sh");
         await page.locator(".xterm-screen").click();
-        await page.keyboard.type("echo shell-is-[$BASH_VERSION]");
+        await page.keyboard.type("echo shell-is-[$BASH_VERSION]", { delay: 25 });
         await page.keyboard.press("Enter");
 
         await expect.poll(() => terminalText(page), { timeout: 15_000 })
@@ -48,7 +48,7 @@ test.describe("switching the container shell", () => {
 
         // Leave a marker in the bash session
         await page.locator(".xterm-screen").click();
-        await page.keyboard.type("echo bash-session-marker");
+        await page.keyboard.type("echo bash-session-marker", { delay: 25 });
         await page.keyboard.press("Enter");
 
         await expect.poll(() => terminalText(page), { timeout: 15_000 })
@@ -68,7 +68,7 @@ test.describe("switching the container shell", () => {
 
         // And the sh session is usable on its own
         await page.locator(".xterm-screen").click();
-        await page.keyboard.type("echo sh-session-marker");
+        await page.keyboard.type("echo sh-session-marker", { delay: 25 });
         await page.keyboard.press("Enter");
 
         await expect.poll(() => terminalText(page), { timeout: 15_000 })
@@ -78,12 +78,12 @@ test.describe("switching the container shell", () => {
     test("an unknown shell in the URL falls back to sh instead of reaching Docker", async ({ page }) => {
         await openTerminal(page, "zsh");
 
-        // The badge shows the shell that is really used
-        await expect(page.locator(".badge", { hasText: "sh" })).toBeVisible();
+        // The panel title names the shell that is really used: service · shell
+        await expect(page.locator(".panel-title")).toHaveText(new RegExp(`${SERVICE}\\s*·\\s*sh$`));
         await expect(page.getByRole("link", { name: /Switch to bash/ })).toBeVisible();
 
         await page.locator(".xterm-screen").click();
-        await page.keyboard.type("echo fallback-works");
+        await page.keyboard.type("echo fallback-works", { delay: 25 });
         await page.keyboard.press("Enter");
 
         await expect.poll(() => terminalText(page), { timeout: 15_000 })

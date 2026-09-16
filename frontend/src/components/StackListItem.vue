@@ -2,34 +2,40 @@
     <router-link
         :to="url"
         class="item"
-        :class="{ 'dim': !stack.isManagedByDockge, 'fresh': isFresh }"
+        :class="{ 'dim': !stack.isManagedByDockge, 'fresh': isFresh, 'active': isCurrent }"
+        :aria-current="isCurrent ? 'page' : null"
     >
         <!-- Навигатор: имя и одна мета-строка. Подробности живут в рабочей области -->
-        <div class="line">
-            <Uptime :stack="stack" :compact="true" :dot-only="true" />
-            <span class="name">{{ stackName }}</span>
-            <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
-        </div>
+        <span class="stack-letter" :class="`stack-color-${stackColor(stackName)}`" aria-hidden="true">{{ stackName.slice(0, 1).toUpperCase() }}</span>
+        <div class="stack-item-text">
+            <div class="line">
+                <span v-ellipsis-title class="name">{{ stackName }}</span>
+                <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
+            </div>
 
-        <div class="meta">
-            <span v-if="agentLabel !== $t('thisServer')" class="agent">{{ agentLabel }}</span>
-            <span class="services-count">{{ $t("serviceCount", services.length) }}</span>
-            <span class="dot-sep" aria-hidden="true">·</span>
-            <span class="availability" :class="`verdict-${availabilityVerdict}`" :title="availabilityTitle">{{ availabilityLabel }}</span>
-            <span v-if="updatesPending" class="updates" :title="updatesTitle">{{ updatesLabel }}</span>
+            <div class="meta">
+                <Uptime v-if="source?.dirty || source?.behind > 0" :stack="stack" :compact="true" />
+                <span v-if="source?.dirty || source?.behind > 0" class="updates"><InterfaceIcon name="git" /> {{ $t("familiarHasChanges") }}</span>
+                <template v-else>
+                    <Uptime :stack="stack" :compact="true" />
+                    <span v-if="updatesPending" class="updates" :title="updatesTitle">{{ updatesLabel }}</span>
+                </template>
+            </div>
         </div>
+        <Uptime :stack="stack" :compact="true" :dot-only="true" aria-hidden="true" />
     </router-link>
 </template>
 
 <script>
+import InterfaceIcon from "./InterfaceIcon.vue";
+import { stackColor } from "../stack-color";
 import Uptime from "./Uptime.vue";
-import { formatDuration, formatPercent } from "../format";
 
-/** Сколько сервисов показывается до сворачивания в «+N» */
+/** Сколько сервисов показывается до сворачивания в "+N" */
 const SHOWN_SERVICES = 3;
 
 export default {
-    components: {
+    components: { InterfaceIcon,
         Uptime
     },
     props: {
@@ -61,18 +67,23 @@ export default {
     },
     computed: {
         url() {
-            if (this.stack.endpoint) {
-                return `/stack/${this.stack.name}/${this.stack.endpoint}`;
-            } else {
-                return `/stack/${this.stack.name}`;
-            }
+            // Вкладка едет за человеком: кто читает журналы, переключает стеки
+            // ради журналов, и возврат на обзор каждый раз стоил бы ему двух
+            // лишних действий. Обзор и отдельные экраны стека ведут на обзор
+            const tab = { stackFiles: "files",
+                stackLogs: "logs",
+                stackTerminal: "terminal",
+                stackGitChanges: "git" }[String(this.$route.name)] ?? "";
+
+            const path = `/stack/${this.stack.name}${tab ? `/${tab}` : ""}`;
+            return this.stack.endpoint ? `${path}/${this.stack.endpoint}` : path;
         },
 
         stackName() {
             return this.stack.name;
         },
 
-        /** Где стек живёт: свой сервер или агент по имени */
+        /** Где стек живет: свой сервер или агент по имени */
         agentLabel() {
             if (!this.stack.endpoint) {
                 return this.$t("thisServer");
@@ -140,9 +151,9 @@ export default {
         },
 
         /**
-         * Обновления. Отставание в коммитах известно из локальных ссылок, а «новее в
-         * реестре» требует проверки digest, которой ещё нет - поэтому вместо догадки
-         * стоит «неизвестно».
+         * Обновления. Отставание в коммитах известно из локальных ссылок, а "новее в
+         * реестре" требует проверки digest, которой еще нет - поэтому вместо догадки
+         * стоит "неизвестно".
          */
         updatesLabel() {
             const behind = this.source?.behind;
@@ -151,7 +162,7 @@ export default {
                 return behind > 0 ? this.$t("updatesGit", behind) : this.$t("updatesNone");
             }
 
-            // Проверки образов в реестре ещё нет, поэтому вместо догадки стоит прочерк,
+            // Проверки образов в реестре еще нет, поэтому вместо догадки стоит прочерк,
             // а объяснение - в подсказке
             return "—";
         },
@@ -168,64 +179,19 @@ export default {
             return this.sourceKind === "git" && (this.source?.behind ?? 0) > 0;
         },
 
-        availability() {
-            return this.stack.availability ?? null;
-        },
-
-        availabilityVerdict() {
-            return this.availability?.verdict ?? "noData";
-        },
-
         /**
-         * Доступность словами. Правила простые и обязательные: без наблюдений нет
-         * процента, полное окно без сбоев - это «без сбоев», а не «100%», а
-         * остановленный стек показывает срок, а не долю.
+         * Открытый сейчас стек. Отмечать его должна рейка, а не только адресная
+         * строка: маршруты вкладок - соседи обзора, а не его дети, поэтому сам
+         * router-link считает пункт активным лишь на обзоре и на файлах, журнале,
+         * терминале и сравнении Git отметка пропадала
+         * @returns {boolean} Это строка текущего стека
          */
-        availabilityLabel() {
-            const data = this.availability;
-
-            if (!data) {
-                return this.$t("availabilityNoData");
+        isCurrent() {
+            if (this.$route.params.stackName !== this.stack.name) {
+                return false;
             }
 
-            if (data.verdict === "stopped") {
-                return this.$t("availabilityStopped", [ formatDuration(data.currentForMs, this.$t) ]);
-            }
-
-            if (data.verdict === "clean") {
-                return this.$t("availabilityClean");
-            }
-
-            if (data.verdict === "degraded" && data.incidents === 0) {
-                // Доля упала не из-за сбоя, а из-за остановки: «0 сбоев» было бы враньём
-                return formatPercent(data.ratio, this.$i18n.locale, true);
-            }
-
-            if (data.verdict === "degraded") {
-                const percent = formatPercent(data.ratio, this.$i18n.locale, true);
-                return `${percent} · ${this.$t("availabilityIncidents", data.incidents)}`;
-            }
-
-            return this.$t("availabilityNoData");
-        },
-
-        /** Почему сказано «мало данных» или почему доля меньше единицы без сбоев */
-        availabilityTitle() {
-            const data = this.availability;
-
-            if (data?.verdict === "degraded" && data.incidents === 0) {
-                return this.$t("availabilityPartlyStopped");
-            }
-
-            if (!data || data.verdict !== "noData") {
-                return "";
-            }
-
-            if (!data.coveredMs) {
-                return this.$t("availabilityNothingObserved");
-            }
-
-            return this.$t("availabilityObservedFor", [ formatDuration(data.coveredMs, this.$t) ]);
+            return (this.$route.params.endpoint || "") === (this.stack.endpoint || "");
         },
 
         /** Только что созданный стек, на который надо показать в списке */
@@ -234,6 +200,7 @@ export default {
         }
     },
     methods: {
+        stackColor,
         /**
          * Состояние сервиса словами для подсказки чипа
          * @param {object} service Сервис из сводки
@@ -260,13 +227,20 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.stack-letter { display: grid; place-items: center; width: var(--gap-2xl); height: var(--gap-2xl); flex-shrink: 0; border-radius: var(--radius-card); background: var(--stack-letter-background, var(--accent-soft)); color: var(--stack-letter-color, var(--accent-text)); font-size: var(--text-md); font-weight: var(--weight-medium); }
+.stack-item-text { min-width: 0; flex: 1; }
+
 // Специфичность a.item намеренная: правило перебивает наследие общего слоя
 // независимо от порядка подключения файлов
 a.item {
-    display: block;
-    padding: var(--gap-sm) var(--gap-md);
-    border-bottom: 1px solid var(--line-hair);
-    border-left: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    padding: var(--gap-sm);
+    border-radius: var(--radius-panel);
+    margin-bottom: var(--gap-xs);
+    border: 1px solid transparent;
+
     text-decoration: none;
     color: var(--text-strong);
 
@@ -274,10 +248,11 @@ a.item {
         background-color: var(--surface-raised);
     }
 
-    // Выбранный стек виден не только цветом: слева акцентная полоса
+    // Открытый стек: заливка акцентом и рамка вместо прозрачной - строка
+    // выступает из рейки, и место в списке видно, не читая имен
     &.active, &[aria-current] {
         background-color: var(--accent-soft);
-        border-left-color: var(--accent);
+        border-color: var(--line-hair);
     }
 
     &:focus-visible {
@@ -289,10 +264,10 @@ a.item {
         opacity: 0.6;
     }
 
-    // Только что созданный стек: подсветка отвечает на «где он в списке»
+    // Только что созданный стек: подсветка отвечает на "где он в списке"
     &.fresh {
         background-color: color-mix(in srgb, var(--state-running) 10%, transparent);
-        border-left-color: var(--state-running);
+        border-color: var(--state-running);
     }
 }
 
@@ -303,47 +278,32 @@ a.item {
     min-width: 0;
 }
 
+.item:focus-visible .name { white-space: normal; overflow-wrap: anywhere; }
+
 .name {
-    font-weight: 600;
+    font-weight: var(--weight-medium);
+    font-size: var(--text-sm);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-// Мета-строка: сколько сервисов и что с доступностью - этого хватает,
+// Мета-строка: состояние словом и несохраненные изменения - этого хватает,
 // чтобы выбрать стек, не открывая его
 .meta {
     display: flex;
     align-items: center;
-    gap: 5px;
-    margin-left: 14px;
+    gap: var(--gap-xs);
+    margin-left: 0;
     font-size: var(--text-xs);
     color: var(--text-faint);
-    white-space: nowrap;
-    overflow: hidden;
-}
-
-.agent {
-    font-family: var(--font-mono);
-}
-
-.dot-sep {
-    color: var(--line-control);
-}
-
-.availability {
-    overflow: hidden;
-    text-overflow: ellipsis;
-
-    &.verdict-degraded {
-        color: var(--state-attention);
-    }
+    flex-wrap: wrap;
 }
 
 // Отставание в Git - повод открыть стек, поэтому оно видно и в навигаторе
 .updates {
-    margin-left: auto;
-    font-family: var(--font-mono);
+    margin-left: 0;
+    font-family: var(--font-ui);
     color: var(--state-attention);
 }
 
@@ -353,6 +313,6 @@ a.item {
     color: var(--state-running);
     border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
     border-radius: var(--radius-chip);
-    padding: 0 5px;
+    padding: 0 var(--gap-xs);
 }
 </style>

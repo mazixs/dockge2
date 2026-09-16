@@ -9,11 +9,12 @@
             class="sheet"
             :role="inline ? undefined : 'dialog'"
             :aria-modal="inline ? undefined : 'true'"
-            :aria-labelledby="titleId"
+            :aria-labelledby="hideHeading && !deploying ? undefined : titleId"
+            :aria-label="hideHeading && !deploying ? $t('gitUiPasteCompose') : undefined"
             @keydown.esc.stop="requestClose"
             @keydown.tab="keepFocusInside"
         >
-            <header>
+            <header v-if="!hideHeading || deploying">
                 <h2 :id="titleId">{{ deploying ? $t("deployingStack", [ name ]) : $t("newStack") }}</h2>
                 <span v-if="!deploying && converted" class="head-note">{{ targetSummary }}</span>
                 <span v-if="deploying" class="head-note"><i class="dot attention"></i> {{ $t("deployRunning", [ elapsed ]) }}</span>
@@ -28,17 +29,19 @@
                 </button>
             </header>
 
-            <!-- Ошибка проверки: слой остаётся открытым, текст приходит от Docker Compose -->
+            <!-- Ошибка проверки: слой остается открытым, текст приходит от Docker Compose -->
             <div v-if="failure" class="line failure">
                 <i class="dot failed"></i>
                 <span><b>{{ $t("notDeployed") }}</b> {{ failure }}</span>
             </div>
 
-            <!-- Пока идёт развёртывание, единственное доступное действие - прервать его -->
+            <!-- Пока идет развертывание, единственное доступное действие - прервать его -->
             <div v-if="deploying" class="line running">
                 <span>{{ $t("deployStepsRunning") }}</span>
                 <button class="btn btn-sm btn-normal" type="button" @click="abort">{{ $t("abortRunning") }}</button>
             </div>
+
+            <div v-if="saving" class="line" role="status">{{ $t("gitUiSavingCompose") }}</div>
 
             <div v-if="!deploying" class="brief">
                 <div class="part">
@@ -55,13 +58,14 @@
                         :id="pasteId"
                         ref="paste"
                         v-model="source"
+                        :disabled="saving"
                         :class="{ joined: converted }"
                         :placeholder="$t('pastePlaceholder')"
                         spellcheck="false"
                         rows="10"
                     ></textarea>
 
-                    <!-- Из отчёта на экране остаётся то, из-за чего сервис не заработает -->
+                    <!-- Из отчета на экране остается то, из-за чего сервис не заработает -->
                     <div v-if="report" class="line report">
                         <template v-if="firstProblem">
                             <i class="dot failed"></i>
@@ -95,18 +99,18 @@
                     <div class="where">
                         <label class="field">
                             <span>{{ $t("stackName") }}</span>
-                            <input v-model="name" type="text" :placeholder="$t('stackNamePlaceholder')" @input="nameTouched = true">
+                            <input v-model="name" :disabled="saving" type="text" :placeholder="$t('stackNamePlaceholder')" @input="nameTouched = true">
                         </label>
                         <label class="field">
                             <span>{{ $t("dockgeAgent", 1) }}</span>
-                            <select v-model="endpoint">
+                            <select v-model="endpoint" :disabled="saving">
                                 <option
                                     v-for="(agent, agentEndpoint) in $root.agentList"
                                     :key="agentEndpoint"
                                     :value="agentEndpoint"
                                     :disabled="$root.agentStatusList[agentEndpoint] !== 'online'"
                                 >
-                                    {{ agent.name || agent.url || $t("Current") }}<template v-if="$root.agentStatusList[agentEndpoint] !== 'online'"> — {{ $root.agentStatusList[agentEndpoint] }}</template>
+                                    {{ agentEndpoint ? agent.name || agent.url : $t("thisServer") }}<template v-if="$root.agentStatusList[agentEndpoint] !== 'online'"> — {{ $root.agentStatusList[agentEndpoint] }}</template>
                                 </option>
                             </select>
                         </label>
@@ -115,7 +119,7 @@
                 </div>
             </div>
 
-            <!-- Развёртывание: тот же слой, список контейнеров и время -->
+            <!-- Развертывание: тот же слой, список контейнеров и время -->
             <div v-else class="progress">
                 <div v-for="service in progressServices" :key="service" class="prow">
                     <span class="name">{{ service }}</span>
@@ -132,7 +136,7 @@
                     {{ $t("saveWithoutStarting") }}
                 </button>
                 <span class="spacer"></span>
-                <span class="sub">{{ canDeploy ? $t("validatedBeforeStart") : $t("deployNeedsContentAndName") }}</span>
+                <span class="sub">{{ saving ? $t("gitUiSavingCompose") : canDeploy ? $t("validatedBeforeStart") : $t("deployNeedsContentAndName") }}</span>
             </footer>
         </section>
     </div>
@@ -145,7 +149,7 @@ import { analyseConversion } from "../../../common/docker-run-flags";
 /** Пауза после ввода, после которой имеет смысл распознавать формат */
 const RECOGNISE_DELAY_MS = 400;
 
-/** Как долго строка нового стека остаётся подсвеченной в списке */
+/** Как долго строка нового стека остается подсвеченной в списке */
 const FRESH_MS = 60_000;
 
 /** Содержимое .env для нового стека: то же, что предлагает страница стека */
@@ -161,21 +165,32 @@ export default {
             type: Boolean,
             default: false,
         },
+        hideHeading: {
+            type: Boolean,
+            default: false,
+        },
+        initialEndpoint: {
+            type: String,
+            default: "",
+        },
     },
+    emits: [ "busy-change" ],
     data() {
         return {
             visible: false,
-            /** Элемент, которому вернётся фокус после закрытия */
+            /** Элемент, которому вернется фокус после закрытия */
             opener: null,
             source: "",
-            /** Исходная команда, чтобы её можно было вернуть: правка поля ломает отмену браузера */
+            /** Исходная команда, чтобы ее можно было вернуть: правка поля ломает отмену браузера */
             originalCommand: "",
             converted: false,
+            skipRecognition: false,
             report: null,
             showAllFlags: false,
             name: "",
             nameTouched: false,
-            endpoint: "",
+            endpoint: this.initialEndpoint,
+            saving: false,
             deploying: false,
             failure: "",
             elapsed: 0,
@@ -187,7 +202,9 @@ export default {
     computed: {
         /** Можно ли уже что-то разворачивать */
         canDeploy() {
-            return this.source.trim().length > 0 && this.name.trim().length > 0;
+            return !this.saving && !this.deploying && this.$root.canManageStacks
+                && this.$root.agentStatusList[this.endpoint] === "online"
+                && this.source.trim().length > 0 && this.name.trim().length > 0;
         },
 
         /** Первый флаг, из-за которого сервис может не заработать */
@@ -195,7 +212,7 @@ export default {
             return this.report?.dropped[0] ?? null;
         },
 
-        /** Сколько флагов остаётся под кнопкой «ещё» */
+        /** Сколько флагов остается под кнопкой "еще" */
         restFlagCount() {
             if (!this.report) {
                 return 0;
@@ -205,7 +222,7 @@ export default {
             return Math.max(0, total - (this.firstProblem ? 1 : 0));
         },
 
-        /** Все флаги в одном списке: сначала потери, потом внимание, потом перенесённые */
+        /** Все флаги в одном списке: сначала потери, потом внимание, потом перенесенные */
         allFlags() {
             if (!this.report) {
                 return [];
@@ -214,11 +231,11 @@ export default {
             return [ ...this.report.dropped, ...this.report.review, ...this.report.carried ];
         },
 
-        /** Куда попадёт стек, одной строкой */
+        /** Куда попадет стек, одной строкой */
         targetSummary() {
             const agent = this.$root.agentList?.[this.endpoint];
-            // Локальный агент приходит с пустым именем, поэтому подпись берётся из перевода
-            const agentName = agent?.name || agent?.url || this.$t("Current");
+            // Локальный агент приходит с пустым именем, поэтому подпись берется из перевода
+            const agentName = this.endpoint ? agent?.name || agent?.url : this.$t("thisServer");
 
             return this.name ? `${this.name} · ${agentName}` : agentName;
         },
@@ -231,7 +248,22 @@ export default {
 
     watch: {
         source() {
+            if (this.skipRecognition) {
+                this.skipRecognition = false;
+                return;
+            }
             this.scheduleRecognition();
+        },
+        initialEndpoint(value) {
+            if (!this.deploying && !this.saving) {
+                this.endpoint = value;
+            }
+        },
+        deploying() {
+            this.$emit("busy-change", this.deploying || this.saving);
+        },
+        saving() {
+            this.$emit("busy-change", this.deploying || this.saving);
         },
     },
 
@@ -247,7 +279,7 @@ export default {
          * @returns {void}
          */
         open(prefill = "") {
-            // Кнопка, с которой пришли: на неё возвращается фокус при закрытии
+            // Кнопка, с которой пришли: на нее возвращается фокус при закрытии
             this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
             this.visible = true;
             this.failure = "";
@@ -272,11 +304,11 @@ export default {
         },
 
         /**
-         * Закрыть слой. Во время развёртывания закрывать нечего: задача идёт.
+         * Закрыть слой. Во время развертывания закрывать нечего: задача идет.
          * @returns {void}
          */
         requestClose() {
-            if (this.deploying || this.inline) {
+            if (this.deploying || this.saving || this.inline) {
                 return;
             }
 
@@ -294,13 +326,16 @@ export default {
         },
 
         /**
-         * Не выпускать фокус из слоя: Tab с последнего элемента идёт на первый,
+         * Не выпускать фокус из слоя: Tab с последнего элемента идет на первый,
          * Shift+Tab с первого - на последний. Иначе клавиатура уходит в список
          * за притемнением, где ничего нажимать нельзя.
          * @param {KeyboardEvent} event Нажатие Tab
          * @returns {void}
          */
         keepFocusInside(event) {
+            if (this.inline) {
+                return;
+            }
             const sheet = this.$refs.sheet;
 
             if (!sheet) {
@@ -350,13 +385,16 @@ export default {
         },
 
         /**
-         * Преобразовать команду в compose и составить отчёт по флагам
+         * Преобразовать команду в compose и составить отчет по флагам
          * @returns {void}
          */
         convert() {
             const command = this.source;
 
             this.$root.getSocket().emit("composerize", command, (res) => {
+                if (this.source !== command || this.converted) {
+                    return;
+                }
                 if (!res?.ok) {
                     this.failure = res?.msg ?? this.$t("conversionFailed");
                     return;
@@ -388,6 +426,8 @@ export default {
             this.report = null;
             this.showAllFlags = false;
             this.originalCommand = "";
+            this.skipRecognition = true;
+            clearTimeout(recogniseTimer);
             this.source = command;
         },
 
@@ -416,7 +456,7 @@ export default {
 
         /**
          * Имя стека по compose-файлу.
-         * Сначала берётся имя контейнера: если человек написал `--name`, он уже
+         * Сначала берется имя контейнера: если человек написал `--name`, он уже
          * назвал эту вещь, и угадывать по образу поверх его выбора незачем.
          * @param {string} composeYAML Содержимое compose-файла
          * @returns {string} Предлагаемое имя
@@ -432,7 +472,7 @@ export default {
                     candidate = String(first.container_name);
                 }
             } catch {
-                // Незаконченный YAML: остаётся имя сервиса
+                // Незаконченный YAML: остается имя сервиса
             }
 
             // Имя стека - это каталог, поэтому только то, что проходит барьер путей
@@ -458,10 +498,14 @@ export default {
         /**
          * Отправить стек агенту
          * @param {string} event Событие сокета
-         * @param {boolean} withDeploy Нужно ли показывать прогресс развёртывания
+         * @param {boolean} withDeploy Нужно ли показывать прогресс развертывания
          * @returns {void}
          */
         send(event, withDeploy) {
+            if (!this.canDeploy) {
+                return;
+            }
+            this.saving = !withDeploy;
             this.failure = "";
             const name = this.name.trim();
 
@@ -474,13 +518,14 @@ export default {
                 }, 1000);
             }
 
-            // Пустой .env создаётся сразу: его почти всегда правят следующим шагом,
+            // Пустой .env создается сразу: его почти всегда правят следующим шагом,
             // и пусть он лежит с подсказкой, а не появляется из ниоткуда потом
             const composeENV = this.$root.envTemplate || ENV_DEFAULT;
 
             this.$root.emitAgent(this.endpoint, event, name, this.source, composeENV, true, (res) => {
                 clearInterval(elapsedTimer);
                 this.deploying = false;
+                this.saving = false;
 
                 if (!res?.ok) {
                     this.failure = res?.msg ? this.$t(res.msg) : this.$t("deployFailed");
@@ -497,12 +542,12 @@ export default {
                 }
                 this.reset();
                 this.$root.toastRes(res);
-                this.$router.push(this.endpoint ? `/stack/${name}/${this.endpoint}` : `/stack/${name}`);
+                this.$router.push(this.endpoint ? `/stack/${encodeURIComponent(name)}/${encodeURIComponent(this.endpoint)}` : `/stack/${encodeURIComponent(name)}`);
             });
         },
 
         /**
-         * Прервать запущенное развёртывание: команда останавливается, файлы остаются
+         * Прервать запущенное развертывание: команда останавливается, файлы остаются
          * на диске черновиком
          * @returns {void}
          */
@@ -535,7 +580,7 @@ export default {
 .sheet-layer {
     position: fixed;
     inset: 0;
-    z-index: 1055;
+    z-index: var(--layer-modal);
 }
 
 // Встроенный бриф: без притемнения, без фиксации на весь экран
@@ -600,13 +645,13 @@ header {
     position: sticky;
     top: 0;
     background: var(--surface-panel);
-    z-index: 1;
+    z-index: var(--layer-sticky);
 }
 
 h2 {
     margin: 0;
     font-size: var(--text-lg);
-    font-weight: 600;
+    font-weight: var(--weight-strong);
     letter-spacing: -.01em;
 }
 
@@ -660,7 +705,7 @@ h2 {
 
 .part-title {
     font-size: var(--text-base);
-    font-weight: 500;
+    font-weight: var(--weight-medium);
     color: var(--text-strong);
 }
 
@@ -682,7 +727,7 @@ textarea {
     color: var(--text-strong);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
-    line-height: 1.6;
+    line-height: var(--line-xs);
     padding: var(--gap-sm) var(--gap-md);
     resize: vertical;
 
@@ -700,7 +745,7 @@ textarea {
     }
 }
 
-// Полоса над полем и отчёт под ним: сообщают, а не окрашивают экран
+// Полоса над полем и отчет под ним: сообщают, а не окрашивают экран
 // Полоса выполнения: секунды идут в шапке, здесь - что происходит и как прервать
 .running {
     justify-content: space-between;
@@ -786,7 +831,7 @@ textarea {
         color: var(--text-muted);
         border: 1px solid var(--line-hair);
         border-radius: var(--radius-chip);
-        padding: 1px 6px;
+        padding: 2px var(--gap-sm);
 
         &.dropped {
             color: var(--state-failed);
@@ -880,7 +925,7 @@ footer {
     flex: 1;
 }
 
-// Вид кнопки живёт в main.scss. Здесь остаётся только тихий вид: в слое
+// Вид кнопки живет в main.scss. Здесь остается только тихий вид: в слое
 // главная кнопка одна, остальные не должны с ней спорить.
 .btn-quiet {
     --bs-btn-color: var(--text-strong);

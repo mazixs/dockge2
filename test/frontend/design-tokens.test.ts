@@ -82,74 +82,80 @@ function readThemes() : Theme[] {
     return [
         { name: "светлая",
             tokens: light },
-        { name: "тёмная",
+        { name: "темная",
             tokens: dark },
     ];
 }
 
-/** Text tokens and the surface they are allowed to sit on */
-const TEXT_PAIRS = [
-    { text: "--text-strong",
-        on: "--surface-base",
-        need: 4.5 },
-    { text: "--text-strong",
-        on: "--surface-panel",
-        need: 4.5 },
-    { text: "--text-muted",
-        on: "--surface-base",
-        need: 4.5 },
-    { text: "--text-muted",
-        on: "--surface-panel",
-        need: 4.5 },
-    // The faint token is the one that used to fail: it is still real text
-    { text: "--text-faint",
-        on: "--surface-base",
-        need: 4.5 },
-    { text: "--text-faint",
-        on: "--surface-panel",
-        need: 4.5 },
-    { text: "--accent-text",
-        on: "--surface-panel",
-        need: 4.5 },
+/**
+ * Every surface of the system, not only the two flat ones: muted text sits on the
+ * sunken strip of the stability panel and on the raised row just as often
+ */
+const SURFACES = [
+    "--surface-base",
+    "--surface-panel",
+    "--surface-sidebar",
+    "--surface-raised",
+    "--surface-sunken",
 ];
 
-/** State colours never carry text on their own, so they follow the 3:1 rule */
+/** Text tokens, each checked against every surface it can land on */
+const TEXT_TOKENS = [
+    "--text-strong",
+    // The faint token is the one that used to fail: it is still real text
+    "--text-faint",
+    "--text-muted",
+    "--accent-text",
+];
+
+/**
+ * State colours are text too - the word next to a counter, the stability verdict,
+ * the Git change line - so they carry the text threshold, not the 3:1 of a fill
+ */
 const STATE_TOKENS = [
     "--state-running",
     "--state-attention",
     "--state-stopped",
     "--state-unknown",
     "--state-failed",
+    "--state-changes",
 ];
 
-test("текст любой темы читается на своей поверхности", () => {
-    for (const theme of readThemes()) {
-        for (const pair of TEXT_PAIRS) {
-            const text = theme.tokens[pair.text];
-            const surface = theme.tokens[pair.on];
-            assert.ok(text && surface, `${theme.name}: нет токена ${pair.text} или ${pair.on}`);
+/** One threshold for both lists: a colour that carries words is read, not glanced at */
+const NEED = 4.5;
 
-            const ratio = contrast(text, surface);
-            assert.ok(
-                ratio >= pair.need,
-                `${theme.name}: ${pair.text} (${text}) на ${pair.on} (${surface}) даёт ${ratio.toFixed(2)}, нужно ${pair.need}`,
-            );
+test("текст любой темы читается на каждой поверхности", () => {
+    for (const theme of readThemes()) {
+        for (const token of TEXT_TOKENS) {
+            const text = theme.tokens[token];
+            assert.ok(text, `${theme.name}: нет токена ${token}`);
+
+            for (const surfaceToken of SURFACES) {
+                const surface = theme.tokens[surfaceToken] as string;
+                assert.ok(surface, `${theme.name}: нет токена ${surfaceToken}`);
+
+                const ratio = contrast(text as string, surface);
+                assert.ok(
+                    ratio >= NEED,
+                    `${theme.name}: ${token} (${text}) на ${surfaceToken} (${surface}) дает ${ratio.toFixed(2)}, нужно ${NEED}`,
+                );
+            }
         }
     }
 });
 
-test("состояния различимы на обеих поверхностях", () => {
+test("состояния читаются как текст на каждой поверхности", () => {
     for (const theme of readThemes()) {
         for (const token of STATE_TOKENS) {
             const colour = theme.tokens[token];
             assert.ok(colour, `${theme.name}: нет токена ${token}`);
 
-            for (const surfaceToken of [ "--surface-base", "--surface-panel" ]) {
+            for (const surfaceToken of SURFACES) {
                 const surface = theme.tokens[surfaceToken] as string;
-                const ratio = contrast(colour, surface);
+                const ratio = contrast(colour as string, surface);
                 assert.ok(
-                    ratio >= 3,
-                    `${theme.name}: ${token} (${colour}) на ${surfaceToken} даёт ${ratio.toFixed(2)}, нужно 3`,
+                    ratio >= NEED,
+                    `${theme.name}: ${token} (${colour}) на ${surfaceToken} дает ${ratio.toFixed(2)}, нужно ${NEED}`,
                 );
             }
         }
@@ -163,15 +169,15 @@ test("надпись на акцентной кнопке и граница ко
         const buttonRatio = contrast(ink, accent);
         assert.ok(
             buttonRatio >= 4.5,
-            `${theme.name}: текст ${ink} на кнопке ${accent} даёт ${buttonRatio.toFixed(2)}, нужно 4.5`,
+            `${theme.name}: текст ${ink} на кнопке ${accent} дает ${buttonRatio.toFixed(2)}, нужно 4.5`,
         );
 
-        // Граница - единственный признак «тихой» кнопки, поэтому 3:1 обязательны
+        // Граница - единственный признак "тихой" кнопки, поэтому 3:1 обязательны
         const border = theme.tokens["--line-control"] as string;
         const borderRatio = contrast(border, theme.tokens["--surface-base"] as string);
         assert.ok(
             borderRatio >= 3,
-            `${theme.name}: граница контрола ${border} на фоне даёт ${borderRatio.toFixed(2)}, нужно 3`,
+            `${theme.name}: граница контрола ${border} на фоне дает ${borderRatio.toFixed(2)}, нужно 3`,
         );
     }
 });
@@ -197,7 +203,7 @@ test("цели нажатия не меньше 32 пикселей, а на у�
     assert.equal(light["--control-height"], "32px");
     assert.equal(light["--control-height-touch"], "44px");
 
-    // Узкий экран обязан поднимать цели: правило живёт в самом файле токенов
+    // Узкий экран обязан поднимать цели: правило живет в самом файле токенов
     const narrow = source.slice(source.indexOf("@media (max-width: 900px)"));
     assert.match(narrow, /--control-height:\s*var\(--control-height-touch\)/);
 });
@@ -217,7 +223,7 @@ test("Bootstrap и токены описывают один и тот же ин�
 
     for (const [ scssVar, token ] of pairs) {
         const match = new RegExp(`\\${scssVar}:\\s*(#[0-9a-f]{6})`, "i").exec(vars);
-        assert.ok(match?.[1], `vars.scss не задаёт ${scssVar}`);
+        assert.ok(match?.[1], `vars.scss не задает ${scssVar}`);
         assert.equal(
             match[1].toLowerCase(),
             (tokens[token] as string).toLowerCase(),
@@ -230,7 +236,7 @@ test("Bootstrap и токены описывают один и тот же ин�
     assert.match(vars, /\$font-family-monospace:\s*"IBM Plex Mono"/);
 });
 
-test("узкое начертание не используется: в нём нет русских букв", () => {
+test("узкое начертание не используется: в нем нет русских букв", () => {
     const fonts = readFileSync(path.join(process.cwd(), "frontend/src/styles/fonts.scss"), "utf8");
 
     // IBM Plex Sans Condensed поставляется только с cyrillic-ext, то есть без
@@ -318,7 +324,7 @@ test("компоненты не объявляют цвет сами, а бер�
  *
  * Галочка селекта, ползунок переключателя и крестик закрытия нарисованы внутри
  * Bootstrap вшитым SVG или подобраны фильтром, поэтому цвет им нельзя передать
- * токеном. Всё остальное под селектором темы - продублированный цвет.
+ * токеном. Все остальное под селектором темы - продублированный цвет.
  * @param lines Строки блока стилей
  * @param start Строка с селектором темы
  * @returns Правда, если внутри только переменные --bs-*
@@ -345,7 +351,7 @@ function onlySwapsBootstrapAssets(lines : string[], start : number) : boolean {
     return false;
 }
 
-test("тема не дублируется правилами под тёмную", () => {
+test("тема не дублируется правилами под темную", () => {
     const offenders : string[] = [];
 
     for (const file of listStyleFiles()) {
@@ -362,7 +368,7 @@ test("тема не дублируется правилами под тёмну�
                 continue;
             }
 
-            // Правило под тему объявляет цвет дважды и однажды разойдётся с токеном.
+            // Правило под тему объявляет цвет дважды и однажды разойдется с токеном.
             // Разрешено единственное исключение: блок, который только подменяет
             // переменные Bootstrap с вшитым SVG - такое значение токен прочитать не может.
             if (/(^|[\s,>])(body)?\.dark(\s|,|>|&|\{|\.)/.test(line) && !onlySwapsBootstrapAssets(lines, index)) {
@@ -372,4 +378,80 @@ test("тема не дублируется правилами под тёмну�
     }
 
     assert.deepEqual(offenders, [], `правило под тему вместо токена:\n${offenders.join("\n")}`);
+});
+
+/** Свойства, значение которых обязано приходить токеном шкалы */
+const SCALE_PROPERTIES = [ "font-size", "line-height", "font-weight", "z-index" ];
+
+/**
+ * Найти в строке стиля значение, заданное мимо шкалы.
+ * @param line Строка блока стилей
+ * @returns Нарушения: свойство и его значение
+ */
+function scaleLiterals(line : string) : string[] {
+    const found : string[] = [];
+
+    for (const property of SCALE_PROPERTIES) {
+        for (const match of line.matchAll(new RegExp(`${property}:\\s*([^;}]+)`, "g"))) {
+            const value = (match[1] ?? "").trim();
+
+            // Относительный кегль внутри строки текста (`code`, `small`)
+            // намеренно следует за родителем и шкалой не задается
+            if (value.startsWith("var(") || value === "inherit" || /^[0-9.]+%$/.test(value)) {
+                continue;
+            }
+
+            found.push(`${property}: ${value}`);
+        }
+    }
+
+    return found;
+}
+
+test("кегль, интерлиньяж, начертание и слой берутся шкалой, а не числом", () => {
+    const offenders : string[] = [];
+
+    for (const file of listStyleFiles()) {
+        if (file === "frontend/src/styles/tokens.scss") {
+            continue;
+        }
+
+        const lines = styleBlocks(file, readFileSync(path.join(process.cwd(), file), "utf8")).split("\n");
+
+        for (const [ index, line ] of lines.entries()) {
+            if (line.trimStart().startsWith("//")) {
+                continue;
+            }
+
+            for (const literal of scaleLiterals(line)) {
+                offenders.push(`${file}:${index + 1} ${literal}`);
+            }
+        }
+    }
+
+    assert.deepEqual(offenders, [], `значение шкалы задано мимо токена:\n${offenders.join("\n")}`);
+});
+
+test("шкала описана целиком: у каждого кегля есть интерлиньяж", () => {
+    const light = readTokens(readFileSync(TOKENS_PATH, "utf8"), ":root");
+
+    for (const step of [ "xs", "sm", "base", "md", "lg", "xl", "title-sm", "code" ]) {
+        assert.ok(light[`--text-${step}`], `нет кегля --text-${step}`);
+        assert.ok(light[`--line-${step}`], `у --text-${step} нет интерлиньяжа --line-${step}`);
+    }
+
+    // Роль без веса и без движения снова заставит компонент придумывать число
+    for (const token of [ "--weight-regular", "--weight-medium", "--weight-strong",
+        "--motion-fast", "--motion-base", "--motion-slow", "--motion-ease",
+        "--field-height", "--icon-sm", "--icon-md", "--icon-lg", "--radius-card",
+        "--layer-header", "--layer-modal", "--layer-toast" ]) {
+        assert.ok(light[token], `нет токена ${token}`);
+    }
+});
+
+test("запрет анимации гасится в самих токенах", () => {
+    const source = readFileSync(TOKENS_PATH, "utf8");
+    const reduced = source.slice(source.indexOf("@media (prefers-reduced-motion: reduce)"));
+
+    assert.match(reduced, /--motion-base:\s*0ms/);
 });

@@ -1,31 +1,34 @@
 <template>
-    <div class="list-box" :style="boxStyle">
+    <div class="list-box">
         <div class="list-header">
             <div class="header-top">
                 <div class="search-wrapper">
-                    <a v-if="searchText === ''" class="search-icon">
+                    <span v-if="searchText === ''" class="search-icon" aria-hidden="true">
                         <font-awesome-icon icon="search" />
-                    </a>
-                    <a v-else class="search-icon" style="cursor: pointer" @click="clearSearchText">
+                    </span>
+                    <button v-else class="search-icon" type="button" :aria-label="$t('clearSearch')" @click="clearSearchText">
                         <font-awesome-icon icon="times" />
-                    </a>
+                    </button>
                     <form @submit.prevent>
-                        <input v-model="searchText" class="form-control search-input" autocomplete="off" :placeholder="$t('searchStacksPlaceholder')" />
+                        <input v-model="searchText" class="form-control search-input" autocomplete="off" :placeholder="$t('searchStacksPlaceholder')" :aria-label="$t('searchStacksPlaceholder')" />
                     </form>
                 </div>
 
                 <!-- Фильтры - кнопки с aria-pressed, а не вкладки и не метки -->
-                <div class="filters">
-                    <button
-                        v-for="filter in filters" :key="filter.key"
-                        class="filter" type="button"
-                        :aria-pressed="String(activeFilter === filter.key)"
-                        :class="{ on: activeFilter === filter.key }"
-                        @click="toggleFilter(filter.key)"
-                    >
-                        {{ filter.label }} <span class="count">{{ filter.count }}</span>
-                    </button>
-                </div>
+                <details class="filter-disclosure" :open="Boolean(activeFilter)">
+                    <summary>{{ $t("filterStacks") }}<span v-if="activeFilter"> · {{ filters.find(filter => filter.key === activeFilter)?.label }}</span></summary>
+                    <div class="filters">
+                        <button
+                            v-for="filter in filters" :key="filter.key"
+                            class="filter" type="button"
+                            :aria-pressed="String(activeFilter === filter.key)"
+                            :class="{ on: activeFilter === filter.key }"
+                            @click="toggleFilter(filter.key)"
+                        >
+                            {{ filter.label }} <span class="count">{{ filter.count }}</span>
+                        </button>
+                    </div>
+                </details>
             </div>
         </div>
 
@@ -47,7 +50,7 @@
                     :title="$t('emptyStacksTitle')"
                     :hint="$t('emptyStacksHint')"
                 >
-                    <button class="primary" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
+                    <button v-if="$root.canManageStacks" class="primary" type="button" @click="$root.openCreateStack && $root.openCreateStack()">
                         {{ $t("emptyStacksAction") }}
                     </button>
                 </EmptyState>
@@ -60,7 +63,7 @@
                     :aria-expanded="String(!closedAgents.get(agent.endpoint))"
                     @click="closedAgents.set(agent.endpoint, !closedAgents.get(agent.endpoint))"
                 >
-                    <font-awesome-icon :icon="closedAgents.get(agent.endpoint) ? 'chevron-circle-right' : 'chevron-circle-down'" class="me-1" />
+                    <font-awesome-icon :icon="closedAgents.get(agent.endpoint) ? 'chevron-circle-right' : 'chevron-circle-down'" />
                     <span v-if="agent.endpoint === 'current'">{{ $t("currentEndpoint") }}</span>
                     <span v-else>{{ agent.endpoint }}</span>
                     <span class="count">{{ agent.stacks.length }}</span>
@@ -105,39 +108,19 @@ export default {
             selectAll: false,
             disableSelectAllWatcher: false,
             selectedStacks: {},
-            windowTop: 0,
-            /** Нажатый фильтр: attention, stopped, updates или пусто. Живёт в адресе,
-             *  поэтому счётчик в шапке может привести сразу к нужному срезу */
+            /** Нажатый фильтр: attention, stopped, updates или пусто. Живет в адресе,
+             *  поэтому счетчик в шапке может привести сразу к нужному срезу */
             activeFilter: this.$route.query.filter ?? "",
             closedAgents: new Map(),
         };
     },
     computed: {
         /**
-         * Improve the sticky appearance of the list by increasing its
-         * height as user scrolls down.
-         * Not used on mobile.
-         * @returns {object} Style for stack list
-         */
-        boxStyle() {
-            if (window.innerWidth > 550) {
-                return {
-                    height: `calc(100vh - 160px + ${this.windowTop}px)`,
-                };
-            } else {
-                return {
-                    height: "calc(100vh - 160px)",
-                };
-            }
-
-        },
-
-        /**
          * Returns a sorted list of stacks based on the applied filters and search text.
          * @returns {Array} The sorted list of stacks.
          */
         agentStackList() {
-            let result = Object.values(this.$root.completeStackList);
+            let result = Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint);
 
             result = result.filter(stack => this.matchesSearch(stack) && this.matchesFilter(stack));
 
@@ -224,12 +207,12 @@ export default {
         },
 
         /**
-         * Фильтры со своими счётчиками. Счётчик считается по всему списку, а не по
-         * отфильтрованному, иначе кнопка меняла бы своё число от собственного нажатия.
-         * @returns {Array<object>} Ключ, подпись и счётчик
+         * Фильтры со своими счетчиками. Счетчик считается по всему списку, а не по
+         * отфильтрованному, иначе кнопка меняла бы свое число от собственного нажатия.
+         * @returns {Array<object>} Ключ, подпись и счетчик
          */
         filters() {
-            const all = Object.values(this.$root.completeStackList);
+            const all = Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint);
 
             return [
                 { key: "attention",
@@ -249,24 +232,7 @@ export default {
             this.activeFilter = value ?? "";
         },
     },
-    mounted() {
-        window.addEventListener("scroll", this.onScroll);
-    },
-    beforeUnmount() {
-        window.removeEventListener("scroll", this.onScroll);
-    },
     methods: {
-        /**
-         * Handle user scroll
-         * @returns {void}
-         */
-        onScroll() {
-            if (window.top.scrollY <= 133) {
-                this.windowTop = window.top.scrollY;
-            } else {
-                this.windowTop = 133;
-            }
-        },
 
         /**
          * Clear the search bar
@@ -277,7 +243,7 @@ export default {
         },
 
         /**
-         * Вернуть весь список: снять поиск и нажатый фильтр разом. Фильтр живёт ещё
+         * Вернуть весь список: снять поиск и нажатый фильтр разом. Фильтр живет еще
          * и в адресе, поэтому очистить одно поле мало - его снимает toggleFilter.
          * @returns {void}
          */
@@ -291,7 +257,7 @@ export default {
 
         /**
          * Совпадает ли стек с поиском. Ищем по имени и по именам сервисов: владелец
-         * помнит «gotenberg», а не то, в каком стеке он лежит.
+         * помнит "gotenberg", а не то, в каком стеке он лежит.
          * @param {object} stack Стек из списка
          * @returns {boolean} Показывать ли строку
          */
@@ -414,148 +380,25 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-// Список - плоская область с разделителями, а не карточка: так строки читаются
-// как таблица, а не как набор плиток
-.list-box {
-    position: sticky;
-    top: 10px;
-    border-right: 1px solid var(--line-hair);
-}
-
-// Цвет берётся токеном, а не правилом внутри темы: иначе одна из тем получит
-// чужой фон под своим текстом.
-.list-header {
-    border-bottom: 1px solid var(--line-hair);
-    padding: 0 var(--gap-md) var(--gap-sm);
-}
-
-// Счётчик в фильтре мельче подписи: он уточняет, а не спорит с ней
-.filter .count {
-    font-size: var(--text-xs);
-}
-
-// Узкая колонка: поиск строкой, фильтры под ним
-.header-top {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--gap-sm);
-}
-
-.search-wrapper {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-
-    form {
-        flex: 1;
-        min-width: 0;
-    }
-}
-
-.search-icon {
-    padding: 0 var(--gap-sm) 0 0;
-    color: var(--text-faint);
-
-    svg[data-icon="times"] {
-        cursor: pointer;
-
-        &:hover {
-            color: var(--state-failed);
-        }
-    }
-}
-
-.search-input {
-    width: 100%;
-}
-
-// Фильтр - переключатель: нажатое состояние видно рамкой и фоном, а не только цветом
-.filters {
-    display: flex;
-    gap: var(--gap-xs);
-    flex-wrap: wrap;
-}
-
-.filter {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: var(--control-height);
-    padding: 0 var(--gap-sm);
-    border: 1px solid var(--line-hair);
-    border-radius: var(--radius-control);
-    background: none;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-
-    &:hover {
-        background-color: var(--surface-raised);
-        color: var(--text-strong);
-    }
-
-    &.on {
-        border-color: var(--accent);
-        background-color: var(--accent-soft);
-        color: var(--text-strong);
-    }
-
-    &:focus-visible {
-        outline: var(--focus-ring);
-        outline-offset: var(--focus-offset);
-    }
-
-    .count {
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        border-radius: var(--radius-pill);
-        padding: 0 5px;
-        background-color: var(--surface-sunken);
-    }
-}
-
-.stack-list {
-    &.scrollbar {
-        overflow-y: auto;
-    }
-}
-
-// Группа агента: кнопка, потому что она сворачивает список
-.agent-select {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-xs);
-    width: 100%;
-    min-height: var(--control-height);
-    padding: 0 var(--gap-md);
-    background: none;
-    border: 0;
-    color: var(--text-faint);
-    font-size: var(--text-sm);
-    font-weight: 500;
-
-    &:hover {
-        color: var(--text-strong);
-    }
-
-    &:focus-visible {
-        outline: var(--focus-ring);
-        outline-offset: var(--focus-offset);
-    }
-
-    .count {
-        margin-left: auto;
-        font-family: var(--font-mono);
-    }
-}
-
-@media (max-width: 1100px) {
-    .list-box {
-        position: static;
-        height: auto;
-        border-right: 0;
-        border-bottom: 1px solid var(--line-hair);
-    }
-
+.list-box { display: flex; flex-direction: column; min-height: 0; }
+.list-header { padding: 0 0 var(--gap-sm); }
+.header-top { display: flex; flex-direction: column; gap: var(--gap-sm); }
+.search-wrapper { position: relative; }
+.search-wrapper form { min-width: 0; }
+.search-input { width: 100%; padding-left: 32px; font-size: var(--text-xs); background: var(--surface-base); border-color: var(--line-hair); }
+.search-icon { position: absolute; left: 0; top: 0; width: 32px; height: 100%; display: grid; place-items: center; color: var(--text-faint); border: 0; background: none; font-size: var(--text-xs); }
+.filter-disclosure summary { color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; padding: var(--gap-xs); }
+.filters { display: flex; flex-direction: column; gap: var(--gap-xs); padding-top: var(--gap-xs); }
+.filter { display: flex; align-items: center; gap: var(--gap-xs); min-height: var(--control-height); padding: 0 var(--gap-sm); border: 1px solid var(--line-hair); border-radius: var(--radius-control); background: none; color: var(--text-muted); font-size: var(--text-xs); }
+.filter.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text-strong); }
+.filter .count { margin-left: auto; }
+.stack-list { overflow-y: auto; height: auto !important; }
+.agent-select { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); background: none; border: 0; color: var(--text-faint); font-size: var(--text-xs); }
+.agent-select .count { margin-left: auto; }
+@media (max-width: 800px) {
+    .search-icon { width: 44px; }
+    .search-input { padding-left: 44px; }
+    .filter-disclosure summary { min-height: var(--control-height-touch); display: flex; align-items: center; }
+    .stack-list { max-height: 40dvh; }
 }
 </style>
