@@ -405,23 +405,23 @@ test("сводка сервисов держит порядок файла и с
 
     const summary = summariseServices(instances, [ "app", "db", "worker" ]);
 
-    // Порядок - файла, а не докера; сервис из докера, которого нет в файле, идёт в конец
+    // Порядок - файла, а не докера; сервис из докера, которого нет в файле, идет в конец
     assert.deepEqual(summary.map((item) => item.name), [ "app", "db", "worker", "sidecar" ]);
 
     assert.equal(summary[0]?.state, "running");
-    // Объявлен, но контейнера нет, а стек поднят: это остановлен, а не «работает»
+    // Объявлен, но контейнера нет, а стек поднят: это остановлен, а не "работает"
     assert.equal(summary[1]?.state, "stopped");
     // Код 137 - причина внимания, а не просто остановка
     assert.equal(summary[2]?.state, "attention");
     assert.equal(summary[3]?.state, "running");
 });
 
-test("сводка не выдаёт нечитаемое состояние за работающее", () => {
-    // Стек без контейнеров: состояние сервисов неизвестно, а не «остановлен»
+test("сводка не выдает нечитаемое состояние за работающее", () => {
+    // Стек без контейнеров: состояние сервисов неизвестно, а не "остановлен"
     const neverStarted = summariseServices([], [ "app", "db" ]);
     assert.deepEqual(neverStarted.map((item) => item.state), [ "unknown", "unknown" ]);
 
-    // Docker вернул контейнер без состояния - это тоже «неизвестно»
+    // Docker вернул контейнер без состояния - это тоже "неизвестно"
     const { instances } = resolveComposePsStatus([
         { Service: "app",
             Name: "demo-app-1",

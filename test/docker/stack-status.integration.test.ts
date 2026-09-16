@@ -25,12 +25,30 @@ const unmarkedFixture = path.join(fixtureDir, "unmarked-exit-stack.compose.yaml"
  * @returns Exit code of the command
  */
 async function docker(args : readonly string[]) : Promise<number | null> {
-    const res = await spawn("docker", args, {
-        encoding: "utf-8",
-        maxBuffer: 1024 * 1024,
-        timeoutMs: 180_000,
+    try {
+        const res = await spawn("docker", args, {
+            encoding: "utf-8",
+            maxBuffer: 1024 * 1024,
+            timeoutMs: 180_000,
+        });
+        return res.code;
+    } catch (error) {
+        const failure = error as Error & { stderr?: string | Buffer };
+        throw new Error(`docker ${args.join(" ")}: ${failure.message}\n${failure.stderr ?? ""}`, { cause: error });
+    }
+}
+
+/** Compose wait can omit an already exited service; wait on its explicit retained container ID. */
+async function waitForInit(project : string, file : string) : Promise<void> {
+    const result = await spawn("docker", [ "compose", "-p", project, "-f", file, "ps", "--all", "--quiet", "init" ], {
+        encoding: "utf8",
+        timeoutMs: 30_000,
     });
-    return res.code;
+    const containerId = String(result.stdout).trim();
+    assert.match(containerId, /^[a-f0-9]{64}$/, "one-shot container must exist even after it exited");
+    const completed = await spawn("docker", [ "wait", containerId ], { encoding: "utf8",
+        timeoutMs: 30_000 });
+    assert.equal(String(completed.stdout).trim(), "0", "one-shot fixture must exit successfully");
 }
 
 test("a stack with a marked one-shot container is reported as running", {
@@ -43,7 +61,7 @@ test("a stack with a marked one-shot container is reported as running", {
         assert.equal(await docker([ "compose", "-p", project, "-f", markedFixture, "up", "-d" ]), 0);
 
         // Block until the one-shot container really exited, otherwise the check races with Docker
-        assert.equal(await docker([ "compose", "-p", project, "-f", markedFixture, "wait", "init" ]), 0);
+        await waitForInit(project, markedFixture);
 
         const statusList = await Stack.getStatusList();
         assert.equal(statusList.get(project), RUNNING);
@@ -59,7 +77,7 @@ test("an unmarked container that exited needs attention instead of looking stopp
 
     try {
         assert.equal(await docker([ "compose", "-p", project, "-f", unmarkedFixture, "up", "-d" ]), 0);
-        assert.equal(await docker([ "compose", "-p", project, "-f", unmarkedFixture, "wait", "init" ]), 0);
+        await waitForInit(project, unmarkedFixture);
 
         const statusList = await Stack.getStatusList();
 

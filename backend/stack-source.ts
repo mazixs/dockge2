@@ -7,6 +7,10 @@ import { log } from "./log";
 export interface StackSource {
     /** git when the directory is a work tree, local when it is a plain directory */
     kind : "git" | "local";
+    /** Full checked-out commit, empty for a local directory. */
+    commit? : string;
+    /** Number of modified/untracked status entries; not a count of failed services. */
+    changedFiles? : number | null;
     /** Remote address without credentials, empty when there is no remote */
     remote : string;
     /** Checked out branch, empty when the head is detached or unreadable */
@@ -42,10 +46,39 @@ const cache = new Map<string, CacheEntry>();
  * @param args Git arguments, fixed by the caller and never taken from a client
  * @returns Output without surrounding whitespace, empty when git failed
  */
-async function git(dir : string, args : string[]) : Promise<string> {
+async function git(dir : string, args : string[], unavailable = "") : Promise<string> {
     try {
-        const res = await spawn("git", args, {
+        const env: NodeJS.ProcessEnv = { ...process.env };
+        for (const key of Object.keys(env)) {
+            if (key.startsWith("GIT_")) {
+                delete env[key];
+            }
+        }
+        Object.assign(env, { GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_TERMINAL_PROMPT: "0",
+            GIT_OPTIONAL_LOCKS: "0" });
+        const safeArgs = [ "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null" ];
+        if (args[0] === "status") {
+            try {
+                const filters = await spawn("git", [ ...safeArgs, "config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$" ], { cwd: dir,
+                    env,
+                    encoding: "utf-8",
+                    maxBuffer: 64 * 1024,
+                    timeoutMs: GIT_TIMEOUT_MS });
+                for (const key of String(filters.stdout ?? "").split("\0").filter(Boolean)) {
+                    safeArgs.push("-c", `${key}=${key.endsWith(".required") ? "false" : ""}`);
+                }
+            } catch (error) {
+                // git config exits 1 when no filter keys exist; other failures must not run status unsafely.
+                if ((error as { code?: number }).code !== 1) {
+                    throw error;
+                }
+            }
+        }
+        const res = await spawn("git", [ ...safeArgs, ...args ], {
             cwd: dir,
+            env,
             encoding: "utf-8",
             maxBuffer: 64 * 1024,
             timeoutMs: GIT_TIMEOUT_MS,
@@ -54,9 +87,9 @@ async function git(dir : string, args : string[]) : Promise<string> {
         return (res.stdout?.toString() ?? "").trim();
     } catch (e) {
         if (e instanceof Error) {
-            log.debug("stackSource", `git ${args[0]} failed in ${dir}: ${e.message}`);
+            log.debug("stackSource", `git ${args[0]} could not read stack source`);
         }
-        return "";
+        return unavailable;
     }
 }
 
@@ -71,7 +104,7 @@ async function git(dir : string, args : string[]) : Promise<string> {
 export function cleanRemote(remote : string) : string {
     let cleaned = remote.trim();
 
-    if (!cleaned) {
+    if (!cleaned || /[\x00-\x1f\x7f]/.test(cleaned)) {
         return "";
     }
 
@@ -86,7 +119,10 @@ export function cleanRemote(remote : string) : string {
             url.password = "";
             cleaned = url.host + url.pathname;
         } catch {
-            // Not a URL, leave it as it is
+            // Only ordinary local repository paths survive URL parsing failure.
+            if (!/^[A-Za-z0-9_./ -]+$/.test(cleaned)) {
+                return "";
+            }
         }
     }
 
@@ -124,6 +160,8 @@ export async function readStackSource(dir : string, now = Date.now()) : Promise<
 async function readFromDisk(dir : string) : Promise<StackSource> {
     const local : StackSource = {
         kind: "local",
+        commit: "",
+        changedFiles: null,
         remote: "",
         branch: "",
         behind: null,
@@ -142,17 +180,20 @@ async function readFromDisk(dir : string) : Promise<StackSource> {
     }
 
     const branch = await git(dir, [ "rev-parse", "--abbrev-ref", "HEAD" ]);
+    const commit = await git(dir, [ "rev-parse", "HEAD" ]);
     const remote = cleanRemote(await git(dir, [ "remote", "get-url", "origin" ]));
-    const status = await git(dir, [ "status", "--porcelain" ]);
+    const status = await git(dir, [ "status", "--porcelain" ], "\0");
     const behindOutput = await git(dir, [ "rev-list", "--count", "HEAD..@{u}" ]);
     const behind = /^\d+$/.test(behindOutput) ? Number.parseInt(behindOutput, 10) : null;
 
     return {
         kind: "git",
+        commit: /^[a-f0-9]{40,64}$/.test(commit) ? commit : "",
+        changedFiles: status === "\0" ? null : status ? status.split("\n").length : 0,
         remote,
         branch: branch === "HEAD" ? "" : branch,
         behind,
-        dirty: status !== "",
+        dirty: status === "\0" ? null : status !== "",
     };
 }
 

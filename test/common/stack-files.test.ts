@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     classifyStackFile,
     isSafeStackFileName,
+    looksLikeStackFile,
     pickDefaultComposeFile,
 } from "../../common/stack-files";
 
@@ -59,4 +60,22 @@ test("the default compose file is picked deterministically", () => {
     // Custom names are sorted, never picked at random
     assert.equal(pickDefaultComposeFile([ "staging.yml", "prod.yaml" ]), "prod.yaml");
     assert.equal(pickDefaultComposeFile([]), "");
+});
+
+test("a refused name that was meant as a stack file is recognised", () => {
+    // Имя отброшено списком имен, но человек заводил именно файл стека:
+    // экран обязан сказать, почему файла нет ни в одном выборе
+    for (const name of [ "настройки.env", ".env.локальный", "compose.старый.yaml", "стек.yml", ".secret.ключ", "ключ.secret" ]) {
+        assert.equal(looksLikeStackFile(name), true, `${name} should be reported as refused`);
+    }
+
+    // Принятое имя попадает в свой список и вторым списком не дублируется
+    for (const name of [ "compose.yaml", ".env", ".env.dev", ".secret.db", "staging.yml" ]) {
+        assert.equal(looksLikeStackFile(name), false, `${name} is accepted and must not be reported`);
+    }
+
+    // Обычные файлы каталога файлами стека никогда не были
+    for (const name of [ "README.md", "notes.txt", "Dockerfile", "data", "compose.yaml.bak" ]) {
+        assert.equal(looksLikeStackFile(name), false, `${name} was never a stack file`);
+    }
 });

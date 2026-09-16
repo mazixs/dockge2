@@ -22,33 +22,10 @@ import {
     sleep,
     ATTENTION,
     statusStateName,
-    statusName,
-    statusNameShort,
 } from "../../common/util-common";
 
-test("status helpers cover all supported statuses", () => {
-    assert.deepEqual([
-        statusName(UNKNOWN),
-        statusName(CREATED_FILE),
-        statusName(CREATED_STACK),
-        statusName(RUNNING),
-        statusName(EXITED),
-        statusName(ATTENTION),
-        statusName(99),
-    ], [ "unknown", "draft", "created_stack", "running", "exited", "attention", "unknown" ]);
-
-    // An unreadable status must never look like a normal inactive stack
-    assert.deepEqual([
-        statusNameShort(UNKNOWN),
-        statusNameShort(CREATED_FILE),
-        statusNameShort(CREATED_STACK),
-        statusNameShort(RUNNING),
-        statusNameShort(EXITED),
-        statusNameShort(ATTENTION),
-        statusNameShort(99),
-    ], [ "unknown", "inactive", "inactive", "active", "exited", "attention", "unknown" ]);
-
-    // Состояние никогда не приходит синим: акцент означает интерактив, а не «работает»
+test("the stack status maps to one state name of the system", () => {
+    // Состояние никогда не приходит синим: акцент означает интерактив, а не "работает"
     assert.deepEqual([
         statusStateName(UNKNOWN),
         statusStateName(CREATED_FILE),

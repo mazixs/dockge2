@@ -10,6 +10,7 @@ import { AgentManager } from "./agent-manager";
 export interface DockgeSocket extends Socket {
     /** Identifier of the signed in user, empty when the socket has no session */
     userID: string;
+    userRole? : import("./auth-access").UserRole;
     consoleTerminal? : Terminal;
     instanceManager : AgentManager;
     endpoint : string;
@@ -208,7 +209,7 @@ export async function dropRevokedSessions(sockets : Iterable<DockgeSocket>) : Pr
 
         const identity = await resolveSocketIdentity(socket.request.headers);
 
-        if (identity.userID === socket.userID) {
+        if (identity.userID === socket.userID && (!socket.userRole || identity.role === socket.userRole)) {
             continue;
         }
 
@@ -216,6 +217,7 @@ export async function dropRevokedSessions(sockets : Iterable<DockgeSocket>) : Pr
         clearPasswordAttempts(socket);
 
         try {
+            socket.instanceManager?.disconnectAll();
             socket.emit("needAuth");
             socket.disconnect();
         } catch (e) {

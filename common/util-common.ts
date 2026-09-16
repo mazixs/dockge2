@@ -52,44 +52,10 @@ export const RUNNING = 3;
 export const EXITED = 4;
 export const ATTENTION = 5;
 
-export function statusName(status : number) : string {
-    switch (status) {
-        case CREATED_FILE:
-            return "draft";
-        case CREATED_STACK:
-            return "created_stack";
-        case RUNNING:
-            return "running";
-        case EXITED:
-            return "exited";
-        case ATTENTION:
-            return "attention";
-        default:
-            return "unknown";
-    }
-}
-
-export function statusNameShort(status : number) : string {
-    switch (status) {
-        case CREATED_FILE:
-            return "inactive";
-        case CREATED_STACK:
-            return "inactive";
-        case RUNNING:
-            return "active";
-        case EXITED:
-            return "exited";
-        case ATTENTION:
-            return "attention";
-        default:
-            return "unknown";
-    }
-}
-
 /**
  * Состояние стека как имя токена состояния, а не как вариант Bootstrap.
  *
- * Синий в системе означает только интерактив, поэтому «работает» не может быть
+ * Синий в системе означает только интерактив, поэтому "работает" не может быть
  * `primary`: имена здесь совпадают с токенами `--state-*` из tokens.scss.
  * @param status Числовое состояние стека
  * @returns Имя состояния: running, attention, stopped, failed или unknown
