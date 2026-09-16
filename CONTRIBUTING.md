@@ -1,38 +1,38 @@
-## Can I create a pull request for Dockge?
+## Can I create a pull request for Dockge2?
 
-Yes or no, it depends on what you will try to do. Since I don't want to waste your time, be sure to **create open a discussion, so we can have a discussion first**. Especially for a large pull request or you don't know if it will be merged or not.
+Yes or no, it depends on what you try to do. To avoid wasting your time, **open a discussion first**,
+especially for a large pull request or when you do not know whether it fits the project.
 
 Here are some references:
 
-### ✅ Usually accepted:
+### Usually accepted
+
 - Bug fix
 - Security fix
-- Adding new language files (see [these instructions](https://github.com/louislam/dockge/blob/master/frontend/src/lang/README.md))
+- Adding new language files (see [these instructions](frontend/src/lang/README.md))
 - Adding new language keys: `$t("...")`
 
-### ⚠️ Discussion required:
+### Discussion required
+
 - Large pull requests
 - New features
 
-### ❌ Won't be merged:
-- A dedicated PR for translating existing languages (see [these instructions](https://github.com/louislam/dockge/blob/master/frontend/src/lang/README.md))
-- Do not pass the auto-test
-- Any breaking changes
+### Won't be merged
+
+- Do not pass the automated checks (`npm run check`)
+- Any breaking changes without a migration
 - Duplicated pull requests
-- Buggy
-- UI/UX is not close to Dockge
-- Modifications or deletions of existing logic without a valid reason.
-- Adding functions that is completely out of scope
+- UI/UX that does not follow [the design system](docs/design-system.md)
+- Modifications or deletions of existing logic without a valid reason
+- Adding functions that are completely out of scope
 - Converting existing code into other programming languages
-- Unnecessarily large code changes that are hard to review and cause conflicts with other PRs.
+- Unnecessarily large code changes that are hard to review
 
 The above cases may not cover all possible situations.
 
-I (@louislam) have the final say. If your pull request does not meet my expectations, I will reject it, no matter how much time you spend on it. Therefore, it is essential to have a discussion beforehand.
-
-I will assign your pull request to a [milestone](https://github.com/louislam/dockge/milestones), if I plan to review and merge it.
-
-Also, please don't rush or ask for an ETA, because I have to understand the pull request, make sure it is no breaking changes and stick to my vision of this project, especially for large pull requests.
+Please do not rush or ask for an ETA: a pull request has to be understood, checked for breaking changes
+and matched against the direction of the project, which is written down in
+[the master plan](docs/plans/2026-08-26-dockge2-master-plan.md).
 
 ## Project Styles
 
@@ -149,12 +149,17 @@ If for security / bug / other reasons, a library must be updated, breaking chang
 
 Please add **all** the strings which are translatable to `src/lang/en.json` (If translation keys are omitted, they can not be translated).
 
-**Don't include any other languages in your initial Pull-Request** (even if this is your mother tongue), to avoid merge-conflicts between weblate and `main`.  
-The translations can then (after merging a PR into `main`) be translated by awesome people donating their language skills.
+`en.json` is the source of truth and `ru.json` is kept complete. Other languages are translated
+directly in this repository, there is no external translation platform.
 
-If you want to help by translating Uptime Kuma into your language, please visit the [instructions on how to translate using weblate](https://github.com/louislam/uptime-kuma/blob/master/src/lang/README.md).
+See [the translation guide](frontend/src/lang/README.md) for how the language files are organised.
 
 ## Spelling & Grammar
 
 Feel free to correct the grammar in the documentation or code.
-My mother language is not English and my grammar is not that great.
+
+## Origin
+
+Dockge2 is a fork of [Dockge](https://github.com/louislam/dockge) by Louis Lam, MIT licensed.
+Fixes made here are not sent upstream automatically, and upstream releases are not merged
+automatically: the two projects have diverged in product decisions.

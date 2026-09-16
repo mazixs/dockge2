@@ -1,6 +1,6 @@
 {
-    "name": "dockge",
-    "version": "1.5.0",
+    "name": "dockge2",
+    "version": "2.0.0",
     "type": "module",
     "engines": {
         "node": "22.23.2 || 24.19.0"
@@ -21,22 +21,26 @@
         "release-final": "tsx ./extra/test-docker.ts && tsx extra/update-version.ts && npm run build:frontend && npm run build:docker",
         "release-beta": "tsx ./extra/test-docker.ts && tsx extra/update-version.ts && npm run build:frontend && npm run build:docker-beta",
         "build:frontend": "vite build --config ./frontend/vite.config.ts",
-        "build:docker-base": "docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t louislam/dockge:base -f ./docker/Base.Dockerfile . --push",
-        "build:docker": "node ./extra/env2arg.js docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t louislam/dockge:latest -t louislam/dockge:1 -t louislam/dockge:$VERSION -t louislam/dockge:beta -t louislam/dockge:nightly --target release -f ./docker/Dockerfile . --push",
-        "build:docker-beta": "node ./extra/env2arg.js docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t louislam/dockge:beta -t louislam/dockge:$VERSION --target release -f ./docker/Dockerfile . --push",
-        "build:healthcheck": "docker buildx build -f docker/BuildHealthCheck.Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v7 -t louislam/dockge:build-healthcheck . --push",
-        "release-nightly": "npm run build:frontend && docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t louislam/dockge:nightly -t ghcr.io/louislam/dockge:nightly --target nightly -f ./docker/Dockerfile . --push",
-        "start-docker": "docker run --rm -p 5001:5001 --name dockge louislam/dockge:latest",
+        "build:docker-base-local": "docker build -f docker/Base.Dockerfile -t mazixs/dockge2:base .",
+        "build:healthcheck-local": "docker build -f docker/BuildHealthCheck.Dockerfile -t mazixs/dockge2:build-healthcheck .",
+        "build:docker-base": "docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t mazixs/dockge2:base -f ./docker/Base.Dockerfile . --push",
+        "build:docker": "node ./extra/env2arg.js docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t mazixs/dockge2:latest -t mazixs/dockge2:2 -t mazixs/dockge2:$VERSION -t mazixs/dockge2:beta -t mazixs/dockge2:nightly --target release -f ./docker/Dockerfile . --push",
+        "build:docker-beta": "node ./extra/env2arg.js docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t mazixs/dockge2:beta -t mazixs/dockge2:$VERSION --target release -f ./docker/Dockerfile . --push",
+        "build:healthcheck": "docker buildx build -f docker/BuildHealthCheck.Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v7 -t mazixs/dockge2:build-healthcheck . --push",
+        "release-nightly": "npm run build:frontend && docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t mazixs/dockge2:nightly -t ghcr.io/mazixs/dockge2:nightly --target nightly -f ./docker/Dockerfile . --push",
+        "start-docker": "docker run --rm -p 5001:5001 --name dockge2 mazixs/dockge2:latest",
         "mark-as-nightly": "tsx ./extra/mark-as-nightly.ts",
-        "reformat-changelog": "tsx ./extra/reformat-changelog.ts",
         "reset-account": "tsx ./extra/reset-account.ts",
         "update-docker": "tsx ./extra/update-dockge.ts",
         "deploy-stack": "tsx ./extra/deploy-stack.ts",
-        "test:e2e": "playwright test"
+        "test:e2e": "playwright test",
+        "test:visual": "playwright test --config playwright-visual.config.ts",
+        "test:visual:approve": "playwright test --config playwright-visual.config.ts --update-snapshots=changed"
     },
     "dependencies": {
         "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
         "@inventage/envsubst": "0.17.0",
+        "@modelcontextprotocol/sdk": "1.30.0",
         "better-auth": "1.7.2",
         "better-sqlite3": "13.0.3",
         "compare-versions": "~6.1.1",
@@ -44,7 +48,7 @@
         "croner": "10.0.1",
         "dayjs": "1.11.23",
         "dotenv": "17.4.2",
-        "express": "4.22.2",
+        "express": "4.22.3",
         "express-static-gzip": "3.0.1",
         "http-graceful-shutdown": "4.0.0",
         "knex": "3.3.0",
@@ -54,7 +58,8 @@
         "ts-command-line-args": "2.5.1",
         "tsx": "4.23.12",
         "type-fest": "5.8.0",
-        "yaml": "2.9.0"
+        "yaml": "2.9.0",
+        "zod": "4.3.6"
     },
     "devDependencies": {
         "@actions/github": "9.1.1",

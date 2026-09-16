@@ -1,5 +1,7 @@
 # Should be identical to .gitignore
 .env
+.env.local
+.tmp/
 node_modules
 .idea
 data
@@ -19,3 +21,23 @@ coverage
 .git
 .gitignore
 README.md
+test-results
+playwright-report
+blob-report
+.vscode
+.DS_Store
+*.log
+*.tsbuildinfo
+
+# Не попадает в образ: приемка и тесты. extra/seed-review.ts поднимает стенд
+# с выключенной аутентификацией, и его место - в репозитории, а не на хосте
+docs
+test
+extra/seed-review.ts
+playwright.config.ts
+playwright-visual.config.ts
+.github
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+SECURITY.md
