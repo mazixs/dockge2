@@ -15,13 +15,13 @@
                     </div>
 
                     <div class="modal-body form-stack">
-                        <div v-if="uri && twoFAStatus === false" class="qr">
+                        <div v-if="uri && twoFAStatus === false && !confirmed" class="qr">
                             <vue-qrcode :key="uri" :value="uri" type="image/png" :quality="1" :color="{ light: '#ffffffff' }" />
                             <button v-show="!showURI" type="button" class="btn btn-sm btn-normal" @click="showURI = true">{{ $t("Show URI") }}</button>
                             <p v-if="showURI" class="uri">{{ uri }}</p>
                         </div>
 
-                        <div v-if="!(uri && twoFAStatus === false)" class="field">
+                        <div v-if="!(uri && twoFAStatus === false) && !confirmed" class="field">
                             <label for="current-password" class="form-label">{{ $t("Current Password") }}</label>
                             <input
                                 id="current-password"
@@ -42,20 +42,27 @@
                             <button class="btn btn-normal btn-danger-text" type="button" :disabled="processing" @click="confirmDisableTwoFA()">{{ $t("Disable 2FA") }}</button>
                         </div>
 
-                        <div v-if="uri && twoFAStatus === false" class="field">
+                        <div v-if="uri && twoFAStatus === false && !confirmed" class="field">
                             <label for="totp-code" class="form-label">{{ $t("twoFAVerifyLabel") }}</label>
                             <input id="totp-code" v-model="token" type="text" maxlength="6" class="form-control" autocomplete="one-time-code" :disabled="processing" required>
                         </div>
 
-                        <!-- Показаны один раз: без приложения это единственный путь назад -->
-                        <div v-if="backupCodes.length > 0" class="field">
+                        <!-- Коды - последний шаг, а не первый. Пока проверка не прошла,
+                             показывать их нечестно: они еще ничего не открывают, а
+                             выглядят как готовый результат -->
+                        <div v-if="confirmed" class="field">
+                            <p class="two-fa-done">{{ $t("twoFAEnabledNow") }}</p>
                             <span class="form-label">{{ $t("backupCodes") }}</span>
                             <pre class="backup-codes">{{ backupCodes.join("\n") }}</pre>
                             <p class="form-text">{{ $t("backupCodesHint") }}</p>
                         </div>
                     </div>
 
-                    <div v-if="uri && twoFAStatus === false" class="modal-footer">
+                    <div v-if="confirmed" class="modal-footer">
+                        <button type="button" class="btn btn-primary" @click="finish">{{ $t("twoFACodesSaved") }}</button>
+                    </div>
+
+                    <div v-else-if="uri && twoFAStatus === false" class="modal-footer">
                         <button type="submit" class="btn btn-primary" :disabled="processing || !token">
                             <div v-if="processing" class="spinner-border spinner-border-sm"></div>
                             {{ $t("Save") }}
@@ -99,18 +106,50 @@ export default {
             twoFAStatus: null,
             token: null,
             showURI: false,
-            /** Codes to use when the authenticator is unavailable */
+            /** Codes to use when the authenticator is unavailable, shown once the setup is confirmed */
             backupCodes: [],
+            /** The same codes while the setup is still unfinished, so nothing is shown too early */
+            pendingBackupCodes: [],
+            /** Whether the code from the app has been accepted, which is what turns two factor on */
+            confirmed: false,
         };
     },
     mounted() {
         this.modal = new Modal(this.$refs.modal);
         this.getStatus();
+
+        // Closing the dialog halfway leaves a secret the account never confirmed. It is
+        // harmless - `better-auth` does not switch two factor on until the code is
+        // verified, so the next login still takes the password alone - but the dialog
+        // has to say so, or the reader is left thinking they locked themselves out
+        this.$refs.modal.addEventListener("hidden.bs.modal", () => {
+            if (this.uri && !this.confirmed) {
+                this.$root.toastError("twoFASetupAbandoned");
+            }
+
+            this.reset();
+        });
     },
     methods: {
         /** Show the dialog */
         show() {
             this.modal.show();
+        },
+
+        /** Forget everything the unfinished setup put on the screen */
+        reset() {
+            this.currentPassword = "";
+            this.token = null;
+            this.uri = null;
+            this.showURI = false;
+            this.backupCodes = [];
+            this.pendingBackupCodes = [];
+            this.confirmed = false;
+        },
+
+        /** Close the dialog once the codes have been written down */
+        finish() {
+            this.modal.hide();
         },
 
         /** Show dialog to confirm enabling 2FA */
@@ -142,7 +181,9 @@ export default {
                 }
 
                 this.uri = data?.totpURI ?? null;
-                this.backupCodes = data?.backupCodes ?? [];
+                // Held, not shown: until the code from the app is accepted these open
+                // nothing, and a list of secrets on screen reads as a finished setup
+                this.pendingBackupCodes = data?.backupCodes ?? [];
             } finally {
                 this.processing = false;
             }
@@ -173,9 +214,13 @@ export default {
                 await this.getStatus();
                 this.currentPassword = "";
                 this.token = null;
-                this.uri = null;
-                this.backupCodes = [];
-                this.modal.hide();
+
+                // Now the codes mean something, so now they are shown - and the dialog
+                // stays open until the reader says they have written them down. Closing
+                // on success was what made them impossible to keep
+                this.confirmed = true;
+                this.backupCodes = this.pendingBackupCodes;
+                this.pendingBackupCodes = [];
             } finally {
                 this.processing = false;
             }
@@ -203,9 +248,7 @@ export default {
 
                 this.$root.toastSuccess("Saved");
                 await this.getStatus();
-                this.currentPassword = "";
-                this.uri = null;
-                this.backupCodes = [];
+                this.reset();
                 this.modal.hide();
             } finally {
                 this.processing = false;
@@ -250,6 +293,11 @@ export default {
     overflow-wrap: anywhere;
     font-family: var(--font-mono);
     font-size: var(--text-code);
+}
+
+.two-fa-done {
+    margin: 0 0 var(--gap-md);
+    color: var(--state-running);
 }
 
 .backup-codes {
