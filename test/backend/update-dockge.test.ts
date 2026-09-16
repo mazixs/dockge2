@@ -6,15 +6,19 @@ test("update commands are built as fixed argument arrays", () => {
     assert.deepEqual(buildUpdateCommands(false), [
         { command: "git",
             args: [ "pull", "--ff-only", "origin", "main" ] },
+        { command: "npm",
+            args: [ "ci", "--no-audit", "--no-fund" ] },
+        { command: "npm",
+            args: [ "run", "build:frontend" ] },
         { command: "docker",
             args: [ "compose", "config", "--quiet" ] },
         { command: "docker",
-            args: [ "compose", "up", "-d", "--pull", "always", "--wait", "--wait-timeout", "60" ] },
+            args: [ "compose", "up", "-d", "--build", "--wait", "--wait-timeout", "60" ] },
     ]);
 
-    assert.deepEqual(buildUpdateCommands(true)[2], {
+    assert.deepEqual(buildUpdateCommands(true).at(-1), {
         command: "docker",
-        args: [ "compose", "up", "-d", "--pull", "always", "--force-recreate", "--wait", "--wait-timeout", "60" ],
+        args: [ "compose", "up", "-d", "--build", "--force-recreate", "--wait", "--wait-timeout", "60" ],
     });
 });
 

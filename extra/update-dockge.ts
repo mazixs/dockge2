@@ -33,12 +33,18 @@ export function buildUpdateCommands(forceRecreate : boolean, branch : string = D
     return [
         { command: "git",
             args: [ "pull", "--ff-only", "origin", branch ] },
+        // Образ собирается из этого репозитория, поэтому обновление кода - это
+        // пересборка, а не pull: зависимости и фронтенд попадают внутрь на сборке
+        { command: "npm",
+            args: [ "ci", "--no-audit", "--no-fund" ] },
+        { command: "npm",
+            args: [ "run", "build:frontend" ] },
         { command: "docker",
             args: [ "compose", "config", "--quiet" ] },
         {
             command: "docker",
             args: [
-                "compose", "up", "-d", "--pull", "always",
+                "compose", "up", "-d", "--build",
                 ...(forceRecreate ? [ "--force-recreate" ] : []),
                 "--wait", "--wait-timeout", "60",
             ],

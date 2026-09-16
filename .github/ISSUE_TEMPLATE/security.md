@@ -1,7 +1,7 @@
 ---
 
 name: "Security Issue"
-about: "Just for alerting @louislam, do not provide any details here"
+about: "Just for alerting the maintainers, do not provide any details here"
 title: "Security Issue"
 ref: "main"
 labels:
@@ -10,10 +10,10 @@ labels:
 
 ---
 
-DO NOT PROVIDE ANY DETAILS HERE. Please privately report to https://github.com/louislam/dockge/security/advisories/new.
+DO NOT PROVIDE ANY DETAILS HERE. Please privately report to https://github.com/mazixs/dockge2/security/advisories/new.
 
 
-Why need this issue? It is because GitHub Advisory do not send a notification to @louislam, it is a workaround to do so.
+Why is this issue needed? GitHub Advisories do not send a notification, so this empty issue is the way to alert the maintainers.
 
 Your GitHub Advisory URL:
 

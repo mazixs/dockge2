@@ -2,130 +2,71 @@
     <img src="./frontend/public/icon.svg" width="128" alt="" />
 </div>
 
-# Dockge
+# Dockge2
 
-A fancy, easy-to-use and reactive self-hosted docker compose.yaml stack-oriented manager.
+A self-hosted manager for `compose.yaml` stacks: your compose files stay files on your disk,
+and the panel only reads and runs them.
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/louislam/dockge?logo=github&style=flat)](https://github.com/louislam/dockge) [![Docker Pulls](https://img.shields.io/docker/pulls/louislam/dockge?logo=docker)](https://hub.docker.com/r/louislam/dockge/tags) [![Docker Image Version (latest semver)](https://img.shields.io/docker/v/louislam/dockge/latest?label=docker%20image%20ver.)](https://hub.docker.com/r/louislam/dockge/tags) [![GitHub last commit (branch)](https://img.shields.io/github/last-commit/louislam/dockge/master?logo=github)](https://github.com/louislam/dockge/commits/master/)
+[![GitHub last commit](https://img.shields.io/github/last-commit/mazixs/dockge2/main?logo=github)](https://github.com/mazixs/dockge2/commits/main/)
+[![License](https://img.shields.io/github/license/mazixs/dockge2)](./LICENSE)
 
-<img src="https://github.com/louislam/dockge/assets/1336778/26a583e1-ecb1-4a8d-aedf-76157d714ad7" width="900" alt="" />
+Dockge2 is a fork of [Dockge](https://github.com/louislam/dockge). It is not a drop-in replacement:
+authentication, access levels, stack status, availability, MCP access and the whole interface have
+been rewritten. Do not report issues of this fork upstream.
 
-View Video: https://youtu.be/AWAlOQeNpgU?t=48
+## Features
 
-## ⭐ Features
+- Manage `compose.yaml` files: create, edit, start, stop, restart, delete, update images.
+- Interactive editor for `compose.yaml`, and conversion of a `docker run ...` command into one.
+- Interactive web terminal per container, and a read-only journal per stack.
+- Multiple agents: stacks from several Docker hosts in one interface.
+- Accounts with three levels (owner, operator, viewer), two-factor authentication, sessions in an
+  `httpOnly` cookie.
+- Stack secrets stored as files with `0600` permissions; only metadata ever leaves the server.
+- Availability measured from recorded status changes, not guessed from the current state.
+- Opt-in MCP access for AI clients, with expiring keys, explicit scopes and optional owner approval.
+- File based structure: Dockge2 does not kidnap your compose files, you can keep using
+  `docker compose` on the same directories.
 
-- 🧑‍💼 Manage your `compose.yaml` files
-  - Create/Edit/Start/Stop/Restart/Delete
-  - Update Docker Images
-- ⌨️ Interactive Editor for `compose.yaml`
-- 🦦 Interactive Web Terminal
-- 🕷️ (1.4.0 🆕) Multiple agents support - You can manage multiple stacks from different Docker hosts in one single interface
-- 🏪 Convert `docker run ...` commands into `compose.yaml`
-- 📙 File based structure - Dockge won't kidnap your compose files, they are stored on your drive as usual. You can interact with them using normal `docker compose` commands
+## Requirements
 
-<img src="https://github.com/louislam/dockge/assets/1336778/cc071864-592e-4909-b73a-343a57494002" width=300 />
+- [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
+  `podman-docker`.
+- Linux on `amd64`, `arm64` or `armv7`. Debian/Raspbian Bullseye or newer, Ubuntu, Fedora, CentOS,
+  ArchLinux. Windows is not supported.
+- [Node.js](https://nodejs.org/) 22.23.2 or 24.19.0, to build the image from this repository.
 
-- 🚄 Reactive - Everything is just responsive. Progress (Pull/Up/Down) and terminal output are in real-time
-- 🐣 Easy-to-use & fancy UI - If you love Uptime Kuma's UI/UX, you will love this one too
+## How to install
 
-![](https://github.com/louislam/dockge/assets/1336778/89fc1023-b069-42c0-a01c-918c495f1a6a)
+There is no published image yet, so the image is built from this repository.
 
-## 🔧 How to Install
+```bash
+# Where the panel lives and where your stacks live
+sudo mkdir -p /opt/stacks
+git clone https://github.com/mazixs/dockge2.git /opt/dockge2
+cd /opt/dockge2
 
-Requirements:
-- [Docker](https://docs.docker.com/engine/install/) 20+ / Podman
-- (Podman only) podman-docker (Debian: `apt install podman-docker`)
-- OS:
-  - Major Linux distros that can run Docker/Podman such as:
-     - ✅ Ubuntu
-     - ✅ Debian (Bullseye or newer)
-     - ✅ Raspbian (Bullseye or newer)
-     - ✅ CentOS
-     - ✅ Fedora
-     - ✅ ArchLinux
-  - ❌ Debian/Raspbian Buster or lower is not supported
-  - ❌ Windows (Will be supported later)
-- Arch: armv7, arm64, amd64 (a.k.a x86_64)
+cp .env.example .env     # ports, paths, proxy settings - read the comments
+npm install
+npm run build:frontend   # the image copies the ready frontend-dist directory
 
-### Basic
-
-- Default Stacks Directory: `/opt/stacks`
-- Default Port: 5001
-
-```
-# Create directories that store your stacks and stores Dockge's stack
-mkdir -p /opt/stacks /opt/dockge
-cd /opt/dockge
-
-# Download the compose.yaml
-curl https://raw.githubusercontent.com/louislam/dockge/master/compose.yaml --output compose.yaml
-
-# Start the server
-docker compose up -d
-
-# If you are using docker-compose V1 or Podman
-# docker-compose up -d
+docker compose -f docker-compose.yml up -d --build
 ```
 
-Dockge is now running on http://localhost:5001
+The panel is now on http://localhost:5001 and asks for a setup code (see [Sign in](#sign-in)).
 
-### Advanced
+`docker-compose.yml` is the production configuration and it is documented line by line inside the
+file. Two settings deserve attention before the first start:
 
-If you want to store your stacks in another directory, you can generate your compose.yaml file by using the following URL with custom query strings.
-
-```
-# Download your compose.yaml
-curl "https://dockge.kuma.pet/compose.yaml?port=5001&stacksPath=/opt/stacks" --output compose.yaml
-```
-
-- port=`5001`
-- stacksPath=`/opt/stacks`
-
-Also, once compose is generated/downloaded, add the `PUID` and `PGID` section below to your compose `environment:` section to set stack ownership, otherwise default is `root`
-
-```
-      # Both PUID and PGID must be set for it to do anything
-      - PUID=1000 # Set the stack file/dir ownership to this user
-      - PGID=1000 # Set the stack file/dir ownership to this group
-```
-
-Interactive compose.yaml generator is available on: 
-https://dockge.kuma.pet
-
-### -OR-
-Copy and paste your compose from the following:
-
-If you want to store your stacks in another directory, you can change the `DOCKGE_STACKS_DIR` environment variable and volumes.
-
-compose:
-```
-services:
-  dockge:
-    image: louislam/dockge:1
-    restart: unless-stopped
-    ports:
-      # Host Port:Container Port
-      - 5001:5001
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./data:/app/data
-        
-      # If you want to use private registries, you need to share the auth file with Dockge:
-      # - /root/.docker/:/root/.docker
-
-      # Stacks Directory
-      # Your stacks directory in the host (The paths inside container must be the same as the host)
-      # ⚠️ If you did it wrong, your data could end up be written into a wrong path.
-      # ✔️ CORRECT EXAMPLE: - /my-stacks:/my-stacks (Both paths match)
-      # ❌ WRONG EXAMPLE: - /docker:/my-stacks (Both paths do not match)
-      - /opt/stacks:/opt/stacks
-    environment:
-      # Tell Dockge where your stacks directory is
-      - DOCKGE_STACKS_DIR=/opt/stacks
-      # Both PUID and PGID must be set for it to do anything
-      - PUID=1000 # Set the stack file/dir ownership to this user
-      - PGID=1000 # Set the stack file/dir ownership to this group
-```
+- `DOCKGE_STACKS_DIR` (default `/opt/stacks`): an absolute path, and the path on the host and inside
+  the container must be identical. The panel runs `docker compose` inside the container, but the
+  daemon that executes it lives on the host and will be given exactly that path.
+  Correct: `/my-stacks:/my-stacks`. Wrong: `/docker:/my-stacks`.
+- `DOCKGE_DATA_DIR` (default `./data`): SQLite database, settings and secrets. Keep it on a local
+  disk - SQLite and a network filesystem do not go together - and outside the Git checkout in
+  production, for example `/var/lib/dockge2/data`.
+- `PUID` and `PGID` set the owner of the stack files the panel creates. Both must be set, otherwise
+  the files belong to `root`.
 
 ## Запуск локально
 
@@ -144,30 +85,37 @@ http://localhost:5001, оба с автоперезапуском. Зависи�
 
 Остановить: `docker compose -p dockge2-local -f docker-compose.local.yml down`.
 
-Production-конфигурация лежит в `docker-compose.yml` (образ собирается из этого
-репозитория, поэтому сначала `npm run build:frontend`). Файл `compose.yaml` рядом -
-пример от upstream, и без явного `-f` docker compose берет именно его:
+Production-конфигурация лежит в `docker-compose.yml`: образ собирается из этого
+репозитория, поэтому сначала `npm run build:frontend`.
 
 ```bash
 npm run build:frontend
 docker compose -f docker-compose.yml up -d --build
 ```
 
-Сейчас сборка образа падает на `npm ci` внутри `docker/Dockerfile`: npm пытается
-пересобрать `better-sqlite3` из исходников, а в базовом образе нет ни python, ни
-компилятора. Это отдельная проблема репозитория, а не конфигурации compose.
-
 ## Sign in
 
-The first visit asks for an email address and a password, and that account is the only
-one this instance accepts: further sign-ups are refused, so an instance you expose to
-the internet cannot be claimed by somebody else. The session is a server side row behind
-an `httpOnly` cookie, and two factor authentication (TOTP plus backup codes) can be
-switched on under Settings → Security.
+The first visit asks for a setup code, username, email and password. Read the one-use
+code from `bootstrap-token` in the Dockge data directory (permissions `0600`), or set
+`DOCKGE_BOOTSTRAP_TOKEN` to a secret of at least 32 characters. Public signup is always
+disabled. After setup, the owner issues accounts under Settings -> Users and assigns
+owner, operator or viewer permissions. Existing owner accounts and sessions survive
+an upgrade; email login remains supported.
 
-Lost the password? Run `npm run reset-account` on the host (or
-`docker compose exec dockge npm run reset-account`). It removes the account and its
-sessions, leaves stacks, settings and agents alone, and the setup screen comes back.
+Sessions use an `httpOnly` cookie. Two-factor authentication (TOTP plus backup codes)
+is available under Settings -> Security. Suspending an account, changing its role,
+resetting its password or deleting it revokes its sessions and open connections.
+Viewers receive status and stability data without raw files, secrets, logs or terminals.
+
+Lost the owner password? Another owner can reset it. For local recovery,
+`npm run reset-account` (or `docker compose exec dockge npm run reset-account`)
+asks before removing **all accounts and their sessions**. Stacks, settings and agents
+remain. Restart Dockge and read the new setup code to create a replacement owner.
+See [authentication and proxy configuration](docs/authentication.md) for details.
+
+Dockge2 also provides opt-in MCP access for AI clients, with individual expiring keys,
+explicit server/stack scopes, observer and operator roles, and optional owner approval.
+See [MCP access and verified client compatibility](docs/mcp.md). MCP is disabled by default.
 
 ### Behind a reverse proxy
 
@@ -180,29 +128,39 @@ matter when a proxy sits in front:
 | `DOCKGE_TRUST_PROXY=true` | Believe `X-Forwarded-For`/`X-Forwarded-Host`, so rate limits count per real client and the proxied host counts as its own origin. Only set it when a proxy really is in front, otherwise a caller writes those headers itself. |
 | `DOCKGE_SECURE_COOKIES=true` | Mark the session cookie `Secure` even though Dockge itself speaks plain HTTP behind the proxy. |
 | `DOCKGE_TRUSTED_ORIGINS` | Comma separated extra origins, for a UI served from another host. |
+| `DOCKGE_PUBLIC_URL` | Public HTTP(S) origin without a path. HTTPS automatically enables Secure cookies. |
+| `DOCKGE_BOOTSTRAP_TOKEN` | Optional one-use setup code, at least 32 characters. Otherwise stored in the local `bootstrap-token` file. |
 | `DOCKGE_AUTH_SECRET` | Signs session cookies. Generated and stored in the database on first start, so set it only to share one secret across replicas. |
 
 ## How to Update
 
-```bash
-cd /opt/dockge
-docker compose pull && docker compose up -d
-```
-
-### Safe update from a checkout of this fork
-
-When the deployment is a Git checkout of this repository, the bundled command runs a fixed,
-non-destructive sequence (`git pull --ff-only`, `docker compose config --quiet`, then
-`docker compose up -d --pull always --wait --wait-timeout 60`):
+The deployment is a Git checkout and the image is built from it, so updating means rebuilding.
+The bundled command runs a fixed, non-destructive sequence - `git pull --ff-only`, `npm ci`,
+`npm run build:frontend`, `docker compose config --quiet`, then
+`docker compose up -d --build --wait --wait-timeout 60`:
 
 ```bash
-cd /opt/dockge
-npm run update-docker -- --dry-run
+cd /opt/dockge2
+npm run update-docker -- --dry-run   # prints the commands and changes nothing
 npm run update-docker
 ```
 
 It fast-forwards `origin/main` by default; a deployment that tracks another branch names it with
 `npm run update-docker -- --branch=release/2.0`.
+
+### Rollback
+
+The previous image is still on the host under its own tag, so a rollback does not need a rebuild:
+
+```bash
+docker image ls dockge2          # find the tag you came from
+cd /opt/dockge2
+git checkout <previous tag>
+DOCKGE_IMAGE=dockge2:<previous tag> docker compose -f docker-compose.yml up -d --wait
+```
+
+The data directory is not touched by any of this. A migration that changed the database schema is the
+one case where a rollback needs a database copy taken before the update.
 
 ### Updating one stack from Git
 
@@ -226,81 +184,56 @@ command, not a browser action.
   instead of leaving the update in an undefined state.
 - The command refuses to run with a dirty working copy, and it never runs `docker compose down -v`,
   `docker volume prune`, `git reset --hard` or `git clean -fdx`.
-- Keep `./data` outside the Git checkout in production, for example `/var/lib/dockge/data`, so that even
+- Keep `./data` outside the Git checkout in production, for example `/var/lib/dockge2/data`, so that even
   a mistaken `git clean` cannot touch the database.
-- The published Compose file uses a registry image, so `git pull` alone does not update the code inside
-  the container: CI has to build and publish the image first, then the deployment pulls that tag.
+- The image is built from this checkout, so `git pull` alone changes nothing inside the running
+  container until the image is rebuilt - which is exactly what `npm run update-docker` does.
 - Updating is a local, administrative action. There is intentionally no Socket.IO event for it, because
   that would give the browser a remote `git pull` plus Docker control.
 
-## Screenshots
+## Community and contribution
 
-![](https://github.com/louislam/dockge/assets/1336778/e7ff0222-af2e-405c-b533-4eab04791b40)
+- Bug reports: https://github.com/mazixs/dockge2/issues
+- Questions and discussions: https://github.com/mazixs/dockge2/discussions
+- Translation: see [the translation guide](frontend/src/lang/README.md)
+- Pull requests: read [CONTRIBUTING.md](CONTRIBUTING.md) first, not every kind of change is accepted
+- Security: see [SECURITY.md](SECURITY.md), never report a vulnerability in a public issue
 
-
-![](https://github.com/louislam/dockge/assets/1336778/7139e88c-77ed-4d45-96e3-00b66d36d871)
-
-![](https://github.com/louislam/dockge/assets/1336778/f019944c-0e87-405b-a1b8-625b35de1eeb)
-
-![](https://github.com/louislam/dockge/assets/1336778/a4478d23-b1c4-4991-8768-1a7cad3472e3)
-
-
-## Motivations
-
-- I have been using Portainer for some time, but for the stack management, I am sometimes not satisfied with it. For example, sometimes when I try to deploy a stack, the loading icon keeps spinning for a few minutes without progress. And sometimes error messages are not clear.
-- Try to develop with ES Module + TypeScript
-
-If you love this project, please consider giving it a ⭐.
-
-
-## 🗣️ Community and Contribution
-
-### Bug Report
-https://github.com/louislam/dockge/issues
-
-### Ask for Help / Discussions
-https://github.com/louislam/dockge/discussions
-
-### Translation
-If you want to translate Dockge into your language, please read [Translation Guide](https://github.com/louislam/dockge/blob/master/frontend/src/lang/README.md)
-
-### Create a Pull Request
-
-Be sure to read the [guide](https://github.com/louislam/dockge/blob/master/CONTRIBUTING.md), as we don't accept all types of pull requests and don't want to waste your time.
+Documentation lives in `docs/`: [authentication](docs/authentication.md), [MCP access](docs/mcp.md),
+[design system](docs/design-system.md) and the
+[master plan](docs/plans/2026-08-26-dockge2-master-plan.md), which records what was decided and why.
 
 ## FAQ
 
-#### "Dockge"?
-
-"Dockge" is a coinage word which is created by myself. I originally hoped it sounds like `Dodge`, but apparently many people called it `Dockage`, it is also acceptable.
-
-The naming idea came from Twitch emotes like `sadge`, `bedge` or `wokege`. They all end in `-ge`.
-
 #### Can I manage a single container without `compose.yaml`?
 
-The main objective of Dockge is to try to use the docker `compose.yaml` for everything. If you want to manage a single container, you can just use Portainer or Docker CLI.
+No. Dockge2 uses `compose.yaml` for everything on purpose: a stack is a directory with a compose
+file, and that is what makes the files yours rather than the panel's. For a single container, use
+the Docker CLI.
 
 #### Can I manage existing stacks?
 
-Yes, you can. However, you need to move your compose file into the stacks directory:
+Yes, if the compose file is inside the stacks directory:
 
-1. Stop your stack
-2. Move your compose file into `/opt/stacks/<stackName>/compose.yaml`
-3. In Dockge, click the " Scan Stacks Folder" button in the top-right corner's dropdown menu
-4. Now you should see your stack in the list
+1. Stop your stack.
+2. Move its compose file to `/opt/stacks/<stackName>/compose.yaml`.
+3. In Dockge2, use "Scan stacks folder" in the top-right menu.
+4. The stack appears in the list.
 
-#### Is Dockge a Portainer replacement?
+#### Does Dockge2 phone home?
 
-Yes or no. Portainer provides a lot of Docker features. While Dockge is currently only focusing on docker-compose with a better user interface and better user experience.
+No. The update check is off by default, and when you turn it on it asks the GitHub releases of this
+repository and nothing else.
 
-If you want to manage your container with docker-compose only, the answer may be yes.
+#### How is it different from upstream Dockge?
 
-If you still need to manage something like docker networks, single containers, the answer may be no.
+Accounts and access levels, two-factor authentication, stack secrets, availability measured from
+recorded status changes, MCP access for AI clients, and an interface rewritten screen by screen.
+Version numbering starts at 2.0.0 and does not follow upstream.
 
-#### Can I install both Dockge and Portainer?
+## Origin and license
 
-Yes, you can.
-
-## Others
-
-Dockge is built on top of [Compose V2](https://docs.docker.com/compose/migrate/). `compose.yaml`  also known as `docker-compose.yml`.
+Dockge2 is a fork of [Dockge](https://github.com/louislam/dockge) by Louis Lam, MIT licensed.
+This fork is also MIT licensed and keeps the original copyright notice; see [LICENSE](LICENSE).
+`compose.yaml` is also known as `docker-compose.yml`; both are
+[Compose V2](https://docs.docker.com/compose/migrate/).
