@@ -33,7 +33,20 @@
         </div>
 
         <div ref="stackList" class="stack-list" :class="{ scrollbar: scrollbar }" :style="stackListStyle">
-            <div v-if="visibleCount === 0" class="empty-list">
+            <!-- Пока список ни разу не приходил, пусто и "пусто" - разные вещи.
+                 Здесь стоял призыв создать первый стек, который видел и тот, у
+                 кого их четырнадцать: он просто ждал ответа сервера -->
+            <div v-if="awaitingFirstList" class="skeleton-list" role="status" :aria-label="$t('stacksLoading')">
+                <div v-for="row in 5" :key="row" class="skeleton-row">
+                    <span class="skeleton-mark"></span>
+                    <span class="skeleton-lines">
+                        <span class="skeleton-line"></span>
+                        <span class="skeleton-line short"></span>
+                    </span>
+                </div>
+            </div>
+
+            <div v-else-if="visibleCount === 0" class="empty-list">
                 <!-- Пусто по двум разным причинам, и лечатся они разным действием -->
                 <EmptyState
                     v-if="isNarrowed"
@@ -211,6 +224,19 @@ export default {
          * отфильтрованному, иначе кнопка меняла бы свое число от собственного нажатия.
          * @returns {Array<object>} Ключ, подпись и счетчик
          */
+        /**
+         * Whether the first stack list is still on its way.
+         *
+         * `stackListAt` stays zero until a list has actually arrived, which separates
+         * "the server has not answered yet" from "the server answered, there is
+         * nothing". Before this the two looked identical and the waiting screen
+         * offered to create a first stack.
+         * @returns {boolean} Признак ожидания первого списка
+         */
+        awaitingFirstList() {
+            return this.$root.stackListAt === 0;
+        },
+
         filters() {
             const all = Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint);
 
@@ -401,6 +427,30 @@ export default {
 .filters { display: flex; flex-direction: column; gap: var(--gap-xs); padding-top: var(--gap-xs); }
 .filter { display: flex; align-items: center; gap: var(--gap-xs); min-height: var(--control-height); padding: 0 var(--gap-sm); border: 1px solid var(--line-hair); border-radius: var(--radius-control); background: none; color: var(--text-muted); font-size: var(--text-xs); }
 .filter.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text-strong); }
+
+// Заготовка строки: та же сетка, что у настоящего стека, поэтому список не
+// прыгает, когда ответ приходит и заготовки сменяются именами
+.skeleton-list { display: flex; flex-direction: column; gap: var(--gap-xs); padding: var(--gap-sm); }
+.skeleton-row { display: flex; align-items: center; gap: var(--gap-sm); min-height: 46px; }
+.skeleton-mark { flex: none; width: 28px; height: 28px; border-radius: var(--radius-control); }
+.skeleton-lines { display: flex; flex-direction: column; gap: var(--gap-xs); flex: 1; min-width: 0; }
+.skeleton-line { height: 9px; border-radius: var(--radius-chip); }
+.skeleton-line.short { width: 55%; }
+
+.skeleton-mark, .skeleton-line {
+    background: var(--surface-sunken);
+    animation: skeleton-pulse 1.4s var(--motion-ease) infinite;
+}
+
+.skeleton-row:nth-child(2) .skeleton-mark, .skeleton-row:nth-child(2) .skeleton-line { animation-delay: 80ms; }
+.skeleton-row:nth-child(3) .skeleton-mark, .skeleton-row:nth-child(3) .skeleton-line { animation-delay: 160ms; }
+.skeleton-row:nth-child(4) .skeleton-mark, .skeleton-row:nth-child(4) .skeleton-line { animation-delay: 240ms; }
+.skeleton-row:nth-child(5) .skeleton-mark, .skeleton-row:nth-child(5) .skeleton-line { animation-delay: 320ms; }
+
+@keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
 .filter .count { margin-left: auto; }
 .stack-list { overflow-y: auto; height: auto !important; }
 .agent-select { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); background: none; border: 0; color: var(--text-faint); font-size: var(--text-xs); }
