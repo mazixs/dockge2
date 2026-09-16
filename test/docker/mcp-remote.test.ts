@@ -66,13 +66,24 @@ async function startInstance(root : string, serverId : string) : Promise<Instanc
             DOCKGE_STACKS_DIR: stacks,
             DOCKGE_BOOTSTRAP_TOKEN: token,
             DOCKGE_MCP_DELEGATION_CONFIG: configPath },
-        stdio: "ignore",
+        stdio: [ "ignore", "pipe", "pipe" ],
     });
+
+    // Экземпляр падает по своим причинам - не та версия Node, занятый порт, отсутствующая
+    // сборка фронтенда. С выброшенным выводом от него оставался только код возврата,
+    // и разбираться приходилось наугад, особенно когда падает не здесь, а в CI
+    let output = "";
+    const collect = (chunk : Buffer) => {
+        output += chunk.toString();
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+
     try {
         let ready = false;
         for (let attempt = 0; attempt < 150; attempt++) {
             if (child.exitCode !== null) {
-                throw new Error(`Isolated Dockge ${serverId} exited with code ${child.exitCode}`);
+                throw new Error(`Isolated Dockge ${serverId} exited with code ${child.exitCode}: ${output.trim() || "no output"}`);
             }
             try {
                 const response = await fetch(url + "/api/auth/bootstrap-status", { signal: AbortSignal.timeout(500) });

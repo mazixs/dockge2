@@ -3,12 +3,14 @@ name: Node.js CI - Dockge2
 on:
   push:
     branches: [main]
+    # '*.md' покрывал только корень, и правка одной страницы в docs/ гоняла
+    # Docker и браузер целиком. '**.md' - то, что и имелось в виду
     paths-ignore:
-      - '*.md'
+      - '**.md'
   pull_request:
     branches: [main]
     paths-ignore:
-      - '*.md'
+      - '**.md'
 
 permissions:
   contents: read
@@ -72,6 +74,11 @@ jobs:
 
       - name: Show Docker Compose version
         run: docker compose version
+
+      # Тест поднимает отдельный экземпляр панели с NODE_ENV=production, а в этом
+      # режиме бэкенд без frontend-dist/index.html выходит с кодом 1
+      - name: Build the frontend
+        run: npm run build:frontend
 
       - name: Test with real Docker Compose
         run: npm run test:docker-integration

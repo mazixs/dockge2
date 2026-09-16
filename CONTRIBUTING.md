@@ -105,7 +105,9 @@ npm run test:docker-integration   # opt-in, needs a working Docker Compose
 ```
 
 `npm run test` enforces the c8 coverage thresholds. The Docker integration test is skipped unless
-`DOCKGE_DOCKER_INTEGRATION=1` is set, and CI runs it in a dedicated Linux job.
+`DOCKGE_DOCKER_INTEGRATION=1` is set, and CI runs it in a dedicated Linux job. Build the frontend
+first: one of its tests starts a whole panel with `NODE_ENV=production`, and in that mode the backend
+refuses to start without `frontend-dist/index.html`.
 
 ```bash
 npx playwright install chromium   # once
@@ -115,6 +117,16 @@ npm run test:e2e                  # real Chromium, real clipboard, real Docker
 The end to end tests start their own backend and frontend, seed a temporary data directory and run a
 container from `test/e2e/seed.ts`. They deliberately use the real clipboard, the real xterm and a real
 container: a stub would hide exactly the bugs they are there to catch.
+
+```bash
+npm run test:visual               # compare the interface with the approved baseline
+npm run test:visual:approve       # re-approve it, only when the change of look is intended
+```
+
+The visual run has no Docker and no backend: it renders the production components against the fixed
+scene in `test/visual/scene.ts`, so the same revision always gives the same frame. The baselines are
+committed under `test/visual/baseline/`. A difference fails the run and is reviewed, one by one -
+re-approving is a decision, not a step of the run.
 
 ## Database Migration
 
