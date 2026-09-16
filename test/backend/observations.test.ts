@@ -1,81 +1,67 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { Database } from "../../backend/database";
-import {
-    pruneOldObservations,
-    readAvailability,
-    readChanges,
-    recordScan,
-    recordStatus,
-    resetObservationState,
-    RETENTION_MS,
-} from "../../backend/observations";
-import { ATTENTION, EXITED, RUNNING } from "../../common/util-common";
+import { pruneOldObservations, readAvailability, readChanges, recordScan, recordStatus, resetObservationState, RETENTION_MS } from "../../backend/observations";
+import { ATTENTION, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 import { withDatabase } from "../helpers/database";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const NOW = 1_700_000_000_000;
 
-test("одинаковый статус второй строки не пишет", async () => {
+test("continuous equal samples extend one row and a change closes the previous interval", async () => {
     await withDatabase(async () => {
         resetObservationState();
-
-        assert.equal(await recordStatus("demo", "", RUNNING, NOW - DAY), true);
-        // Ничего не изменилось: история не растёт от того, что крон тикнул
-        assert.equal(await recordStatus("demo", "", RUNNING, NOW - HOUR), false);
-        assert.equal(await recordStatus("demo", "", ATTENTION, NOW - HOUR), true);
-
-        const rows = await Database.getKnex()("stack_observation").select("status");
+        assert.equal(await recordStatus("demo", "", RUNNING, NOW - 20_000), true);
+        assert.equal(await recordStatus("demo", "", RUNNING, NOW - 10_000), false);
+        assert.equal(await recordStatus("demo", "", ATTENTION, NOW), true);
+        const rows = await Database.getKnex()("stack_observation").orderBy("observed_at");
         assert.equal(rows.length, 2);
+        assert.equal(Number(rows[0].observed_until), NOW);
     });
 });
 
-test("окно читается вместе с изменением, которое было до него", async () => {
+test("an old timestamp without later confirmation never implies continuous running", async () => {
     await withDatabase(async () => {
         resetObservationState();
-
-        // Стек работает месяц: внутри суток изменений нет вообще
         await recordStatus("demo", "", RUNNING, NOW - 30 * DAY);
-
-        const changes = await readChanges("demo", "", DAY, NOW);
-        assert.equal(changes.length, 1);
-        assert.equal(changes[0]?.status, RUNNING);
-
-        // Без этой записи стек выглядел бы как стек без истории
+        assert.equal((await readChanges("demo", "", DAY, NOW)).length, 1);
         const availability = await readAvailability("demo", "", DAY, NOW);
-        assert.equal(availability.verdict, "clean");
+        assert.equal(availability.verdict, "noData");
+        assert.equal(availability.coveredMs, 0);
+        assert.equal(availability.currentStatus, UNKNOWN);
     });
 });
 
-test("история стека агента не смешивается с локальной", async () => {
+test("confirmed intervals are read across the left window edge and agent histories stay distinct", async () => {
     await withDatabase(async () => {
-        resetObservationState();
-
-        await recordStatus("demo", "", RUNNING, NOW - 2 * DAY);
-        await recordStatus("demo", "nas:5001", EXITED, NOW - 2 * DAY);
-
+        await Database.getKnex()("stack_observation").insert([
+            { stack_name: "demo",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: NOW - 2 * DAY,
+                observed_until: NOW },
+            { stack_name: "demo",
+                endpoint: "nas:5001",
+                status: EXITED,
+                observed_at: NOW - 2 * DAY,
+                observed_until: NOW },
+        ]);
         assert.equal((await readAvailability("demo", "", DAY, NOW)).verdict, "clean");
         assert.equal((await readAvailability("demo", "nas:5001", DAY, NOW)).verdict, "stopped");
     });
 });
 
-test("обход списка пишет только изменившиеся стеки", async () => {
+test("a scan writes new rows only for changed states within uninterrupted observation", async () => {
     await withDatabase(async () => {
         resetObservationState();
-
-        const scan = [
-            { name: "a",
-                endpoint: "",
-                status: RUNNING },
-            { name: "b",
-                endpoint: "",
-                status: EXITED },
-        ];
-
-        assert.equal(await recordScan(scan, NOW - DAY), 2);
-        assert.equal(await recordScan(scan, NOW - HOUR), 0);
-
+        const scan = [{ name: "a",
+            endpoint: "",
+            status: RUNNING }, { name: "b",
+            endpoint: "",
+            status: EXITED }];
+        assert.equal(await recordScan(scan, NOW - 20_000), 2);
+        assert.equal(await recordScan(scan, NOW - 10_000), 0);
         scan[1] = { name: "b",
             endpoint: "",
             status: RUNNING };
@@ -83,33 +69,71 @@ test("обход списка пишет только изменившиеся �
     });
 });
 
-test("старые записи удаляются, а нужные для окна остаются", async () => {
+test("retention keeps a long active interval while removing old unconfirmed timestamps", async () => {
     await withDatabase(async () => {
-        resetObservationState();
-
-        await recordStatus("demo", "", RUNNING, NOW - RETENTION_MS - DAY);
-        await recordStatus("demo", "", ATTENTION, NOW - 2 * DAY);
-
-        const removed = await pruneOldObservations(NOW);
-        assert.equal(removed, 1);
-
-        const rows = await Database.getKnex()("stack_observation").select("status");
-        assert.equal(rows.length, 1);
-        assert.equal(Number(rows[0]?.status), ATTENTION);
+        await Database.getKnex()("stack_observation").insert([
+            { stack_name: "old",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: NOW - RETENTION_MS - DAY,
+                observed_until: NOW - RETENTION_MS - DAY },
+            { stack_name: "active",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: NOW - RETENTION_MS - DAY,
+                observed_until: NOW },
+        ]);
+        assert.equal(await pruneOldObservations(NOW), 1);
+        assert.equal((await readAvailability("active", "", 30 * DAY, NOW)).coveredMs, 30 * DAY);
     });
 });
 
-test("сбой в сутках даёт долю и один случай", async () => {
+test("a confirmed one hour incident gives 23/24 availability without counting missing time", async () => {
     await withDatabase(async () => {
-        resetObservationState();
-
-        await recordStatus("demo", "", RUNNING, NOW - 2 * DAY);
-        await recordStatus("demo", "", ATTENTION, NOW - 3 * HOUR);
-        await recordStatus("demo", "", RUNNING, NOW - 2 * HOUR);
-
+        await Database.getKnex()("stack_observation").insert([
+            { stack_name: "demo",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: NOW - DAY,
+                observed_until: NOW - 3 * HOUR },
+            { stack_name: "demo",
+                endpoint: "",
+                status: ATTENTION,
+                observed_at: NOW - 3 * HOUR,
+                observed_until: NOW - 2 * HOUR },
+            { stack_name: "demo",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: NOW - 2 * HOUR,
+                observed_until: NOW },
+        ]);
         const availability = await readAvailability("demo", "", DAY, NOW);
         assert.equal(availability.verdict, "degraded");
         assert.equal(availability.incidents, 1);
-        assert.ok((availability.ratio ?? 0) > 0.9, String(availability.ratio));
+        assert.equal(availability.ratio, 23 / 24);
+    });
+});
+
+test("unchanged observations confirm a bounded interval and a later gap starts a new one", async () => {
+    await withDatabase(async () => {
+        resetObservationState();
+        await recordStatus("bounded", "", RUNNING, NOW - 60_000);
+        await recordStatus("bounded", "", RUNNING, NOW - 50_000);
+        await recordStatus("bounded", "", RUNNING, NOW);
+        const changes = await readChanges("bounded", "", DAY, NOW);
+        assert.equal(changes.length, 2);
+        assert.equal(changes[0]?.until, NOW - 50_000);
+        assert.equal((await readAvailability("bounded", "", DAY, NOW)).coveredMs, 10_000);
+    });
+});
+
+test("process restart does not reconnect an old observation interval", async () => {
+    await withDatabase(async () => {
+        resetObservationState();
+        await recordStatus("restart", "", RUNNING, NOW - 20_000);
+        await recordStatus("restart", "", RUNNING, NOW - 10_000);
+        resetObservationState();
+        await recordStatus("restart", "", RUNNING, NOW);
+        assert.equal((await readAvailability("restart", "", DAY, NOW)).coveredMs, 10_000);
     });
 });
