@@ -132,6 +132,29 @@ matter when a proxy sits in front:
 | `DOCKGE_BOOTSTRAP_TOKEN` | Optional one-use setup code, at least 32 characters. Otherwise stored in the local `bootstrap-token` file. |
 | `DOCKGE_AUTH_SECRET` | Signs session cookies. Generated and stored in the database on first start, so set it only to share one secret across replicas. |
 
+The socket carries everything the panel does - status, logs, terminals - and its handshake is
+checked against the same origins. A proxy that rewrites `Host` to an internal name (the usual
+`proxy_set_header Host $host;`) therefore has to pass `X-Forwarded-Host` and `X-Forwarded-Proto`
+with `DOCKGE_TRUST_PROXY=true`, or the public address has to be named in `DOCKGE_PUBLIC_URL`.
+Without one of the two the page loads and then sits there connecting. A worked nginx configuration:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:5001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $http_host;   # with the port, when the address has one
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 300s;
+}
+```
+
+`DOCKGE_WS_ORIGIN_CHECK=bypass` exists for a setup none of this fits. It switches the check off
+rather than configuring it, so it is the last resort, not the first.
+
 ## How to Update
 
 The deployment is a Git checkout and the image is built from it, so updating means rebuilding.
@@ -150,10 +173,20 @@ It fast-forwards `origin/main` by default; a deployment that tracks another bran
 
 ### Rollback
 
-The previous image is still on the host under its own tag, so a rollback does not need a rebuild:
+`DOCKGE_IMAGE` is one fixed tag, and `docker compose up --build` re-points it at the image it has
+just built, so the image you are running right now loses its only name during an update. Give it a
+name of its own first, and then a rollback needs no rebuild:
 
 ```bash
-docker image ls dockge2          # find the tag you came from
+cd /opt/dockge2
+docker image tag dockge2:latest "dockge2:$(git describe --tags --always)"   # before updating
+npm run update-docker
+```
+
+Going back to it:
+
+```bash
+docker image ls dockge2          # the tag you came from
 cd /opt/dockge2
 git checkout <previous tag>
 DOCKGE_IMAGE=dockge2:<previous tag> docker compose -f docker-compose.yml up -d --wait
