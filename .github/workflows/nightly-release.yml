@@ -1,10 +1,10 @@
 name: Nightly Release
 
+# Ничего не публикуется само по себе: этот форк не выпускает образы,
+# и расписание опубликовало бы ночную сборку с первого же дня в GitHub.
+# Запуск только руками, когда публикация действительно нужна.
 on:
-  schedule:
-    # Runs at 2:00 AM UTC every day
-    - cron: "0 2 * * *"
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 permissions: {}
 
