@@ -296,27 +296,14 @@ export class DockgeServer {
                 const bypass = isDev || process.env.DOCKGE_WS_ORIGIN_CHECK === "bypass";
 
                 if (!bypass) {
-                    let host = req.headers.host;
-
                     // If this is set, it means the request is from the browser
-                    let origin = req.headers.origin;
+                    const origin = req.headers.origin;
 
-                    // If this is from the browser, check if the origin is allowed
-                    if (origin) {
-                        try {
-                            let originURL = new URL(origin);
-
-                            if (host !== originURL.host) {
-                                isOriginValid = false;
-                                log.error("auth", `Origin (${origin}) does not match host (${host}), IP: ${req.socket.remoteAddress}`);
-                            }
-                        } catch (e) {
-                            // Invalid origin url, probably not from browser
-                            isOriginValid = false;
-                            log.error("auth", `Invalid origin url (${origin}), IP: ${req.socket.remoteAddress}`);
-                        }
-                    } else {
+                    if (!origin) {
                         log.info("auth", `Origin is not set, IP: ${req.socket.remoteAddress}`);
+                    } else if (!isHandshakeOriginTrusted(this, req.headers)) {
+                        isOriginValid = false;
+                        log.error("auth", `Origin (${origin}) is not trusted, IP: ${req.socket.remoteAddress}`);
                     }
                 } else {
                     log.debug("auth", "Origin check is bypassed");
@@ -905,6 +892,34 @@ export class DockgeServer {
         return `${protocol}://${host}:${this.config.port}`;
     }
 
+}
+
+/**
+ * Whether a socket handshake may proceed.
+ * The address the browser used is not always the `Host` this process sees: a reverse
+ * proxy usually rewrites it. Comparing the origin to that one header refused every
+ * websocket behind a proxy, although the page itself had already loaded, and the only
+ * way out was to switch the check off completely. The same set of trusted origins that
+ * guards the authentication endpoints decides here.
+ * @param server Server the handshake arrived at
+ * @param headers Headers of the handshake request
+ * @returns True when the origin may open a socket
+ */
+export function isHandshakeOriginTrusted(server : DockgeServer, headers : http.IncomingHttpHeaders) : boolean {
+    const origin = headers.origin;
+
+    // Not a browser: there is nothing to compare, and the session still decides
+    if (!origin) {
+        return true;
+    }
+
+    const trusted = new Set(resolveTrustedOrigins(server, {
+        host: headers.host,
+        forwardedHost: firstHeaderValue(headers["x-forwarded-host"]),
+        forwardedProto: firstHeaderValue(headers["x-forwarded-proto"]),
+    }));
+
+    return trusted.has(origin);
 }
 
 /**
