@@ -23,7 +23,10 @@ export default defineConfig({
         timeout: 15_000,
     },
     fullyParallel: true,
-    workers: process.env.CI ? 1 : undefined,
+    // В CI - один рабочий процесс, иначе параллельные снимки делят одну машину и
+    // отличаются от эталона по времени отрисовки. Локально число выбирает Playwright,
+    // поэтому ключ не задается вовсе, а не задается в undefined
+    ...(process.env.CI ? { workers: 1 } : {}),
     retries: 0,
     reporter: process.env.CI ? [[ "list" ], [ "github" ]] : [[ "list" ]],
 
