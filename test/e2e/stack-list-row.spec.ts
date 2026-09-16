@@ -2,23 +2,25 @@ import { expect, test } from "@playwright/test";
 import { E2E_ATTENTION_STACK, E2E_FILES_STACK, E2E_STACK_NAME } from "./constants";
 
 test.describe("строка списка стеков", () => {
-    test("строка называет агента, источник и сервисы стека", async ({ page }) => {
+    test("строка называет состояние, а подробности остаются в инспекторе", async ({ page }) => {
         await page.goto("/");
 
         const row = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
         await expect(row).toBeVisible();
 
-        // Навигатор держит одну мета-строку: сколько сервисов и что с доступностью.
-        // Подробности - образы, порты, расход - живут в рабочей области справа
+        // Состояние читается словами, подробности доступны после выбора стека.
         const meta = row.locator(".meta");
-        await expect(meta).toContainText(/2 service|2 сервиса/i);
-        await expect(meta.locator(".availability")).toBeVisible();
+        await expect(meta.locator(".state-chip .label")).toContainText(/attention|внимани/i);
+        await row.click();
+        await expect(page.locator(".inspector .service-count")).toHaveText("2");
+        await expect(page.locator(".inspector .availability")).toBeVisible();
     });
 
-    test("фильтр сужает список и остаётся в адресе", async ({ page }) => {
+    test("фильтр сужает список и остается в адресе", async ({ page }) => {
         await page.goto("/");
 
-        const attention = page.getByRole("button", { name: /^(attention|внимание)\b/i });
+        await page.locator(".filter-disclosure > summary").click();
+        const attention = page.getByRole("button", { name: /^(attention|внимание)(?:\s|$)/i });
         await expect(attention).toHaveAttribute("aria-pressed", "false");
 
         await attention.click();
@@ -50,45 +52,47 @@ test.describe("строка списка стеков", () => {
     test("инспектор называет каталог, число сервисов и реестр образов", async ({ page }) => {
         await page.goto(`/stack/${E2E_ATTENTION_STACK}`);
 
-        const facts = page.locator(".inspector .facts");
-        await expect(facts).toContainText(E2E_ATTENTION_STACK);
-        await expect(facts).toContainText(/2 service|2 сервиса/i);
-        await expect(facts).toContainText(/Docker Hub/);
+        const services = page.locator(".inspector .services");
+        await expect(page.locator(".source-panel")).toContainText(E2E_ATTENTION_STACK);
+        await expect(services.locator(".service-count")).toHaveText("2");
+        await page.locator(".links .summary").click();
+        await expect(page.locator(".links .details")).toContainText(/Docker Hub/);
 
-        // Причина названа и рядом стоит то, чем её лечить
+        // Причина названа и рядом стоит то, чем ее лечить
         const attention = page.locator(".inspector .attention").first();
-        await expect(attention.locator(".reason-badge")).toBeVisible();
+        await expect(attention.locator(".attention-badge")).toBeVisible();
         await expect(attention.getByRole("button", { name: /logs of init|логи init/i })).toBeVisible();
         await expect(attention.getByRole("button", { name: /restart init|перезапустить init/i })).toBeVisible();
 
         // Подпись раздела честно говорит, насколько свежие числа
-        await expect(page.locator(".inspector .services caption")).toHaveText(/state as of|состояние на/i);
+        await expect(services.locator(".services-checked")).toHaveText(/checked|проверено/i);
     });
 });
 
 test.describe("доступность", () => {
-    test("окно без сбоев не превращается в «100%», а сбой называет и долю, и случай", async ({ page }) => {
-        await page.goto("/");
+    test("окно без сбоев не превращается в 100 процентов, а сбой называет и долю, и случай", async ({ page }) => {
+        await page.goto(`/stack/${E2E_STACK_NAME}`);
 
         // Стек работает третьи сутки: окно закрыто целиком и без сбоев
-        const healthy = page.locator(".item", { hasText: E2E_STACK_NAME });
-        await expect(healthy.locator(".meta .availability")).toHaveText(/no incidents|без сбоев/i);
+        const healthy = page.locator(".inspector .availability .verdict");
+        await expect(healthy).toHaveText(/no incidents|без сбоев/i);
 
-        // Стек со сбоем: доля и число случаев, а не «почти работает».
+        // Стек со сбоем: доля и число случаев, а не "почти работает".
         // Случаев может быть больше одного: сервер записывает и свои наблюдения,
         // поэтому проверяется правило, а не конкретное число.
-        const degraded = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
-        await expect(degraded.locator(".meta .availability")).toHaveText(/9\d[.,]\d%/);
-        await expect(degraded.locator(".meta .availability")).toHaveText(/\d+ incident|\d+ сбо/i);
+        await page.goto(`/stack/${E2E_ATTENTION_STACK}`);
+        const degraded = page.locator(".inspector .availability .verdict");
+        await expect(degraded).toHaveText(/9\d[.,]\d%/);
+        await expect(degraded).toHaveText(/\d+ incident|\d+ сбо/i);
     });
 
     test("остановленный стек показывает срок, а не долю", async ({ page }) => {
-        await page.goto("/");
+        await page.goto(`/stack/${E2E_FILES_STACK}`);
 
         // У стека нет запущенных контейнеров: процент был бы бессмыслицей
-        const stopped = page.locator(".item", { hasText: E2E_FILES_STACK });
-        await expect(stopped.locator(".meta .availability")).toHaveText(/stopped .* ago|остановлен .* назад/i);
-        await expect(stopped.locator(".meta .availability")).not.toHaveText(/%/);
+        const stopped = page.locator(".inspector .availability .verdict");
+        await expect(stopped).toHaveText(/stopped .* ago|остановлен .* назад/i);
+        await expect(stopped).not.toHaveText(/%/);
     });
 
     test("инспектор считает доступность по выбранному окну", async ({ page }) => {

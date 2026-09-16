@@ -39,6 +39,7 @@ import {
     faLink,
     faChevronDown,
     faChevronUp,
+    faChevronLeft,
     faSignOutAlt,
     faPen,
     faExternalLinkSquareAlt,
@@ -59,6 +60,12 @@ import {
     faChevronCircleDown,
     faTriangleExclamation,
     faPaste,
+    faChartLine,
+    faCodeBranch,
+    faShieldHalved,
+    faServer,
+    faCodeCommit,
+    faCircleCheck,
 } from "@fortawesome/free-solid-svg-icons";
 
 library.add(
@@ -94,6 +101,7 @@ library.add(
     faLink,
     faChevronDown,
     faChevronUp,
+    faChevronLeft,
     faSignOutAlt,
     faPen,
     faExternalLinkSquareAlt,
@@ -119,6 +127,12 @@ library.add(
     faChevronCircleDown,
     faTriangleExclamation,
     faPaste,
+    faChartLine,
+    faCodeBranch,
+    faShieldHalved,
+    faServer,
+    faCodeCommit,
+    faCircleCheck,
 );
 
 export { FontAwesomeIcon };

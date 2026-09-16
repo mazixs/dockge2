@@ -1,54 +1,43 @@
 <template>
-    <div>
-        <h5>{{ $t("Internal Networks") }}</h5>
-        <ul class="list-group">
-            <li v-for="(networkRow, index) in networkList" :key="index" class="list-group-item">
-                <input v-model="networkRow.key" type="text" class="no-bg domain-input" :placeholder="$t(`Network name...`)" @change="applyToYAML(false)" />
-                <font-awesome-icon icon="times" class="action remove ms-2 me-3 text-danger" @click="remove(index)" />
-            </li>
-        </ul>
+    <!-- Сети стека: свои и внешние. Каждая группа - поле системы с подписью,
+         поэтому имена групп звучат так же тихо, как подписи остальных полей -->
+    <div class="networks form-stack">
+        <fieldset class="field">
+            <legend class="form-label">{{ $t("Internal Networks") }}</legend>
+            <ul class="value-list">
+                <li v-for="(networkRow, index) in networkList" :key="index" class="value-row">
+                    <input v-model="networkRow.key" type="text" class="value-input" :placeholder="$t(`Network name...`)" @change="applyToYAML(false)" />
+                    <button class="value-remove" type="button" :aria-label="$t('removeListItem', [ $t('Internal Networks') ])" @click="remove(index)">
+                        <font-awesome-icon icon="times" />
+                    </button>
+                </li>
+            </ul>
+            <button class="btn btn-normal btn-sm add-value" type="button" @click="addField">{{ $t("addInternalNetwork") }}</button>
+        </fieldset>
 
-        <button class="btn btn-normal btn-sm mt-3 me-2" @click="addField">{{ $t("addInternalNetwork") }}</button>
+        <fieldset class="field">
+            <legend class="form-label">{{ $t("External Networks") }}</legend>
 
-        <h5 class="mt-3">{{ $t("External Networks") }}</h5>
+            <p v-if="externalNetworkList.length === 0" class="form-text">{{ $t("No External Networks") }}</p>
 
-        <div v-if="externalNetworkList.length === 0">
-            {{ $t("No External Networks") }}
-        </div>
-
-        <!-- Переключатель сети по контракту системы: button с role="switch",
-             подпись слева, вид сети справа. Чекбокс Bootstrap не давал ни
-             состояния для чтения с экрана, ни цели нажатия нужного размера -->
-        <div v-for="networkName in externalNetworkList" :key="networkName" class="network-row">
-            <span class="network-name">{{ networkName }}</span>
-            <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
-            <button
-                class="switch" type="button" role="switch"
-                :aria-checked="String(!!selectedExternalList[networkName])"
-                :aria-label="networkName"
-                @click="toggleExternal(networkName)"
-            >
-                <span class="knob" aria-hidden="true"></span>
-            </button>
-        </div>
-
-        <div v-if="false" class="input-group mb-3">
-            <input
-                placeholder="New external network name..."
-                class="form-control"
-                @keyup.enter="createExternelNetwork"
-            />
-            <button class="btn btn-normal btn-sm  me-2" type="button">
-                {{ $t("createExternalNetwork") }}
-            </button>
-        </div>
-
-        <div v-if="false">
-            <button class="btn btn-primary btn-sm mt-3 me-2" @click="applyToYAML">{{ $t("applyToYAML") }}</button>
-        </div>
+            <!-- Переключатель сети по контракту системы: button с role="switch",
+                 подпись слева, вид сети справа. Чекбокс Bootstrap не давал ни
+                 состояния для чтения с экрана, ни цели нажатия нужного размера -->
+            <div v-for="networkName in externalNetworkList" :key="networkName" class="network-row">
+                <span class="network-name">{{ networkName }}</span>
+                <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
+                <button
+                    class="switch" type="button" role="switch"
+                    :aria-checked="String(!!selectedExternalList[networkName])"
+                    :aria-label="networkName"
+                    @click="toggleExternal(networkName)"
+                >
+                    <span class="knob" aria-hidden="true"></span>
+                </button>
+            </div>
+        </fieldset>
     </div>
 </template>
-
 <script>
 export default {
     data() {
@@ -232,28 +221,27 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../styles/vars.scss" as *;
+// Группа полей рамки не имеет: подпись группы делает legend, а рамку рисует панель
+.networks {
+    max-width: none;
+}
 
-.list-group {
-    background-color: var(--surface-panel);
+fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
 
-    li {
-        display: flex;
-        align-items: center;
-        padding: 10px 0 10px 10px;
+legend {
+    float: none;
+    width: auto;
+    padding: 0;
+}
 
-        .domain-input {
-            flex-grow: 1;
-            background-color: transparent;
-            border: none;
-            color: var(--text-strong);
-            outline: none;
-
-            &::placeholder {
-                color: var(--text-faint);
-            }
-        }
-    }
+.add-value {
+    align-self: flex-start;
+    margin-top: var(--gap-sm);
 }
 
 // Переключатель: 34x20, подпись слева, состояние читается и без цвета
@@ -275,6 +263,7 @@ export default {
 }
 
 .switch {
+    position: relative;
     flex: none;
     width: 34px;
     height: 20px;
@@ -283,13 +272,26 @@ export default {
     border: 1px solid var(--line-control);
     background-color: var(--surface-sunken);
 
+    // Цель нажатия больше рисунка: переключатель рисуется в 20 px, а под пальцем
+    // столько не нажимается. Высоту цели дает общий токен контрола, поэтому на
+    // узком экране она растет вместе со всеми остальными
+    &::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: var(--control-height);
+        transform: translateY(-50%);
+    }
+
     .knob {
         display: block;
         width: 14px;
         height: 14px;
         border-radius: var(--radius-pill);
         background-color: var(--text-faint);
-        transition: transform ease-in-out 0.12s;
+        transition: transform var(--motion-base) var(--motion-ease);
     }
 
     &[aria-checked="true"] {
@@ -306,11 +308,5 @@ export default {
         outline: var(--focus-ring);
         outline-offset: var(--focus-offset);
     }
-}
-
-.delete {
-    text-decoration: underline;
-    font-size: 13px;
-    cursor: pointer;
 }
 </style>

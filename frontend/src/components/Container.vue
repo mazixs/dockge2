@@ -1,95 +1,85 @@
 <template>
-    <div class="shadow-box big-padding mb-3 container">
-        <div class="row">
-            <div class="col-5">
-                <h4>{{ name }}</h4>
-                <div class="image mb-2">
-                    <span class="me-1">{{ imageName }}:</span><span class="tag">{{ imageTag }}</span>
+    <!-- Сервис - строка списка внутри панели контейнеров, а не карточка в карточке:
+         имя со значком и образ слева, действия справа, настройки раскрываются под строкой -->
+    <div class="service">
+        <div class="service-head">
+            <div class="service-ident">
+                <h3 class="service-name"><InterfaceIcon name="box" />{{ name }}</h3>
+                <div class="image">
+                    <span>{{ imageName }}:</span><span class="tag">{{ imageTag }}</span>
                 </div>
-                <div v-if="!isEditMode">
-                    <StateChip class="me-1" :state="serviceState" :label="statusLabel" :attention="needsAttention" />
+                <div v-if="!isEditMode" class="service-state">
+                    <StateChip :state="serviceState" :label="statusLabel" :attention="needsAttention" />
 
-                    <a v-for="port in (envsubstService.ports ?? [])" :key="port" class="port-link me-1" :href="parsePort(port).url" target="_blank">
+                    <a v-for="port in (envsubstService.ports ?? [])" :key="port" class="port-link" :href="parsePort(port).url" target="_blank">
                         <span class="port-chip">{{ parsePort(port).display }}</span>
                     </a>
 
-                    <ul v-if="instances.length > 0" class="instance-list mt-2">
+                    <ul v-if="instances.length > 0" class="instance-list">
                         <li v-for="instance in instances" :key="instance.name">
                             <span class="instance-name">{{ instance.name || $t("unknown") }}</span>
-                            <StateChip class="ms-1" :state="instanceState(instance)" :label="instanceLabel(instance)" :attention="!!instance.issue" />
-                            <span v-if="instance.issue" class="issue ms-1">{{ instanceIssueText(instance) }}</span>
+                            <StateChip :state="instanceState(instance)" :label="instanceLabel(instance)" :attention="!!instance.issue" />
+                            <span v-if="instance.issue" class="issue">{{ instanceIssueText(instance) }}</span>
                         </li>
                     </ul>
                 </div>
             </div>
-            <div class="col-7">
-                <div class="function">
-                    <div class="btn-group me-2" role="group">
-                        <router-link v-if="!isEditMode && hasRunningInstance" class="btn btn-normal" :to="terminalRouteLink" disabled="">
-                            <font-awesome-icon icon="terminal" />
-                            Bash
-                        </router-link>
-                        <button
-                            v-if="serviceCount > 1 && !isEditMode && !hasRunningInstance"
-                            class="btn btn-primary"
-                            :disabled="processing"
-                            @click="startService"
-                        >
-                            <font-awesome-icon icon="play" class="me-1" />
-                            {{ $t("startStack") }}
-                        </button>
-                        <button
-                            v-if="serviceCount > 1 && !isEditMode && hasRunningInstance"
-                            class="btn btn-normal"
-                            :disabled="processing"
-                            @click="restartService"
-                        >
-                            <font-awesome-icon icon="rotate" class="me-1" />
-                            {{ $t("restartStack") }}
-                        </button>
-                        <button
-                            v-if="serviceCount > 1 && !isEditMode && hasRunningInstance"
-                            class="btn btn-normal"
-                            :disabled="processing"
-                            @click="stopService"
-                        >
-                            <font-awesome-icon icon="stop" class="me-1" />
-                            {{ $t("stopStack") }}
-                        </button>
-                    </div>
+
+            <div class="service-actions">
+                <!-- В режиме правки у строки два действия: раскрыть настройки и удалить.
+                     Удаление не кричит: слово красное, кнопка обычная -->
+                <template v-if="isEditMode">
+                    <button class="btn btn-sm btn-normal" :aria-expanded="String(showConfig)" @click="showConfig = !showConfig">
+                        <font-awesome-icon icon="edit" />{{ $t("Edit") }}
+                    </button>
+                    <button class="btn btn-sm btn-normal btn-danger-text" @click="remove">
+                        <font-awesome-icon icon="trash" />{{ $t("deleteContainer") }}
+                    </button>
+                </template>
+                <div v-else class="btn-group" role="group">
+                    <router-link v-if="hasRunningInstance" class="btn btn-sm btn-normal" :to="terminalRouteLink">
+                        <font-awesome-icon icon="terminal" />Bash
+                    </router-link>
+                    <button
+                        v-if="serviceCount > 1 && !hasRunningInstance"
+                        class="btn btn-sm btn-primary"
+                        :disabled="processing"
+                        @click="startService"
+                    >
+                        <font-awesome-icon icon="play" />{{ $t("startStack") }}
+                    </button>
+                    <button
+                        v-if="serviceCount > 1 && hasRunningInstance"
+                        class="btn btn-sm btn-normal"
+                        :disabled="processing"
+                        @click="restartService"
+                    >
+                        <font-awesome-icon icon="rotate" />{{ $t("restartStack") }}
+                    </button>
+                    <button
+                        v-if="serviceCount > 1 && hasRunningInstance"
+                        class="btn btn-sm btn-normal"
+                        :disabled="processing"
+                        @click="stopService"
+                    >
+                        <font-awesome-icon icon="stop" />{{ $t("stopStack") }}
+                    </button>
                 </div>
             </div>
         </div>
 
-        <div v-if="isEditMode" class="mt-2">
-            <button class="btn btn-normal me-2" @click="showConfig = !showConfig">
-                <font-awesome-icon icon="edit" />
-                {{ $t("Edit") }}
-            </button>
-            <button v-if="false" class="btn btn-normal me-2">Rename</button>
-            <button class="btn btn-danger me-2" @click="remove">
-                <font-awesome-icon icon="trash" />
-                {{ $t("deleteContainer") }}
-            </button>
-        </div>
-        <div v-else-if="statsInstances.length > 0" class="mt-2">
-            <div class="d-flex align-items-center gap-3">
+        <div v-if="!isEditMode && statsInstances.length > 0" class="service-stats">
+            <div class="stats-line">
                 <template v-if="!expandedStats">
-                    <div class="stats">
-                        {{ $t('CPU') }}: {{ statsInstances[0].CPUPerc }}
-                    </div>
-                    <div class="stats">
-                        {{ $t('memoryAbbreviated') }}: {{ statsInstances[0].MemUsage }}
-                    </div>
+                    <span class="stats">{{ $t('CPU') }}: {{ statsInstances[0].CPUPerc }}</span>
+                    <span class="stats">{{ $t('memoryAbbreviated') }}: {{ statsInstances[0].MemUsage }}</span>
                 </template>
-                <div class="d-flex flex-grow-1 justify-content-end">
-                    <button class="btn btn-sm btn-normal" @click="expandedStats = !expandedStats">
-                        <font-awesome-icon :icon="expandedStats ? 'chevron-up' : 'chevron-down'" />
-                    </button>
-                </div>
+                <button class="btn btn-sm btn-normal ms-auto" :aria-expanded="String(expandedStats)" @click="expandedStats = !expandedStats">
+                    <font-awesome-icon :icon="expandedStats ? 'chevron-up' : 'chevron-down'" />
+                </button>
             </div>
             <transition name="slide-fade" appear>
-                <div v-if="expandedStats" class="d-flex flex-column gap-3 mt-2">
+                <div v-if="expandedStats" class="stats-expanded">
                     <DockerStat
                         v-for="stat in statsInstances"
                         :key="stat.Name"
@@ -100,49 +90,30 @@
         </div>
 
         <transition name="slide-fade" appear>
-            <div v-if="isEditMode && showConfig" class="config mt-3">
-                <!-- Image -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("dockerImage") }}
-                    </label>
-                    <div class="input-group mb-3">
-                        <input
-                            v-model="service.image"
-                            class="form-control"
-                            list="image-datalist"
-                        />
-                    </div>
-
-                    <!-- TODO: Search online: https://hub.docker.com/api/content/v1/products/search?q=louislam%2Fuptime&source=community&page=1&page_size=4 -->
+            <!-- Настройки сервиса - обычная колонка полей системы: подпись над
+                 полем, пояснение под ним, один шаг между полями -->
+            <div v-if="isEditMode && showConfig" class="config form-stack">
+                <div class="field">
+                    <label :for="`service-image-${uid}`" class="form-label">{{ $t("dockerImage") }}</label>
+                    <input :id="`service-image-${uid}`" v-model="service.image" class="form-control" list="image-datalist" />
                     <datalist id="image-datalist">
                         <option value="louislam/uptime-kuma:1" />
                     </datalist>
-                    <div class="form-text"></div>
                 </div>
 
-                <!-- Ports -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("port", 2) }}
-                    </label>
+                <div class="field">
+                    <span class="form-label">{{ $t("port", 2) }}</span>
                     <ArrayInput name="ports" :display-name="$t('port')" placeholder="HOST:CONTAINER" />
                 </div>
 
-                <!-- Volumes -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("volume", 2) }}
-                    </label>
+                <div class="field">
+                    <span class="form-label">{{ $t("volume", 2) }}</span>
                     <ArrayInput name="volumes" :display-name="$t('volume')" placeholder="HOST:CONTAINER" />
                 </div>
 
-                <!-- Restart Policy -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("restartPolicy") }}
-                    </label>
-                    <select v-model="service.restart" class="form-select">
+                <div class="field">
+                    <label :for="`service-restart-${uid}`" class="form-label">{{ $t("restartPolicy") }}</label>
+                    <select :id="`service-restart-${uid}`" v-model="service.restart" class="form-select">
                         <option value="always">{{ $t("restartPolicyAlways") }}</option>
                         <option value="unless-stopped">{{ $t("restartPolicyUnlessStopped") }}</option>
                         <option value="on-failure">{{ $t("restartPolicyOnFailure") }}</option>
@@ -150,46 +121,21 @@
                     </select>
                 </div>
 
-                <!-- Environment Variables -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("environmentVariable", 2) }}
-                    </label>
+                <div class="field">
+                    <span class="form-label">{{ $t("environmentVariable", 2) }}</span>
                     <ArrayInput name="environment" :display-name="$t('environmentVariable')" placeholder="KEY=VALUE" />
                 </div>
 
-                <!-- Container Name -->
-                <div v-if="false" class="mb-4">
-                    <label class="form-label">
-                        {{ $t("containerName") }}
-                    </label>
-                    <div class="input-group mb-3">
-                        <input
-                            v-model="service.container_name"
-                            class="form-control"
-                        />
-                    </div>
-                    <div class="form-text"></div>
-                </div>
-
-                <!-- Network -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("network", 2) }}
-                    </label>
-
-                    <div v-if="networkList.length === 0 && service.networks && service.networks.length > 0" class="text-warning mb-3">
+                <div class="field">
+                    <span class="form-label">{{ $t("network", 2) }}</span>
+                    <p v-if="networkList.length === 0 && service.networks && service.networks.length > 0" class="form-text attention">
                         {{ $t("NoNetworksAvailable") }}
-                    </div>
-
+                    </p>
                     <ArraySelect name="networks" :display-name="$t('network')" placeholder="Network Name" :options="networkList" />
                 </div>
 
-                <!-- Depends on -->
-                <div class="mb-4">
-                    <label class="form-label">
-                        {{ $t("dependsOn") }}
-                    </label>
+                <div class="field">
+                    <span class="form-label">{{ $t("dependsOn") }}</span>
                     <ArrayInput name="depends_on" :display-name="$t('dependsOn')" :placeholder="$t(`containerName`)" />
                 </div>
             </div>
@@ -203,9 +149,11 @@ import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { parseDockerPort } from "../../../common/util-common";
 import DockerStat from "./DockerStat.vue";
 import StateChip from "./StateChip.vue";
+import InterfaceIcon from "./InterfaceIcon.vue";
 
 export default defineComponent({
     components: {
+        InterfaceIcon,
         FontAwesomeIcon,
         DockerStat,
         StateChip,
@@ -250,6 +198,15 @@ export default defineComponent({
     },
     computed: {
 
+        /**
+         * Устойчивый хвост для id полей: подписи настроек должны указывать на
+         * поле своего сервиса, а сервисов на странице несколько
+         * @returns {string} Имя сервиса, пригодное для id
+         */
+        uid() {
+            return this.name.replace(/[^a-zA-Z0-9_-]/g, "-");
+        },
+
         networkList() {
             let list = [];
             for (const networkName in this.jsonObject.networks) {
@@ -260,7 +217,7 @@ export default defineComponent({
 
         /**
          * Состояние сервиса именем системы: синий означает только интерактив,
-         * поэтому «работает» - это running, а не primary.
+         * поэтому "работает" - это running, а не primary.
          * @returns {string} Имя состояния для чипа
          */
         serviceState() {
@@ -475,11 +432,128 @@ export default defineComponent({
 </script>
 
 <style scoped lang="scss">
+// Строка сервиса: соседние строки разделяет тонкая линия, отступ у всех один -
+// тот же, что у тела панели, поэтому список читается как одно целое
+.service {
+    padding: var(--gap-md);
+
+    & + & {
+        border-top: 1px solid var(--line-hair);
+    }
+}
+
+.service-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--gap-sm) var(--gap-md);
+}
+
+.service-ident {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+    min-width: 0;
+}
+
+.service-name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: var(--weight-medium);
+    color: var(--text-strong);
+    overflow-wrap: anywhere;
+
+    > svg {
+        flex: none;
+        color: var(--text-muted);
+    }
+}
+
+.image {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+
+    .tag {
+        color: var(--text-strong);
+    }
+}
+
+.service-state {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-sm);
+}
+
+.service-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-sm);
+    margin-left: auto;
+}
+
+.service-stats {
+    margin-top: var(--gap-sm);
+}
+
+.stats-line {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
+}
+
+.stats {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+// Настройки раскрываются под строкой и отделены от нее линией, а не второй рамкой
+// Настройки раскрываются под строкой сервиса, поэтому отделены от нее линией
+.config {
+    max-width: none;
+    margin-top: var(--gap-md);
+    padding-top: var(--gap-md);
+    border-top: 1px solid var(--line-hair);
+}
+
+// Предупреждение внутри поля говорит цветом состояния, а не своей плашкой
+.form-text.attention {
+    color: var(--state-attention);
+}
+
+.stats-expanded {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-md);
+    margin-top: var(--gap-sm);
+}
+
+.form-label {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
 .instance-list {
     list-style: none;
     padding: 0;
     margin: 0;
-    font-size: 0.8rem;
+    width: 100%;
+    font-size: var(--text-xs);
+
+    // Имя экземпляра, его состояние и причина стоят в строку с одним шагом
+    li {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--gap-xs);
+    }
 
     .instance-name {
         opacity: 0.8;
@@ -487,30 +561,6 @@ export default defineComponent({
 
     .issue {
         opacity: 0.8;
-    }
-}
-
-.container {
-    .image {
-        font-size: var(--text-sm);
-        color: var(--text-muted);
-        .tag {
-            color: var(--text-strong);
-        }
-    }
-
-    .function {
-        align-content: center;
-        display: flex;
-        height: 100%;
-        width: 100%;
-        align-items: center;
-        justify-content: end;
-    }
-
-    .stats {
-        font-size: var(--text-sm);
-        color: var(--text-muted);
     }
 }
 
@@ -532,7 +582,7 @@ export default defineComponent({
     border-radius: var(--radius-pill);
     font-size: var(--text-sm);
     font-family: var(--font-mono);
-    line-height: 1.4;
+    line-height: var(--line-sm);
     color: var(--accent-text);
     background-color: var(--surface-raised);
     border: 1px solid var(--line-hair);

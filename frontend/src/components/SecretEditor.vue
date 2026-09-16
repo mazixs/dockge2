@@ -1,89 +1,108 @@
 <template>
-    <div class="shadow-box big-padding mb-3">
-        <div class="form-text mb-3">{{ $t("secretsHint") }}</div>
+    <!-- Секреты - панель той же анатомии, что выбор файлов над ней. Каждый файл -
+         строка списка под тонкой линией, а не карточка в карточке -->
+    <section class="panel secrets">
+        <div class="panel-bar">
+            <h2 class="panel-title"><InterfaceIcon name="lock" />{{ $t("secrets") }}</h2>
+            <span v-if="secretFiles.length > 0" class="panel-meta">{{ secretFiles.length }}</span>
+        </div>
 
         <!-- Existing secret files -->
-        <div v-for="secret in secretFiles" :key="secret.fileName" class="secret mb-3">
-            <div class="d-flex align-items-center flex-wrap gap-2">
+        <div v-for="secret in secretFiles" :key="secret.fileName" class="secret">
+            <div class="secret-head">
                 <span class="file-name">{{ secret.fileName }}</span>
-                <span v-if="secret.secretName" class="badge bg-primary">{{ secret.secretName }}</span>
-                <span v-else class="badge bg-secondary">{{ $t("secretNotBound") }}</span>
-                <span v-for="service in secret.services" :key="service" class="badge bg-secondary">{{ service }}</span>
+                <!-- Имя секрета из compose и сервисы, которым он выдан: бирки на
+                     поверхности панели, привязанное имя окрашено акцентом -->
+                <span v-if="secret.secretName" class="tag bound">{{ secret.secretName }}</span>
+                <span v-else class="tag">{{ $t("secretNotBound") }}</span>
+                <span v-for="service in secret.services" :key="service" class="tag">{{ service }}</span>
                 <span class="meta">{{ secret.size }} {{ $t("bytes") }}</span>
+
+                <!-- Удаление стоит в стороне от правки и не кричит: слово красное, кнопка обычная -->
+                <button class="btn btn-sm btn-normal btn-danger-text remove" :disabled="disabled" @click="askPassword('delete', secret.fileName)">
+                    <font-awesome-icon icon="trash" />{{ $t("deleteSecret") }}
+                </button>
             </div>
 
-            <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+            <div class="secret-row">
                 <!-- The value is masked until it is explicitly revealed -->
                 <input
                     :value="revealed[secret.fileName] ?? maskedValue"
                     class="form-control secret-value"
                     :readonly="revealed[secret.fileName] === undefined"
                     :type="revealed[secret.fileName] === undefined ? 'password' : 'text'"
+                    :aria-label="secret.fileName"
                     @input="revealed[secret.fileName] = $event.target.value"
                 />
 
-                <button v-if="revealed[secret.fileName] === undefined" class="btn btn-normal" :disabled="disabled" @click="askPassword('reveal', secret.fileName)">
-                    <font-awesome-icon icon="eye" class="me-1" />
-                    {{ $t("revealSecret") }}
+                <button v-if="revealed[secret.fileName] === undefined" class="btn btn-sm btn-normal" :disabled="disabled" @click="askPassword('reveal', secret.fileName)">
+                    <font-awesome-icon icon="eye" />{{ $t("revealSecret") }}
                 </button>
                 <template v-else>
-                    <button class="btn btn-primary" :disabled="disabled" @click="askPassword('save', secret.fileName)">
-                        <font-awesome-icon icon="save" class="me-1" />
-                        {{ $t("saveSecret") }}
+                    <button class="btn btn-sm btn-primary" :disabled="disabled" @click="askPassword('save', secret.fileName)">
+                        <font-awesome-icon icon="save" />{{ $t("saveSecret") }}
                     </button>
-                    <button class="btn btn-normal" :disabled="disabled" @click="hide(secret.fileName)">
-                        <font-awesome-icon icon="eye-slash" class="me-1" />
-                        {{ $t("hideSecret") }}
+                    <button class="btn btn-sm btn-normal" :disabled="disabled" @click="hide(secret.fileName)">
+                        <font-awesome-icon icon="eye-slash" />{{ $t("hideSecret") }}
                     </button>
                 </template>
-
-                <button class="btn btn-danger" :disabled="disabled" @click="askPassword('delete', secret.fileName)">
-                    <font-awesome-icon icon="trash" class="me-1" />
-                    {{ $t("deleteSecret") }}
-                </button>
             </div>
 
             <!-- Referencing the secret from the compose file -->
-            <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+            <div class="secret-row">
                 <input
                     v-model="bindName[secret.fileName]"
                     class="form-control secret-name"
                     :placeholder="$t('secretName')"
+                    :aria-label="$t('secretName')"
                     :disabled="disabled"
                 />
-                <select v-model="bindServices[secret.fileName]" class="form-select secret-services" multiple :disabled="disabled">
-                    <option v-for="service in services" :key="service" :value="service">{{ service }}</option>
-                </select>
-                <button class="btn btn-normal" :disabled="disabled" @click="bind(secret.fileName)">
-                    <font-awesome-icon icon="link" class="me-1" />
-                    {{ $t("bindSecret") }}
-                </button>
-                <button v-if="secret.secretName" class="btn btn-normal" :disabled="disabled" @click="unbind(secret.secretName)">
-                    <font-awesome-icon icon="unlink" class="me-1" />
-                    {{ $t("unbindSecret") }}
-                </button>
+                <!-- Сервисы - флажки, а не список с множественным выбором: тот же
+                     контрол, что у env-файлов выше, и видно, кто получает секрет -->
+                <div class="secret-services" role="group" :aria-labelledby="`secret-services-${secret.fileName}`">
+                    <span :id="`secret-services-${secret.fileName}`" class="services-label">{{ $t("bindServices") }}</span>
+                    <label v-for="service in services" :key="service" class="form-check form-check-inline">
+                        <input v-model="bindServices[secret.fileName]" class="form-check-input" type="checkbox" :value="service" :disabled="disabled" />
+                        <span class="form-check-label">{{ service }}</span>
+                    </label>
+                </div>
+                <!-- Привязать и отвязать - пара: при переносе строки они остаются рядом -->
+                <div class="secret-actions">
+                    <button class="btn btn-sm btn-normal" :disabled="disabled" @click="bind(secret.fileName)">
+                        <font-awesome-icon icon="link" />{{ $t("bindSecret") }}
+                    </button>
+                    <button v-if="secret.secretName" class="btn btn-sm btn-normal" :disabled="disabled" @click="unbind(secret.secretName)">
+                        <font-awesome-icon icon="unlink" />{{ $t("unbindSecret") }}
+                    </button>
+                </div>
             </div>
         </div>
 
         <!-- Create a new secret file -->
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <input v-model="newFileName" class="form-control secret-name" placeholder=".secret.db" :disabled="disabled" />
-            <button class="btn btn-normal" :disabled="disabled || !newFileName" @click="askPassword('create', newFileName)">
-                <font-awesome-icon icon="plus" class="me-1" />
-                {{ $t("addSecret") }}
+        <div class="panel-body secret-row">
+            <input v-model="newFileName" class="form-control secret-name" placeholder=".secret.db" :aria-label="$t('addSecret')" :disabled="disabled" />
+            <button class="btn btn-sm btn-normal" :disabled="disabled || !newFileName" @click="askPassword('create', newFileName)">
+                <font-awesome-icon icon="plus" />{{ $t("addSecret") }}
             </button>
         </div>
+
+        <p class="panel-foot"><font-awesome-icon icon="info-circle" />{{ $t("secretsHint") }}</p>
 
         <!-- Reading or changing a secret is a separate authorised action -->
         <BModal v-model="showPasswordDialog" :title="$t('confirmSecretAction')" :okTitle="$t('confirm')" :cancelTitle="$t('cancel')" @ok="runPendingAction" @hidden="resetPassword">
             <p>{{ $t("secretPasswordHint") }}</p>
             <input v-model="currentPassword" type="password" class="form-control" autocomplete="current-password" />
         </BModal>
-    </div>
+    </section>
 </template>
 
 <script>
+import InterfaceIcon from "./InterfaceIcon.vue";
+
 export default {
+    components: {
+        InterfaceIcon,
+    },
     props: {
         stackName: {
             type: String,
@@ -242,24 +261,68 @@ export default {
 </script>
 
 <style scoped lang="scss">
-@use "../styles/vars.scss" as *;
-
+// Файл секрета - строка списка: отделена линией от следующей, внутри три ряда
+// с одним шагом. Строки не вкладываются в панели: панель здесь одна
 .secret {
-    padding-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+    padding: var(--gap-md);
     border-bottom: 1px solid var(--line-hair);
+}
 
-    &:last-of-type {
-        border-bottom: none;
-    }
+.secret-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-sm);
 }
 
 .file-name {
     font-family: var(--font-mono);
+    color: var(--text-strong);
+}
+
+// Бирка - имя или сервис на поверхности панели; привязанное имя окрашено акцентом
+.tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--gap-sm);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-chip);
+    background-color: var(--surface-raised);
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    line-height: var(--line-sm);
+
+    &.bound {
+        border-color: transparent;
+        background-color: var(--accent-soft);
+        color: var(--accent-text);
+    }
 }
 
 .meta {
-    font-size: 0.8rem;
-    opacity: 0.7;
+    color: var(--text-faint);
+    font-size: var(--text-xs);
+}
+
+.remove {
+    margin-left: auto;
+}
+
+.secret-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-sm);
+}
+
+.secret-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    margin-left: auto;
 }
 
 .secret-value {
@@ -272,8 +335,26 @@ export default {
     font-family: var(--font-mono);
 }
 
+// Подпись к флажкам: без нее три имени сервисов в ряду читаются как набор
+// бирок, а не как выбор, кому достанется секрет. Подпись занимает свою строку,
+// иначе на узком экране первый сервис оказывается ее продолжением
+.services-label {
+    flex: 1 0 100%;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    line-height: var(--line-xs);
+}
+
 .secret-services {
-    max-width: 220px;
-    min-height: 2.4rem;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-sm);
+    min-height: var(--control-height);
+    font-size: var(--text-sm);
+
+    .form-check {
+        margin: 0;
+    }
 }
 </style>

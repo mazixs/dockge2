@@ -1,5 +1,5 @@
 <template>
-    <div class="input-group mb-3">
+    <div class="input-group">
         <input
             ref="input"
             v-model="model"
@@ -12,12 +12,12 @@
             :readonly="readonly"
         >
 
-        <a v-if="visibility == 'password'" class="btn btn-outline-primary" @click="showInput()">
+        <button v-if="visibility === 'password'" class="btn btn-normal" type="button" :aria-label="$t('showPassword')" @click="showInput()">
             <font-awesome-icon icon="eye" />
-        </a>
-        <a v-if="visibility == 'text'" class="btn btn-outline-primary" @click="hideInput()">
+        </button>
+        <button v-else class="btn btn-normal" type="button" :aria-label="$t('hidePassword')" @click="hideInput()">
             <font-awesome-icon icon="eye-slash" />
-        </a>
+        </button>
     </div>
 </template>
 
@@ -69,9 +69,6 @@ export default {
                 this.$emit("update:modelValue", value);
             }
         }
-    },
-    created() {
-
     },
     methods: {
         /** Show users input in plain text */

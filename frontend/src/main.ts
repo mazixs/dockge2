@@ -6,6 +6,7 @@ import App from "./App.vue";
 import { router } from "./router";
 import { FontAwesomeIcon } from "./icon.js";
 import { i18n } from "./i18n";
+import { ellipsisTitle } from "./directives/ellipsis-title";
 
 // Dependencies
 import "bootstrap";
@@ -13,7 +14,6 @@ import Vue3Toastify, { toast } from "vue3-toastify";
 import "@xterm/xterm/lib/xterm.js";
 
 // CSS
-import "@fontsource/jetbrains-mono";
 import "vue3-toastify/dist/index.css";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/main.scss";
@@ -22,6 +22,8 @@ import "./styles/main.scss";
 import socket from "./mixins/socket";
 import lang from "./mixins/lang";
 import theme from "./mixins/theme";
+import responsive from "./mixins/responsive";
+import navigation from "./mixins/navigation";
 
 interface ToastResponse {
     ok: boolean;
@@ -42,6 +44,7 @@ app.use(Vue3Toastify, {
 app.use(router);
 app.use(i18n);
 app.component("FontAwesomeIcon", FontAwesomeIcon);
+app.directive("ellipsis-title", ellipsisTitle);
 app.mount("#app");
 
 /**
@@ -53,6 +56,8 @@ function rootApp() {
             socket,
             lang,
             theme,
+            responsive,
+            navigation,
         ],
         // The session state lives in the socket mixin, so it is not repeated here
         computed: {

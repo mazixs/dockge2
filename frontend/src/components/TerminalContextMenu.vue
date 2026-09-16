@@ -2,13 +2,13 @@
     <div
         v-if="visible"
         ref="menu"
-        class="terminal-context-menu shadow-box"
+        class="terminal-context-menu"
         :style="menuStyle"
         role="menu"
         @contextmenu.prevent
     >
         <button ref="pasteButton" type="button" class="menu-item" role="menuitem" @click="emitPaste">
-            <font-awesome-icon icon="paste" class="me-2" />
+            <font-awesome-icon icon="paste" />
             {{ $t("paste") }}
         </button>
         <div v-if="message" class="menu-message" role="status" aria-live="polite">{{ message }}</div>
@@ -112,9 +112,9 @@ export default {
 
 .terminal-context-menu {
     position: fixed;
-    z-index: 1080;
+    z-index: var(--layer-toast);
     min-width: 160px;
-    padding: 4px;
+    padding: var(--gap-xs);
     background-color: var(--surface-panel);
     border: 1px solid var(--line-hair);
     border-radius: var(--radius-panel);
@@ -122,9 +122,11 @@ export default {
 }
 
 .menu-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
     width: 100%;
-    padding: 6px 10px;
+    padding: var(--gap-xs) var(--gap-sm);
     background: none;
     border: none;
     border-radius: var(--radius-control);
@@ -138,8 +140,8 @@ export default {
 }
 
 .menu-message {
-    padding: 4px 10px 6px;
-    font-size: 0.8rem;
+    padding: var(--gap-xs) var(--gap-sm);
+    font-size: var(--text-xs);
     opacity: 0.8;
 }
 </style>

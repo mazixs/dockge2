@@ -41,11 +41,11 @@ export default {
 .title {
     margin: 0;
     font-size: var(--text-md);
-    font-weight: 600;
+    font-weight: var(--weight-strong);
     color: var(--text-strong);
 }
 
-// Мера строки: объяснение читается в один-два ряда, а не поперёк всего экрана
+// Мера строки: объяснение читается в один-два ряда, а не поперек всего экрана
 .hint {
     margin: 0;
     max-width: 52ch;

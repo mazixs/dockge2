@@ -3,9 +3,9 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 id="exampleModalLabel" class="modal-title">
+                    <h2 id="exampleModalLabel" class="modal-title">
                         {{ title || $t("Confirm") }}
-                    </h5>
+                    </h2>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" />
                 </div>
                 <div class="modal-body">
@@ -15,7 +15,7 @@
                     <button type="button" class="btn" :class="btnStyle" data-bs-dismiss="modal" @click="yes">
                         {{ yesText }}
                     </button>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" @click="no">
+                    <button type="button" class="btn btn-normal" data-bs-dismiss="modal" @click="no">
                         {{ noText }}
                     </button>
                 </div>

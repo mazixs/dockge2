@@ -1,42 +1,27 @@
 <template>
-    <transition name="slide-fade" appear>
-        <div>
-            <h1 v-if="isAdd" class="mb-3">{{ $t("compose") }}</h1>
-            <h1 v-else class="mb-3">
-                <!-- Инспектор остаётся тем, откуда пришли: имя стека ведёт назад -->
+    <!-- Внутри страницы стека появление дает вкладка: второй въезд наложился бы на первый -->
+    <transition name="slide-fade" :appear="!embedded" :css="!embedded">
+        <!-- На своей странице редактор - обычная страница рабочей области; внутри
+             страницы стека шаг между панелями задает сама вкладка -->
+        <div :class="{ page: !embedded }">
+            <!-- Внутри страницы стека заголовок уже есть: редактор не повторяет имя -->
+            <h1 v-if="isAdd">{{ $t("compose") }}</h1>
+            <h1 v-else-if="!embedded">
+                <!-- Инспектор остается тем, откуда пришли: имя стека ведет назад -->
                 <router-link :to="url" class="back">{{ stack.name }}</router-link>
                 <span class="file-name">/ {{ stack.composeFileName }}</span>
                 <span v-if="$root.agentCount > 1 && endpoint !== ''" class="agent-name">
                     ({{ endpointDisplay }})
                 </span>
             </h1>
-
-            <div v-if="stack.isManagedByDockge" class="mb-3">
-                <!-- Здесь только правка файла: остановить, обновить и удалить можно из инспектора -->
-                <button v-if="isEditMode" class="btn btn-primary me-2" :disabled="processing" @click="deployStack">
-                    <font-awesome-icon icon="rocket" class="me-1" />
-                    {{ $t("deployStack") }}
-                </button>
-
-                <button v-if="isEditMode" class="btn btn-normal me-2" :disabled="processing" @click="saveStack">
-                    <font-awesome-icon icon="save" class="me-1" />
-                    {{ $t("saveStackDraft") }}
-                </button>
-
-                <button v-if="!isEditMode" class="btn btn-primary me-2" :disabled="processing" @click="enableEditMode">
-                    <font-awesome-icon icon="pen" class="me-1" />
-                    {{ $t("editStack") }}
-                </button>
-
-                <button v-if="isEditMode && !isAdd" class="btn btn-normal" :disabled="processing" @click="discardStack">{{ $t("discardStack") }}</button>
-            </div>
-
-            <!-- Progress Terminal -->
-            <transition name="slide-fade" appear>
+            <!-- Ход команды. Внутри страницы стека его показывает сама страница
+                 панелью под кнопками: один вывод нельзя слушать двумя терминалами,
+                 второй отнял бы у первого имя и строки -->
+            <transition v-if="!embedded" name="slide-fade" appear>
                 <Terminal
                     v-show="showProgressTerminal"
                     ref="progressTerminal"
-                    class="mb-3 terminal"
+                    class="terminal"
                     :name="terminalName"
                     :endpoint="endpoint"
                     :rows="progressTerminalRows"
@@ -44,64 +29,124 @@
                 ></Terminal>
             </transition>
 
-            <div v-if="stack.isManagedByDockge" class="row">
-                <div class="col-lg-6">
+            <!-- Страница собрана из панелей одной анатомии: шапка с именем и действиями,
+                 тело, подпись. Отдельных заголовков между панелями нет - имя панели и
+                 есть заголовок раздела, поэтому в шапке стоит h2, как в настройках -->
+            <div v-if="stack.isManagedByDockge" :class="embedded ? 'files-stack' : 'files-grid'">
+                <div :class="embedded ? 'files-column' : 'editor-column'">
                     <!-- General -->
-                    <div v-if="isAdd">
-                        <h4 class="mb-3">{{ $t("general") }}</h4>
-                        <div class="shadow-box big-padding mb-3">
+                    <section v-if="isAdd" class="panel">
+                        <div class="panel-bar">
+                            <h2 class="panel-title"><InterfaceIcon name="sliders" />{{ $t("general") }}</h2>
+                        </div>
+                        <div class="panel-body fields">
                             <!-- Stack Name -->
-                            <div>
+                            <div class="field">
                                 <label for="name" class="form-label">{{ $t("stackName") }}</label>
                                 <input id="name" v-model="stack.name" type="text" class="form-control" required @blur="stackNameToLowercase">
                                 <div class="form-text">{{ $t("Lowercase only") }}</div>
                             </div>
 
                             <!-- Endpoint -->
-                            <div class="mt-3">
-                                <label for="name" class="form-label">{{ $t("dockgeAgent") }}</label>
-                                <select v-model="stack.endpoint" class="form-select">
+                            <div class="field">
+                                <label for="endpoint" class="form-label">{{ $t("dockgeAgent") }}</label>
+                                <select id="endpoint" v-model="stack.endpoint" class="form-select">
                                     <option v-for="(agent, agentEndpoint) in $root.agentList" :key="agentEndpoint" :value="agentEndpoint" :disabled="$root.agentStatusList[agentEndpoint] != 'online'">
                                         ({{ $root.agentStatusList[agentEndpoint] }}) {{ (agent.name !== '') ? agent.name : agent.url || $t("Current") }}
                                     </option>
                                 </select>
                             </div>
                         </div>
-                    </div>
+                    </section>
 
-                    <h4 class="mb-3">{{ stack.composeFileName }}</h4>
+                    <!-- Файл стека: шапка называет файл и откуда он взят, действия стоят
+                         рядом с ним, а подпись внизу обещает сохранность исходного текста -->
+                    <section class="panel file-card">
+                        <div class="panel-bar">
+                            <h2 class="panel-title mono"><InterfaceIcon name="file" />{{ stack.composeFileName }}</h2>
+                            <span v-if="!isAdd" class="panel-meta">{{ $t("gitUiOnServer") }}</span>
 
-                    <!-- YAML editor -->
-                    <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
-                        <code-mirror
-                            ref="editor"
-                            v-model="stack.composeYAML"
-                            :extensions="extensions"
-                            minimal
-                            wrap
-                            dark
-                            tab
-                            :disabled="!isEditMode"
-                            :hasFocus="editorFocus"
-                            @change="yamlCodeChange"
-                        />
-                    </div>
-                    <div v-if="isEditMode" class="mb-3">
-                        {{ yamlError }}
-                    </div>
+                            <button class="icon-btn" type="button" :title="$t('copyFile')" :aria-label="$t('copyFile')" @click="copyCompose">
+                                <font-awesome-icon icon="copy" />
+                            </button>
+
+                            <!-- Здесь только правка файла: остановить, обновить и удалить можно из инспектора -->
+                            <template v-if="isEditMode">
+                                <button class="btn btn-sm btn-primary" :disabled="processing" @click="deployStack">
+                                    <font-awesome-icon icon="rocket" />{{ $t("deployStack") }}
+                                </button>
+
+                                <button class="btn btn-sm btn-normal" :disabled="processing" @click="saveStack">
+                                    <font-awesome-icon icon="save" />{{ $t("saveStackDraft") }}
+                                </button>
+
+                                <button v-if="!isAdd" class="btn btn-sm btn-normal" :disabled="processing" @click="discardStack">{{ $t("discardStack") }}</button>
+                            </template>
+
+                            <button v-else class="btn btn-sm btn-primary" :disabled="processing" @click="enableEditMode">
+                                <font-awesome-icon icon="pen" />{{ $t("editStack") }}
+                            </button>
+                        </div>
+
+                        <!-- YAML editor -->
+                        <div class="editor-box" :class="{'edit-mode' : isEditMode}">
+                            <code-mirror
+                                ref="composeEditor"
+                                v-model="stack.composeYAML"
+                                :extensions="extensions"
+                                minimal
+                                wrap
+                                dark
+                                tab
+                                :disabled="!isEditMode"
+                                :hasFocus="editorFocus"
+                                @change="yamlCodeChange"
+                            />
+                        </div>
+
+                        <p class="panel-foot kept"><ShieldCheck />{{ $t("fileSourceNote") }}</p>
+                    </section>
+
+                    <!-- Ошибка разбора называет строку и причину прямо под файлом -->
+                    <p v-if="isEditMode && yamlError" class="yaml-error" role="alert">
+                        <font-awesome-icon icon="triangle-exclamation" />{{ yamlError }}
+                    </p>
 
                     <!-- A file the structured editor cannot rebuild stays in text mode -->
                     <div v-if="isEditMode && composeAnalysis && !structuredEditsEnabled && unsupportedConstructs.length > 0" class="alert alert-warning" role="alert">
-                        <font-awesome-icon icon="triangle-exclamation" class="me-1" />
+                        <font-awesome-icon icon="triangle-exclamation" />
                         {{ $t("textModeOnly", [ unsupportedConstructs.join(", ") ]) }}
                     </div>
 
-                    <!-- ENV editor -->
-                    <div v-if="isEditMode">
-                        <h4 class="mb-3">{{ activeEnvFileName }}</h4>
-                        <div class="shadow-box mb-3 editor-box" :class="{'edit-mode' : isEditMode}">
+                    <!-- Env-файл стоит рядом с compose и в чтении, и в правке: режим
+                         решает, можно ли править, а не существует ли файл на экране.
+                         Раньше он появлялся только по кнопке "Изменить", и прочитать
+                         .env было нельзя, хотя compose читался свободно -->
+                    <section v-if="envPanelVisible" class="panel file-card">
+                        <div class="panel-bar">
+                            <h2 class="panel-title mono"><InterfaceIcon name="file" />{{ activeEnvFileName }}</h2>
+                            <span v-if="!isAdd" class="panel-meta">{{ $t("gitUiOnServer") }}</span>
+
+                            <button class="icon-btn" type="button" :title="$t('copyFile')" :aria-label="$t('copyFile')" @click="copyEnv">
+                                <font-awesome-icon icon="copy" />
+                            </button>
+
+                            <!-- Правка включается и отсюда: режим один на экран, но кнопка
+                                 стоит у того файла, который человек читает. Без нее env
+                                 выглядел файлом, который вообще нельзя изменить. Акцент
+                                 остается у compose: главное действие экрана одно -->
+                            <button v-if="!isEditMode" class="btn btn-sm btn-normal" :disabled="processing" @click="enableEditMode">
+                                <font-awesome-icon icon="pen" />{{ $t("editStack") }}
+                            </button>
+                        </div>
+
+                        <!-- Пустой файл говорит об этом словами: черный прямоугольник с одной
+                             строкой читался как сбой загрузки, а не как файл без переменных -->
+                        <p v-if="!isEditMode && envIsEmpty" class="panel-body empty-file">{{ $t("envFileEmpty") }}</p>
+
+                        <div v-show="isEditMode || !envIsEmpty" class="editor-box" :class="{'edit-mode' : isEditMode}">
                             <code-mirror
-                                ref="editor"
+                                ref="envEditor"
                                 v-model="stack.composeENV"
                                 :extensions="extensionsEnv"
                                 minimal
@@ -113,102 +158,92 @@
                                 @change="yamlCodeChange"
                             />
                         </div>
-                    </div>
 
-                    <!-- Containers -->
-                    <h4 v-if="isEditMode" class="mb-3">{{ $t("container", 2) }}</h4>
+                        <p v-if="isEditMode || !envIsEmpty" class="panel-foot kept"><ShieldCheck />{{ $t("fileSourceNote") }}</p>
+                    </section>
 
-                    <div v-if="isEditMode && structuredEditsEnabled" class="input-group mb-3">
-                        <input
-                            v-model="newContainerName"
-                            :placeholder="$t(`New Container Name...`)"
-                            class="form-control"
-                            @keyup.enter="addContainer"
-                        />
-                        <button class="btn btn-primary" @click="addContainer">
-                            {{ $t("addContainer") }}
-                        </button>
-                    </div>
+                    <!-- Контейнеры: один список в одной панели. Каждый сервис - строка,
+                         строка добавления стоит последней, где и появится новый сервис -->
+                    <section v-if="isEditMode" class="panel service-list">
+                        <div class="panel-bar">
+                            <h2 class="panel-title"><InterfaceIcon name="box" />{{ $t("container", 2) }}</h2>
+                            <span class="panel-meta">{{ Object.keys(jsonConfig.services ?? {}).length }}</span>
+                        </div>
 
-                    <div v-if="isEditMode" ref="containerList">
-                        <Container
-                            v-for="(service, name) in jsonConfig.services"
-                            :key="name"
-                            :name="name"
-                            :is-edit-mode="isEditMode && structuredEditsEnabled"
-                            :first="name === Object.keys(jsonConfig.services)[0]"
-                            :serviceStatus="serviceStatusList[name]"
-                            :dockerStats="dockerStats"
-                            :processing="processing"
-                            @start-service="startService"
-                            @stop-service="stopService"
-                            @restart-service="restartService"
-                        />
-                    </div>
+                        <div ref="containerList" class="service-rows">
+                            <Container
+                                v-for="(service, name) in jsonConfig.services"
+                                :key="name"
+                                :name="name"
+                                :is-edit-mode="isEditMode && structuredEditsEnabled"
+                                :first="name === Object.keys(jsonConfig.services)[0]"
+                                :serviceStatus="serviceStatusList[name]"
+                                :dockerStats="dockerStats"
+                                :processing="processing"
+                                @start-service="startService"
+                                @stop-service="stopService"
+                                @restart-service="restartService"
+                            />
+                        </div>
 
-                    <button v-if="false && isEditMode && jsonConfig.services && Object.keys(jsonConfig.services).length > 0" class="btn btn-normal mb-3" @click="addContainer">{{ $t("addContainer") }}</button>
+                        <div v-if="structuredEditsEnabled" class="panel-body add-service">
+                            <input
+                                v-model="newContainerName"
+                                :placeholder="$t(`New Container Name...`)"
+                                :aria-label="$t('addContainer')"
+                                class="form-control"
+                                @keyup.enter="addContainer"
+                            />
+                            <button class="btn btn-sm btn-normal" :disabled="!newContainerName" @click="addContainer">
+                                <font-awesome-icon icon="plus" />{{ $t("addContainer") }}
+                            </button>
+                        </div>
+                    </section>
 
-                    <!-- General -->
-                    <div v-if="isEditMode && structuredEditsEnabled">
-                        <h4 class="mb-3">{{ $t("extra") }}</h4>
-                        <div class="shadow-box big-padding mb-3">
+                    <!-- Extra -->
+                    <section v-if="isEditMode && structuredEditsEnabled" class="panel">
+                        <div class="panel-bar">
+                            <h2 class="panel-title"><InterfaceIcon name="sliders" />{{ $t("extra") }}</h2>
+                        </div>
+                        <div class="panel-body fields">
                             <!-- URLs -->
-                            <div class="mb-4">
-                                <label class="form-label">
-                                    {{ $t("url", 2) }}
-                                </label>
+                            <div class="field">
+                                <label class="form-label">{{ $t("url", 2) }}</label>
                                 <ArrayInput name="urls" :display-name="$t('url')" placeholder="https://" object-type="x-dockge" />
                             </div>
                         </div>
-                    </div>
-                </div>
-                <div class="col-lg-6">
-                    <!-- Files of the stack directory -->
-                    <div v-if="!isAdd && stack.isManagedByDockge && fileInventory">
-                        <h4 class="mb-3">{{ $t("stackFiles") }}</h4>
-                        <StackFilesEditor
-                            :inventory="fileInventory"
-                            :disabled="processing"
-                            @save="saveFileSelection"
-                        />
-                    </div>
+                    </section>
 
-                    <!-- Compose secrets stored as files -->
-                    <div v-if="!isAdd && stack.isManagedByDockge && fileInventory">
-                        <h4 class="mb-3">{{ $t("secrets") }}</h4>
-                        <SecretEditor
-                            :stackName="stack.name"
-                            :endpoint="endpoint"
-                            :secretFiles="fileInventory.secretFiles"
-                            :services="serviceNames"
-                            :disabled="processing"
-                            @updated="onSecretsUpdated"
-                        />
-                    </div>
-
-                    <div v-if="isEditMode && structuredEditsEnabled">
-                        <!-- Volumes -->
-                        <div v-if="false">
-                            <h4 class="mb-3">{{ $t("volume", 2) }}</h4>
-                            <div class="shadow-box big-padding mb-3">
-                            </div>
+                    <!-- Networks -->
+                    <section v-if="isEditMode && structuredEditsEnabled" class="panel">
+                        <div class="panel-bar">
+                            <h2 class="panel-title"><InterfaceIcon name="network" />{{ $t("network", 2) }}</h2>
                         </div>
-
-                        <!-- Networks -->
-                        <h4 class="mb-3">{{ $t("network", 2) }}</h4>
-                        <div class="shadow-box big-padding mb-3">
+                        <div class="panel-body">
                             <NetworkInput />
                         </div>
-                    </div>
+                    </section>
+                </div>
+                <div :class="embedded ? 'files-column' : 'editor-column'">
+                    <!-- Files of the stack directory -->
+                    <StackFilesEditor
+                        v-if="!isAdd && stack.isManagedByDockge && fileInventory"
+                        :inventory="fileInventory"
+                        :disabled="processing"
+                        @save="saveFileSelection"
+                        @create-env="createEnvFile"
+                    />
 
-                    <!-- <div class="shadow-box big-padding mb-3">
-                        <div class="mb-3">
-                            <label for="name" class="form-label"> Search Templates</label>
-                            <input id="name" v-model="name" type="text" class="form-control" placeholder="Search..." required>
-                        </div>
-
-                        <prism-editor v-if="false" v-model="yamlConfig" class="yaml-editor" :highlight="highlighter" line-numbers @input="yamlCodeChange"></prism-editor>
-                    </div>-->
+                    <!-- Compose secrets stored as files -->
+                    <SecretEditor
+                        v-if="!isAdd && stack.isManagedByDockge && fileInventory"
+                        :stackName="stack.name"
+                        :endpoint="endpoint"
+                        :secretFiles="fileInventory.secretFiles"
+                        :services="serviceNames"
+                        :disabled="processing"
+                        @updated="onSecretsUpdated"
+                    />
                 </div>
             </div>
 
@@ -237,6 +272,8 @@ import { analyseComposeSource, applyStructuredEdit, canEditStructurally } from "
 import NetworkInput from "../components/NetworkInput.vue";
 import StackFilesEditor from "../components/StackFilesEditor.vue";
 import SecretEditor from "../components/SecretEditor.vue";
+import InterfaceIcon from "../components/InterfaceIcon.vue";
+import ShieldCheck from "../components/ShieldCheck.vue";
 import dotenv from "dotenv";
 import { ref } from "vue";
 
@@ -262,6 +299,8 @@ export default {
         CodeMirror,
         StackFilesEditor,
         SecretEditor,
+        InterfaceIcon,
+        ShieldCheck,
     },
     beforeRouteUpdate(to, from, next) {
         this.exitConfirm(next);
@@ -269,6 +308,27 @@ export default {
     beforeRouteLeave(to, from, next) {
         this.exitConfirm(next);
     },
+    props: {
+        /** Редактор показан вкладкой страницы стека, а не отдельным экраном */
+        embedded: {
+            type: Boolean,
+            default: false,
+        },
+
+        /** Стек, чьи файлы правим: во вкладке он приходит от страницы, а не из адреса */
+        stackName: {
+            type: String,
+            default: "",
+        },
+
+        /** Агент стека, когда редактор встроен */
+        endpointName: {
+            type: String,
+            default: "",
+        },
+    },
+    // Страница стека слушает ход команды: ее панель показывает вывод редактора
+    emits: [ "run-start", "run-end" ],
     setup() {
         const editorFocus = ref(false);
 
@@ -359,7 +419,7 @@ export default {
         },
 
         isAdd() {
-            return this.$route.path === "/compose" && !this.submitted;
+            return !this.embedded && this.$route.path === "/compose" && !this.submitted;
         },
 
         /**
@@ -403,6 +463,28 @@ export default {
         },
 
         /**
+         * Whether the shown env file has no content yet
+         * @returns {boolean} True when the file is empty or only whitespace
+         */
+        envIsEmpty() {
+            return (this.stack.composeENV ?? "").trim() === "";
+        },
+
+        /**
+         * Whether the env panel belongs on the page.
+         * While editing it is always there: an empty `.env` is a draft the save can
+         * create. While viewing, a file that is not on disk would be an empty promise.
+         * @returns {boolean} True when the panel is shown
+         */
+        envPanelVisible() {
+            if (this.isAdd || this.isEditMode) {
+                return true;
+            }
+
+            return (this.fileInventory?.envFileNames ?? []).includes(this.activeEnvFileName);
+        },
+
+        /**
          * Services declared in the compose file, used for secret bindings
          * @returns {Array<string>} Service names
          */
@@ -422,7 +504,7 @@ export default {
         },
 
         endpoint() {
-            return this.stack.endpoint || this.$route.params.endpoint || "";
+            return this.stack.endpoint || this.endpointName || this.$route.params.endpoint || "";
         },
 
         /** Куда возвращаться после сохранения: инспектор стека, а не редактор */
@@ -487,6 +569,10 @@ export default {
         }
     },
     mounted() {
+        if (!this.$root.canManageStacks) {
+            this.$router.replace("/");
+            return;
+        }
         if (this.isAdd) {
             this.processing = false;
             this.isEditMode = true;
@@ -519,7 +605,7 @@ export default {
             this.yamlCodeChange();
 
         } else {
-            this.stack.name = this.$route.params.stackName;
+            this.stack.name = this.embedded ? this.stackName : this.$route.params.stackName;
             this.loadStack();
         }
 
@@ -590,6 +676,27 @@ export default {
         },
 
         /**
+         * Create an empty env file in the stack directory.
+         * Only the file appears. Which files compose interpolates and which one the
+         * editor shows stay a separate, explicit choice: folding them into one action
+         * would swap the text under an open editor and write it back into the new file.
+         * @param {string} fileName Name typed in the file selection panel
+         * @returns {void}
+         */
+        createEnvFile(fileName) {
+            this.processing = true;
+
+            this.$root.emitAgent(this.endpoint, "saveEnvFile", this.stack.name, fileName, "", (res) => {
+                this.processing = false;
+                this.$root.toastRes(res);
+
+                if (res.ok) {
+                    this.requestStackFiles();
+                }
+            });
+        },
+
+        /**
          * Refresh the secret list after an authorised secret action
          * @param {Array<object>} secretFiles New metadata
          * @returns {void}
@@ -649,8 +756,35 @@ export default {
             clearTimeout(serviceStatusTimeout);
             clearTimeout(dockerStatsTimeout);
 
-            // Вывод стека живёт в доке: он сам решает, когда отписаться, поэтому
-            // уход с редактора больше не обрывает чужие логи
+            // Вывод стека живет во вкладке журнала: она сама решает, когда
+            // отписаться, поэтому уход с файлов не обрывает чужие логи
+        },
+
+        /**
+         * Скопировать текст env-файла как он есть на экране
+         * @returns {Promise<void>}
+         */
+        async copyEnv() {
+            try {
+                await navigator.clipboard.writeText(this.stack.composeENV ?? "");
+                this.$root.toastSuccess(this.$t("copiedToClipboard"));
+            } catch (e) {
+                this.$root.toastError(e.message);
+            }
+        },
+
+        /**
+         * Скопировать текст compose как он есть на экране: без пересборки YAML,
+         * иначе в буфер ушел бы не тот текст, что лежит на сервере
+         * @returns {Promise<void>}
+         */
+        async copyCompose() {
+            try {
+                await navigator.clipboard.writeText(this.stack.composeYAML ?? "");
+                this.$root.toastSuccess(this.$t("copiedToClipboard"));
+            } catch (e) {
+                this.$root.toastError(e.message);
+            }
         },
 
         bindTerminal() {
@@ -706,9 +840,13 @@ export default {
             }
 
             this.bindTerminal();
+            // Вывод развертывания идет в терминал прогресса. Во вкладке файлов его
+            // показывает страница стека, поэтому она должна узнать о начале
+            this.$emit("run-start", "deployStack");
 
             this.$root.emitAgent(this.stack.endpoint, "deployStack", this.stack.name, this.stack.composeYAML, this.stack.composeENV, this.isAdd, (res) => {
                 this.processing = false;
+                this.$emit("run-end", res?.ok ? "ok" : "failed");
                 this.$root.toastRes(res);
 
                 if (res.ok) {
@@ -897,9 +1035,11 @@ export default {
 
         startService(serviceName) {
             this.processing = true;
+            this.$emit("run-start", "startService");
 
             this.$root.emitAgent(this.endpoint, "startService", this.stack.name, serviceName, (res) => {
                 this.processing = false;
+                this.$emit("run-end", res?.ok ? "ok" : "failed");
                 this.$root.toastRes(res);
 
                 if (res.ok) {
@@ -910,9 +1050,11 @@ export default {
 
         stopService(serviceName) {
             this.processing = true;
+            this.$emit("run-start", "stopService");
 
             this.$root.emitAgent(this.endpoint, "stopService", this.stack.name, serviceName, (res) => {
                 this.processing = false;
+                this.$emit("run-end", res?.ok ? "ok" : "failed");
                 this.$root.toastRes(res);
 
                 if (res.ok) {
@@ -923,9 +1065,11 @@ export default {
 
         restartService(serviceName) {
             this.processing = true;
+            this.$emit("run-start", "restartService");
 
             this.$root.emitAgent(this.endpoint, "restartService", this.stack.name, serviceName, (res) => {
                 this.processing = false;
+                this.$emit("run-end", res?.ok ? "ok" : "failed");
                 this.$root.toastRes(res);
 
                 if (res.ok) {
@@ -942,7 +1086,7 @@ export default {
 // иначе редактор набран не тем же голосом, что список и инспектор.
 h1 {
     font-size: var(--text-xl);
-    font-weight: 600;
+    font-weight: var(--weight-strong);
     letter-spacing: -.01em;
 
     .back {
@@ -957,18 +1101,88 @@ h1 {
     }
 }
 
-h4 {
-    font-size: var(--text-md);
-    font-weight: 600;
-    color: var(--text-strong);
+// Внутри страницы стека панели стоят одной колонкой с общим шагом; на своей
+// странице редактор держит две колонки bootstrap
+.files-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
 }
 
-.form-label {
+.files-column {
+    display: contents;
+}
+
+// На своей странице редактор держит две колонки: слева правка, справа файлы
+.files-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap-lg);
+}
+
+.editor-column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+    min-width: 0;
+}
+
+.fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-md);
+}
+
+@media (max-width: 992px) {
+    .files-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+// Строка добавления сервиса стоит под списком, отделена линией как еще одна строка
+.add-service {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    border-top: 1px solid var(--line-hair);
+
+    .form-control {
+        flex: 1 1 200px;
+        max-width: 360px;
+    }
+}
+
+.service-list .service-rows:empty + .add-service {
+    border-top: 0;
+}
+
+// Ошибка разбора: красным словом под файлом, без рамки - это не панель
+.yaml-error {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap-sm);
+    margin: 0;
+    color: var(--state-failed);
     font-size: var(--text-sm);
+    line-height: var(--line-sm);
+    overflow-wrap: anywhere;
+}
+
+.alert {
+    margin: 0;
+}
+
+// Пустой файл - строка на поверхности панели, а не консольная подложка: место,
+// где нечего читать, не должно выглядеть как погасший экран
+.empty-file {
+    margin: 0;
     color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
 }
 
 .form-text {
+    margin: 0;
     font-size: var(--text-xs);
     color: var(--text-faint);
 }
@@ -977,29 +1191,32 @@ h4 {
     height: 200px;
 }
 
-// Панель редактора: тот же радиус, что у остальных панелей, но поверхность
-// консольная в обеих темах - подсветка синтаксиса CodeMirror нарисована для
-// тёмного фона, и на белом её красные ключи не проходят порог контраста
-.editor-box {
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    border-radius: var(--radius-panel);
-    background-color: var(--surface-console) !important;
-    border: 1px solid var(--line-hair);
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-height);
+    height: var(--control-height);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: none;
+    color: var(--text-muted);
+    transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+
+    &:hover {
+        background-color: var(--surface-raised);
+        color: var(--text-strong);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
 }
 
 .agent-name {
     font-size: var(--text-sm);
     color: var(--text-faint);
-}
-
-// Предупреждение о текстовом режиме - та же полоса внимания, что в инспекторе
-.alert-warning {
-    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
-    background-color: color-mix(in srgb, var(--state-attention) 8%, transparent);
-    border-radius: var(--radius-panel);
-    color: var(--text-strong);
-    font-size: var(--text-base);
 }
 
 // Видимый фокус нужен и кнопкам страницы: глобальные правила .btn его гасят

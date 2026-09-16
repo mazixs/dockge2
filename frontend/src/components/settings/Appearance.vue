@@ -1,75 +1,42 @@
 <template>
-    <div>
-        <div class="my-4">
-            <label for="language" class="form-label">
-                {{ $t("Language") }}
-            </label>
-            <select id="language" v-model="$root.language" class="form-select">
-                <option
-                    v-for="language in availableLanguages"
-                    :key="language.code"
-                    :value="language.code"
-                >
-                    {{ language.name }}
-                </option>
-            </select>
+    <!-- Внешний вид - одна панель: язык и тема меняются сразу, поэтому кнопки
+         сохранения у раздела нет -->
+    <section class="panel">
+        <div class="panel-bar">
+            <h2 class="panel-title"><InterfaceIcon name="sliders" />{{ $t("Appearance") }}</h2>
         </div>
-        <div v-show="true" class="my-4">
-            <label for="timezone" class="form-label">{{ $t("Theme") }}</label>
-            <div>
-                <div
-                    class="btn-group"
-                    role="group"
-                    aria-label="Basic checkbox toggle button group"
-                >
-                    <input
-                        id="btncheck1"
-                        v-model="$root.userTheme"
-                        type="radio"
-                        class="btn-check"
-                        name="theme"
-                        autocomplete="off"
-                        value="light"
-                    />
-                    <label class="btn btn-outline-primary" for="btncheck1">
-                        {{ $t("Light") }}
-                    </label>
 
-                    <input
-                        id="btncheck2"
-                        v-model="$root.userTheme"
-                        type="radio"
-                        class="btn-check"
-                        name="theme"
-                        autocomplete="off"
-                        value="dark"
-                    />
-                    <label class="btn btn-outline-primary" for="btncheck2">
-                        {{ $t("Dark") }}
-                    </label>
+        <div class="panel-body form-stack">
+            <div class="field">
+                <label for="language" class="form-label">{{ $t("Language") }}</label>
+                <select id="language" v-model="$root.language" class="form-select">
+                    <option
+                        v-for="language in availableLanguages"
+                        :key="language.code"
+                        :value="language.code"
+                    >
+                        {{ language.name }}
+                    </option>
+                </select>
+            </div>
 
-                    <input
-                        id="btncheck3"
-                        v-model="$root.userTheme"
-                        type="radio"
-                        class="btn-check"
-                        name="theme"
-                        autocomplete="off"
-                        value="auto"
-                    />
-                    <label class="btn btn-outline-primary" for="btncheck3">
-                        {{ $t("Auto") }}
-                    </label>
-                </div>
+            <div class="field">
+                <span class="form-label">{{ $t("Theme") }}</span>
+                <ThemePicker />
+                <p class="form-text">{{ $t("familiarThemeHint") }}</p>
             </div>
         </div>
-    </div>
+    </section>
 </template>
 
 <script>
+import ThemePicker from "../ThemePicker.vue";
+import InterfaceIcon from "../InterfaceIcon.vue";
 import { availableLanguages } from "../../i18n";
 
 export default {
+    components: { ThemePicker,
+        InterfaceIcon },
     computed: {
         /**
          * Languages offered in the selector
@@ -83,17 +50,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-@use "../../styles/vars.scss" as *;
-
-.btn-check:active + .btn-outline-primary,
-.btn-check:checked + .btn-outline-primary,
-.btn-check:hover + .btn-outline-primary {
-    color: var(--text-on-accent);
-}
-
-// Список тем: цвет приходит токеном, поэтому правило одно на обе темы
-.list-group-item {
-    background-color: var(--surface-panel);
-    color: var(--text-strong);
+// В форме выбор темы стоит рядом с выбором языка и занимает ту же ширину:
+// два одинаковых контрола разной ширины читались как разные вещи
+.theme-picker :deep(select) {
+    width: 100%;
 }
 </style>

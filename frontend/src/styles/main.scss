@@ -13,19 +13,19 @@
 @import "bootstrap-vue-next/dist/bootstrap-vue-next.css";
 
 // Мост к Bootstrap. Свои компоненты Bootstrap рисует собственными переменными,
-// поэтому тему ему задаёт одна таблица соответствий с нашими токенами: пока она
+// поэтому тему ему задает одна таблица соответствий с нашими токенами: пока она
 // есть, ни одному правилу не нужен блок `.dark`, потому что токен меняется сам.
 //
-// Селектор именно `body`, а не `:root`: тёмные токены объявлены на `body.dark`,
+// Селектор именно `body`, а не `:root`: темные токены объявлены на `body.dark`,
 // то есть на потомке, поэтому мост на `:root` вычислился бы со светлыми
-// значениями и заголовки в тёмной теме получили бы почти чёрный цвет.
+// значениями и заголовки в темной теме получили бы почти черный цвет.
 body {
     --bs-body-font-family: var(--font-ui);
     --bs-body-font-size: var(--text-base);
     --bs-font-monospace: var(--font-mono);
 
     // Панель, а не страница: из --bs-body-bg берут фон поля, модальное окно и
-    // выпадающий список, а фон самой страницы задаётся ниже на body.
+    // выпадающий список, а фон самой страницы задается ниже на body.
     --bs-body-bg: var(--surface-panel);
     --bs-body-color: var(--text-strong);
     --bs-emphasis-color: var(--text-strong);
@@ -65,12 +65,31 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Шкала заголовков. Одна на приложение: имя страницы, имя раздела, имя группы
+ * внутри раздела и подпись к группе. Дальше говорят шапки панелей, поэтому
+ * пятого размера в системе нет - h5 совпадает с подписью.
+ */
+
 h1 {
     font-size: var(--text-xl);
+    line-height: var(--line-xl);
 }
 
 h2 {
     font-size: var(--text-lg);
+    line-height: var(--line-lg);
+}
+
+h3 {
+    font-size: var(--text-md);
+    line-height: var(--line-md);
+}
+
+h4, h5, h6 {
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+    font-weight: var(--weight-medium);
 }
 
 mark, .mark {
@@ -122,15 +141,264 @@ html {
  * Панели
  */
 
-.shadow-box {
+/*
+ * Страница рабочей области. Отступ по краям дает колонка, поэтому страница
+ * отвечает только за шаг между именем страницы и панелями под ним.
+ */
+
+.page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+    min-width: 0;
+
+    > h1 {
+        margin: 0;
+    }
+}
+
+// Страница из одной консоли: панель занимает рабочую область до низа. Высота,
+// заданная числом строк, оставляла под панелью пустую четверть экрана, а на
+// высоком мониторе - половину; столько вывода, сколько влезает, полезнее пустоты
+.page-fill {
+    flex: 1;
+
+    > .panel {
+        flex: 1;
+    }
+
+    .panel-console {
+        flex: 1;
+        min-height: 280px;
+    }
+}
+
+// Шапка страницы: имя слева, действия страницы справа, пояснение под именем
+.page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--gap-md);
+
+    h1 {
+        margin: 0;
+    }
+}
+
+.page-lede {
+    margin: var(--gap-xs) 0 0;
+    max-width: 62ch;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+}
+
+/*
+ * Вход и первый запуск - один экран: узкая колонка по центру, марка сверху,
+ * имя экрана, одна строка объяснения и форма из тех же полей, что в настройках.
+ * Плавающие подписи Bootstrap здесь не нужны: подпись стоит над полем, как
+ * везде в системе.
+ */
+
+// Кроме карточки на экране входа ничего нет, поэтому она стоит посреди области
+// под шапкой: прижатая к верху форма оставляла под собой пустое поле в пол-экрана
+.auth-screen {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100dvh - var(--header-height));
+    padding: var(--gap-3xl) var(--gap-lg);
+}
+
+.auth-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+    width: 100%;
+    max-width: 360px;
+}
+
+.auth-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap-sm);
+    color: var(--text-strong);
+    font-size: var(--text-lg);
+    line-height: var(--line-lg);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--tracking-title);
+}
+
+.auth-head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+    text-align: center;
+
+    h1 {
+        margin: 0;
+        font-size: var(--text-lg);
+        line-height: var(--line-lg);
+    }
+}
+
+.auth-lede {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+}
+
+// Форма входа - та же колонка полей, но действие занимает всю ширину карточки:
+// на этом экране оно одно и промахнуться по нему нельзя
+.auth-form {
+    width: 100%;
+    max-width: none;
+
+    .btn {
+        width: 100%;
+    }
+
+    .alert {
+        margin: 0;
+    }
+}
+
+/*
+ * Панель рабочей области. Файл, выбор файлов, секреты, журнал, терминал и
+ * источник собраны из одной анатомии: рамка, шапка на поверхности панели,
+ * тело, подпись. Шапки одной высоты стоят на одной линии, поэтому при смене
+ * вкладки взгляд не перестраивается. Панели не вкладываются друг в друга:
+ * список внутри панели - строки под тонкими линиями.
+ */
+
+.panel {
+    // Шапка вмещает контрол и по отступу сверху и снизу
+    --panel-bar-height: calc(var(--control-height) + var(--gap-sm));
+
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
     background-color: var(--surface-panel);
     border: 1px solid var(--line-hair);
     border-radius: var(--radius-panel);
-    box-shadow: var(--shadow-panel);
-    padding: var(--gap-md);
+    overflow: hidden;
+}
 
-    &.big-padding {
-        padding: var(--gap-lg);
+.panel-bar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-sm);
+    min-height: var(--panel-bar-height);
+    padding: var(--gap-xs) var(--gap-md);
+    border-bottom: 1px solid var(--line-hair);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+}
+
+// Имя объекта со значком его вида; имя файла набрано моноширинным.
+// Размер и поля задает шапка, а не уровень заголовка: `h2` приносит с собой
+// размер и нижнее поле браузера, и одна и та же шапка выходила то в 14, то в 22 px
+.panel-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-strong);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+    font-weight: var(--weight-medium);
+    overflow-wrap: anywhere;
+
+    > svg {
+        flex: none;
+        color: var(--text-muted);
+    }
+
+    &.mono {
+        font-family: var(--font-mono);
+        font-weight: var(--weight-regular);
+    }
+}
+
+// Откуда объект или сколько его: тихая подпись у правого края, действия идут следом
+.panel-meta {
+    margin-left: auto;
+    color: var(--text-faint);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+
+    // До действия шаг больше, чем между действиями: иначе счет у правого края
+    // читался как подпись к соседней кнопке, а не как факт о панели
+    + .btn {
+        margin-left: var(--gap-sm);
+    }
+}
+
+.panel-body {
+    padding: var(--gap-md);
+}
+
+// Список внутри панели: строки под тонкими линиями вместо вложенных карточек.
+// Линия разделяет строки между собой, поэтому у последней она остается только
+// тогда, когда под списком стоит еще один блок панели: иначе она удвоила бы рамку
+.panel-rows {
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gap-sm) var(--gap-md);
+    margin: 0;
+    padding: var(--gap-sm) var(--gap-md);
+    border-bottom: 1px solid var(--line-hair);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+}
+
+.panel-rows:last-child > .panel-row:last-child {
+    border-bottom: 0;
+}
+
+// Консоль внутри панели: темная поверхность в обеих темах, рамку дает панель
+// Консольная поверхность держит текст на отступе от рамки: строки, прижатые
+// к линии панели, читались как обрезанные
+.panel-console {
+    padding: var(--gap-sm) var(--gap-md);
+    background-color: var(--surface-console);
+    overflow: hidden;
+}
+
+// Подпись отвечает на немой вопрос о панели. Щит - единственный цветной знак
+// в ней: он обещает, что исходный текст сохраняется
+.panel-foot {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--gap-sm);
+    margin: 0;
+    padding: var(--gap-sm) var(--gap-md);
+    border-top: 1px solid var(--line-hair);
+    color: var(--text-faint);
+    font-size: var(--text-xs);
+    line-height: var(--line-xs);
+
+    > svg {
+        flex: none;
+        color: var(--text-faint);
+    }
+
+    &.kept > svg {
+        color: var(--state-running);
     }
 }
 
@@ -150,6 +418,14 @@ html {
     box-shadow: var(--shadow-panel);
 }
 
+// Имя окна звучит так же, как имя панели: один голос на всю систему
+.modal-title {
+    margin: 0;
+    font-size: var(--text-md);
+    line-height: var(--line-md);
+    font-weight: var(--weight-medium);
+}
+
 .dropdown-menu {
     --bs-dropdown-bg: var(--surface-panel);
     --bs-dropdown-color: var(--text-strong);
@@ -159,20 +435,24 @@ html {
     --bs-dropdown-link-color: var(--text-strong);
     --bs-dropdown-link-hover-color: var(--text-strong);
     --bs-dropdown-link-hover-bg: var(--surface-raised);
-    --bs-dropdown-link-active-color: var(--text-on-accent);
-    --bs-dropdown-link-active-bg: var(--accent);
+    // Текущий пункт отмечается так же, как строка в рейке и раздел настроек:
+    // мягким акцентом. Сплошная заливка на белом листе меню читалась как выделение
+    // мышью, а не как "вы уже здесь"
+    --bs-dropdown-link-active-color: var(--accent-text);
+    --bs-dropdown-link-active-bg: var(--accent-soft);
 }
 
-.list-group {
-    --bs-list-group-bg: var(--surface-panel);
-    --bs-list-group-color: var(--text-strong);
-    --bs-list-group-border-color: var(--line-hair);
-    --bs-list-group-border-radius: var(--radius-panel);
-    --bs-list-group-action-hover-bg: var(--surface-raised);
-    --bs-list-group-action-hover-color: var(--text-strong);
-    --bs-list-group-active-bg: var(--accent);
-    --bs-list-group-active-border-color: var(--accent);
-    --bs-list-group-active-color: var(--text-on-accent);
+// Значок отстоит от подписи так же, как в кнопке: расстояние - свойство
+// системы, а не утилита в шаблоне
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+
+    > svg {
+        flex: none;
+        color: var(--text-muted);
+    }
 }
 
 .table {
@@ -186,7 +466,7 @@ html {
 }
 
 /*
- * Кнопки. Геометрия одна на все виды, а цвет задаётся видом ниже: у `.btn` и
+ * Кнопки. Геометрия одна на все виды, а цвет задается видом ниже: у `.btn` и
  * `.btn-primary` одна специфичность, поэтому вид перебивает общий случай только
  * порядком в файле.
  */
@@ -203,22 +483,34 @@ html {
     --bs-btn-active-color: var(--text-strong);
     --bs-btn-active-bg: var(--surface-sunken);
     --bs-btn-active-border-color: var(--line-control);
+    // Выключенное действие выглядит одинаково у всех видов кнопок: у недоступного
+    // действия нет веса, и заливка вида ввела бы в заблуждение. Прозрачность
+    // Bootstrap отменена: цвет задают токены, иначе контраст надписи зависит
+    // от того, что оказалось под кнопкой
     --bs-btn-disabled-color: var(--text-faint);
     --bs-btn-disabled-bg: transparent;
     --bs-btn-disabled-border-color: var(--line-hair);
+    --bs-btn-disabled-opacity: 1;
     --bs-btn-box-shadow: none;
     --bs-btn-active-shadow: none;
 
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: var(--gap-xs);
     min-height: var(--control-height);
     padding-left: var(--gap-lg);
     padding-right: var(--gap-lg);
+
+    // Расстояние между значком и надписью дает сама кнопка: отступы-утилиты
+    // Bootstrap внутри нее ничего не решают и только расходятся между экранами
+    > .me-1, > .me-2, > .ms-1, > .ms-2 {
+        margin: 0;
+    }
 }
 
 // Таблетки в системе отменены: пилюля осталась только у бейджа состояния и
-// счётчика, поэтому мелкая кнопка берёт тот же радиус, что обычная.
+// счетчика, поэтому мелкая кнопка берет тот же радиус, что обычная.
 .btn-sm, .btn-group-sm > .btn {
     --bs-btn-border-radius: var(--radius-control);
     --bs-btn-font-size: var(--text-sm);
@@ -237,9 +529,6 @@ html {
     --bs-btn-active-color: var(--text-on-accent);
     --bs-btn-active-bg: var(--accent);
     --bs-btn-active-border-color: var(--accent-text);
-    --bs-btn-disabled-color: var(--text-on-accent);
-    --bs-btn-disabled-bg: var(--accent);
-    --bs-btn-disabled-border-color: var(--accent);
 }
 
 .btn-outline-primary {
@@ -252,25 +541,6 @@ html {
     --bs-btn-active-color: var(--accent-text);
     --bs-btn-active-bg: var(--accent-soft);
     --bs-btn-active-border-color: var(--accent-text);
-    --bs-btn-disabled-color: var(--text-faint);
-    --bs-btn-disabled-border-color: var(--line-hair);
-}
-
-// Опасное действие: граница и текст состояния отказа, фон остаётся прозрачным,
-// чтобы красная плашка не притягивала палец раньше, чем прочитана надпись.
-.btn-danger {
-    --bs-btn-color: var(--state-failed);
-    --bs-btn-bg: transparent;
-    --bs-btn-border-color: var(--state-failed);
-    --bs-btn-hover-color: var(--state-failed);
-    --bs-btn-hover-bg: var(--surface-raised);
-    --bs-btn-hover-border-color: var(--state-failed);
-    --bs-btn-active-color: var(--state-failed);
-    --bs-btn-active-bg: var(--surface-sunken);
-    --bs-btn-active-border-color: var(--state-failed);
-    --bs-btn-disabled-color: var(--text-faint);
-    --bs-btn-disabled-bg: transparent;
-    --bs-btn-disabled-border-color: var(--line-hair);
 }
 
 .btn-warning {
@@ -297,8 +567,48 @@ html {
     --bs-btn-active-border-color: var(--line-control);
 }
 
+// Серый набор Bootstrap - та же обычная кнопка: два вида одного веса в одном
+// интерфейсе читались бы как разные по важности.
+.btn-outline-secondary {
+    --bs-btn-color: var(--text-strong);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--line-control);
+    --bs-btn-hover-color: var(--text-strong);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--line-control);
+    --bs-btn-active-color: var(--text-strong);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--line-control);
+}
+
+// Красная заливка остается только за последним шагом в окне подтверждения;
+// в строках и формах опасное действие говорит словом - `.btn-danger-text`.
+.btn-danger {
+    --bs-btn-color: var(--text-on-accent);
+    --bs-btn-bg: var(--state-failed);
+    --bs-btn-border-color: var(--state-failed);
+    --bs-btn-hover-color: var(--text-on-accent);
+    --bs-btn-hover-bg: var(--state-failed);
+    --bs-btn-hover-border-color: var(--text-strong);
+    --bs-btn-active-color: var(--text-on-accent);
+    --bs-btn-active-bg: var(--state-failed);
+    --bs-btn-active-border-color: var(--text-strong);
+}
+
+.btn-outline-danger {
+    --bs-btn-color: var(--state-failed);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--line-control);
+    --bs-btn-hover-color: var(--state-failed);
+    --bs-btn-hover-bg: var(--surface-raised);
+    --bs-btn-hover-border-color: var(--line-control);
+    --bs-btn-active-color: var(--state-failed);
+    --bs-btn-active-bg: var(--surface-sunken);
+    --bs-btn-active-border-color: var(--line-control);
+}
+
 // `.btn-normal` - обычная кнопка форка: она стоит в десятках компонентов, поэтому
-// имя сохранено, а вид приведён к контракту обычной кнопки.
+// имя сохранено, а вид приведен к контракту обычной кнопки.
 .btn-normal {
     --bs-btn-color: var(--text-strong);
     --bs-btn-bg: transparent;
@@ -309,6 +619,14 @@ html {
     --bs-btn-active-color: var(--text-strong);
     --bs-btn-active-bg: var(--surface-sunken);
     --bs-btn-active-border-color: var(--line-control);
+}
+
+// Удаление внутри списка: обычная кнопка с красным словом. Красная заливка
+// кричала бы из каждой строки, а слово говорит то же самое тише.
+.btn-normal.btn-danger-text {
+    --bs-btn-color: var(--state-failed);
+    --bs-btn-hover-color: var(--state-failed);
+    --bs-btn-active-color: var(--state-failed);
 }
 
 // Тот же вид доступен и без класса `.btn`: в списке стеков он стоит на голых
@@ -375,7 +693,7 @@ html {
     opacity: 1;
 }
 
-// Многострочный список выбора: фон его строк рисует система, поэтому в тёмной
+// Многострочный список выбора: фон его строк рисует система, поэтому в темной
 // теме на месте списка получалась белая заплата - строки приходится красить сами.
 .form-select[multiple] {
     background-image: none;
@@ -396,6 +714,31 @@ html {
 textarea.form-control {
     border-radius: var(--radius-panel);
     font-family: var(--font-mono);
+}
+
+// Флажок - строка из коробки, шага и подписи. Bootstrap ставит коробку в float
+// с отрицательным левым полем, и в такой строке она уезжает за левый край панели,
+// где ее срезает рамка. Правило живет здесь, а не в каждом экране: тремя копиями
+// оно уже было выписано в настройках и в одной из них проигрывало Bootstrap
+// порядком подключения, а не весом селектора
+.form-check {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    margin: 0;
+    padding: 0;
+    min-height: var(--control-height);
+
+    // Ряд флажков в строку: тот же контрол, только не занимает всю ширину
+    &.form-check-inline {
+        display: inline-flex;
+    }
+
+    .form-check-input {
+        float: none;
+        flex: none;
+        margin: 0;
+    }
 }
 
 .form-check-input {
@@ -425,6 +768,115 @@ textarea.form-control {
 
 .form-text {
     color: var(--text-muted);
+
+    > .me-1, > .me-2 {
+        margin: 0;
+    }
+}
+
+/*
+ * Анатомия формы. Поле - подпись, контрол и пояснение под ним; расстояние
+ * дает колонка, а не поля отдельных элементов, поэтому формы во всех разделах
+ * дышат одинаково и не зависят от классов отступов Bootstrap.
+ */
+
+.form-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-md);
+    max-width: 560px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+    min-width: 0;
+
+    > .form-label,
+    > label {
+        margin: 0;
+        font-size: var(--text-sm);
+        line-height: var(--line-sm);
+        color: var(--text-muted);
+    }
+
+    > .form-text {
+        margin: 0;
+        font-size: var(--text-xs);
+        line-height: var(--line-xs);
+        color: var(--text-faint);
+    }
+}
+
+// Список значений в форме: строка - поле и кнопка удаления. Один вид на порты,
+// сети, зависимости и переменные, иначе каждый список изобретал бы свой ряд.
+.value-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.value-row {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-height: var(--field-height);
+    border-bottom: 1px solid var(--line-hair);
+}
+
+.value-input {
+    flex: 1;
+    min-width: 0;
+    background-color: transparent;
+    border: 0;
+    outline: none;
+    color: var(--text-strong);
+    font-size: var(--text-sm);
+
+    &::placeholder {
+        color: var(--text-faint);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+}
+
+// Удаление строки - кнопка с именем для чтения с экрана, а не кликабельный значок
+.value-remove {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-height);
+    height: var(--control-height);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    color: var(--text-faint);
+
+    &:hover {
+        background-color: var(--surface-sunken);
+        color: var(--state-failed);
+    }
+
+    &:focus-visible {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-offset);
+    }
+}
+
+// Ряд действий: кнопки стоят в одну линию и переносятся на узком экране
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gap-sm);
 }
 
 // Floating Label
@@ -436,21 +888,34 @@ textarea.form-control {
     color: var(--text-muted);
 }
 
-// CodeMirror ставит contenteditable на своё содержимое, поэтому фон редактора
-// даёт панель под ним, а не сама редактируемая область.
+// CodeMirror ставит contenteditable на свое содержимое, поэтому фон редактора
+// дает панель под ним, а не сама редактируемая область.
 [contenteditable="true"] {
     background-color: transparent;
 }
 
 /*
- * Сообщения. Цвет несёт смысл состояния, а не палитру Bootstrap: синий в системе
- * означает только интерактив, поэтому успех берёт --state-running.
+ * Сообщения. Цвет несет смысл состояния, а не палитру Bootstrap: синий в системе
+ * означает только интерактив, поэтому успех берет --state-running.
  */
 
+// Сообщение системы: значок слева, текст рядом. Промежуток дает само
+// сообщение, поэтому значку не нужен собственный отступ
 .alert {
     --bs-alert-border-color: var(--line-hair);
 
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap-sm);
     border-radius: var(--radius-panel);
+
+    > svg {
+        flex: none;
+    }
+
+    > .me-1, > .me-2 {
+        margin: 0;
+    }
 }
 
 .alert-success {
@@ -459,10 +924,40 @@ textarea.form-control {
     --bs-alert-border-color: var(--state-running);
 }
 
+// Предупреждение - та же полоса внимания, что в инспекторе стека
 .alert-warning {
-    --bs-alert-color: var(--state-attention);
-    --bs-alert-bg: transparent;
-    --bs-alert-border-color: var(--state-attention);
+    --bs-alert-color: var(--text-strong);
+    --bs-alert-bg: color-mix(in srgb, var(--state-attention) 8%, transparent);
+    --bs-alert-border-color: color-mix(in srgb, var(--state-attention) 45%, transparent);
+
+    font-size: var(--text-sm);
+}
+
+// Полоса внимания: одна и та же коробка на главной и на странице стека. Раньше
+// ее вид был выписан в каждом экране заново и успел разойтись - метка в одном
+// месте шла с заглавной, в другом принудительно приводилась к строчной
+.attention-block {
+    padding: var(--gap-sm) var(--gap-md);
+    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
+    background-color: color-mix(in srgb, var(--state-attention) 8%, transparent);
+    border-radius: var(--radius-panel);
+    color: var(--text-strong);
+    font-size: var(--text-sm);
+}
+
+// Метка говорит, что стоит рядом: "Внимание" на главной, "Причина" на стеке
+.attention-badge {
+    flex: none;
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    padding: 2px var(--gap-sm);
+    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
+    border-radius: var(--radius-chip);
+    color: var(--state-attention);
+    font-size: var(--text-xs);
+    white-space: nowrap;
 }
 
 .alert-danger {
@@ -484,14 +979,6 @@ textarea.form-control {
 
 .spinner {
     color: var(--accent-text);
-}
-
-h5.settings-subheading::after {
-    content: "";
-    display: block;
-    width: 50%;
-    padding-top: var(--gap-sm);
-    border-bottom: 1px solid var(--line-hair);
 }
 
 /*
@@ -516,7 +1003,7 @@ summary:focus-visible {
 }
 
 /*
- * Единственное место, где тема остаётся селектором: три встроенных значка
+ * Единственное место, где тема остается селектором: три встроенных значка
  * Bootstrap - галочка селекта, ползунок переключателя и крестик закрытия -
  * нарисованы вшитым SVG или подобраны фильтром и токен прочитать не могут.
  */
@@ -541,11 +1028,11 @@ body.dark {
 
 // page-change
 .slide-fade-enter-active {
-    transition: all 0.2s $easing-in;
+    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-leave-active {
-    transition: all 0.2s $easing-in;
+    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-enter-from,
@@ -555,11 +1042,11 @@ body.dark {
 }
 
 .slide-fade-right-enter-active {
-    transition: all 0.2s $easing-in;
+    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-right-leave-active {
-    transition: all 0.2s $easing-in;
+    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-right-enter-from,
@@ -569,11 +1056,11 @@ body.dark {
 }
 
 .slide-fade-up-enter-active {
-    transition: all 0.2s $easing-in;
+    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-up-leave-active {
-    transition: all 0.2s $easing-in;
+    transition: all var(--motion-base) var(--motion-ease-in);
 }
 
 .slide-fade-up-enter-from,
@@ -583,7 +1070,7 @@ body.dark {
 }
 
 .action {
-    transition: all $easing-in 0.2s;
+    transition: all var(--motion-base) var(--motion-ease-in);
 
     &:hover {
         cursor: pointer;
@@ -591,8 +1078,8 @@ body.dark {
     }
 }
 
-// Движение не несёт смысла, поэтому просьбу его убрать система выполняет
-// целиком: содержимое остаётся на месте, исчезает только переход.
+// Движение не несет смысла, поэтому просьбу его убрать система выполняет
+// целиком: содержимое остается на месте, исчезает только переход.
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         transition-duration: 0.01ms !important;
@@ -626,6 +1113,27 @@ body.dark {
     }
 }
 
+// Текстовый редактор внутри панели: поверхность консольная в обеих темах -
+// подсветка CodeMirror нарисована для темного фона, на белом ее красные ключи
+// не проходят порог контраста. Рамку и радиус дает панель, поэтому их здесь нет
+.editor-box {
+    // Место под шесть строк: короткий или пустой файл сжимал коробку до одной
+    // строки, и поверхность переставала читаться как та, в которой пишут
+    min-height: calc(var(--line-code) * 6 + var(--gap-md) * 2);
+    padding: var(--gap-md);
+    background-color: var(--surface-console) !important;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: var(--line-code);
+
+    // Кольцо рисует коробка, а не область ввода CodeMirror: та без рамки и без
+    // контура, и приход в редактор с клавиатуры отмечался одним курсором
+    &:focus-within {
+        outline: var(--focus-ring);
+        outline-offset: calc(var(--focus-offset) * -1);
+    }
+}
+
 .cm-gutters {
     background-color: transparent !important;
 }
@@ -645,3 +1153,15 @@ body.dark {
 .cm-focused {
     outline: none !important;
 }
+
+// Stack letters share one palette in the navigator and the selected stack.
+@each $color in "green", "purple", "blue", "teal", "gray" {
+    .stack-color-#{$color} {
+        --stack-letter-background: var(--stack-#{$color}-bg);
+        --stack-letter-color: var(--stack-#{$color}-text);
+    }
+}
+html { scrollbar-gutter: stable; }
+button, input, select, textarea { font-family: var(--font-ui); }
+h1, h2, h3 { font-weight: var(--weight-medium); }
+h1 { font-weight: var(--weight-strong); letter-spacing: var(--tracking-title); line-height: var(--line-xl); }

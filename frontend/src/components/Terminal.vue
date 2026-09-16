@@ -1,5 +1,5 @@
 <template>
-    <div class="shadow-box">
+    <div class="terminal-box">
         <div v-pre ref="terminal" class="main-terminal"></div>
 
         <TerminalContextMenu
@@ -17,6 +17,11 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERMINAL_COLS, TERMINAL_ROWS } from "../../../common/util-common";
 import TerminalContextMenu from "./TerminalContextMenu.vue";
+
+/** Размер и семейство консольного шрифта: ими же терминал меряет знакоместо */
+const CONSOLE_FONT_SIZE = 14;
+const CONSOLE_FONT_FAMILY = "'IBM Plex Mono', ui-monospace, monospace";
+const CONSOLE_FONT_FACE = "'IBM Plex Mono'";
 
 export default {
     /**
@@ -90,85 +95,16 @@ export default {
 
     },
     mounted() {
-        let cursorBlink = true;
-
-        if (this.mode === "displayOnly") {
-            cursorBlink = false;
-        }
-
-        this.terminal = new Terminal({
-            fontSize: 14,
-            fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-            cursorBlink,
-            cols: this.cols,
-            rows: this.rows,
-        });
-
-        if (this.mode === "mainTerminal") {
-            this.mainTerminalConfig();
-        } else if (this.mode === "interactive") {
-            this.interactiveTerminalConfig();
-        }
-
-        //this.terminal.loadAddon(new WebLinksAddon());
-
-        // Bind to a div
-        this.terminal.open(this.$refs.terminal);
-        this.terminal.focus();
-
-        // Right click opens an explicit menu instead of pasting immediately
-        this.$refs.terminal.addEventListener("contextmenu", this.handleContextMenu);
-
-        // Ctrl+V, Ctrl+Shift+V and Cmd+V are left to the browser, which pastes into the
-        // hidden xterm textarea. That keeps the exact text and never sends a stray "v".
-        this.terminal.attachCustomKeyEventHandler((event) => {
-            const isPasteShortcut = event.key.toLowerCase() === "v" && (event.ctrlKey || event.metaKey);
-
-            if (isPasteShortcut && event.type === "keydown") {
-                return false;
-            }
-
-            return true;
-        });
-
-        // The hidden textarea receives the real paste event, used by the limited console
-        if (this.mode === "mainTerminal" && this.terminal.textarea) {
-            this.terminal.textarea.addEventListener("paste", this.handleNativePaste);
-        }
-
-        // Add selection handler for copy to clipboard
-        this.terminal.onSelectionChange(() => {
-            this.handleSelection();
-        });
-
-        // Notify parent component when data is received
-        this.terminal.onCursorMove(() => {
-            console.debug("onData triggered");
-            if (this.first) {
-                this.$emit("has-data");
-                this.first = false;
+        // Ширина знакоместа меряется один раз, при открытии терминала. Если консольный
+        // шрифт к этому моменту не загружен, xterm померяет запасной моноширинный и
+        // разложит сетку под него: колонки встанут не по ширине панели, а текст - не по
+        // колонкам, и так и останется до первого изменения размера окна
+        this.consoleFontReady().then(() => {
+            // Пока грузился шрифт, вкладку могли закрыть
+            if (this.$refs.terminal) {
+                this.openTerminal();
             }
         });
-
-        this.bind();
-
-        // Create a new Terminal
-        if (this.mode === "mainTerminal") {
-            this.$root.emitAgent(this.endpoint, "mainTerminal", this.name, (res) => {
-                if (!res.ok) {
-                    this.$root.toastRes(res);
-                }
-            });
-        } else if (this.mode === "interactive") {
-            console.debug("Create Interactive terminal:", this.name);
-            this.$root.emitAgent(this.endpoint, "interactiveTerminal", this.stackName, this.serviceName, this.shell, (res) => {
-                if (!res.ok) {
-                    this.$root.toastRes(res);
-                }
-            });
-        }
-        // Fit the terminal width to the div container size after terminal is created.
-        this.updateTerminalSize();
     },
 
     beforeUnmount() {
@@ -186,12 +122,153 @@ export default {
         }
 
         this.$root.unbindTerminal(this.name);
-        this.terminal.textarea?.removeEventListener("paste", this.handleNativePaste);
-        this.terminal.dispose();
+
+        // Терминала может и не быть: вкладку закрыли, пока грузился консольный шрифт
+        this.terminal?.textarea?.removeEventListener("paste", this.handleNativePaste);
+        this.terminal?.dispose();
         this.$refs.terminal?.removeEventListener("contextmenu", this.handleContextMenu);
     },
 
     methods: {
+        /**
+         * Дождаться консольного шрифта, чтобы замер знакоместа шел по нему
+         * @returns {Promise<void>} Разрешается, когда шрифт загружен или отказал
+         */
+        async consoleFontReady() {
+            try {
+                // Шрифт грузится по требованию, поэтому мало дождаться document.fonts.ready:
+                // без явного запроса на экране без моноширинного текста он и не начнет грузиться
+                await document.fonts.load(`${CONSOLE_FONT_SIZE}px ${CONSOLE_FONT_FACE}`);
+                await document.fonts.ready;
+            } catch {
+                // Шрифт не обязателен: без него терминал рисуется запасным моноширинным
+            }
+        },
+
+        /**
+         * Собрать терминал и подключить его к сессии
+         * @returns {void}
+         */
+        openTerminal() {
+            let cursorBlink = true;
+
+            if (this.mode === "displayOnly") {
+                cursorBlink = false;
+            }
+
+            this.terminal = new Terminal({
+                fontSize: CONSOLE_FONT_SIZE,
+                fontFamily: CONSOLE_FONT_FAMILY,
+                cursorBlink,
+                // Журнал и окно запуска - вывод, а не ввод: скрытое поле xterm не должно
+                // принимать набранное. Печатать там все равно было некуда - ни `onKey`,
+                // ни `onData` для этого режима не подключены
+                disableStdin: this.mode === "displayOnly",
+                cols: this.cols,
+                rows: this.rows,
+                theme: this.consoleTheme(),
+            });
+
+            if (this.mode === "mainTerminal") {
+                this.mainTerminalConfig();
+            } else if (this.mode === "interactive") {
+                this.interactiveTerminalConfig();
+            }
+
+            //this.terminal.loadAddon(new WebLinksAddon());
+
+            // Bind to a div
+            this.terminal.open(this.$refs.terminal);
+
+            // Фокус забирает только тот терминал, в который печатают. Журнал уносил
+            // курсор внутрь вывода сразу при открытии вкладки, а окно запуска - вместо
+            // своей кнопки закрытия
+            if (this.mode !== "displayOnly") {
+                this.terminal.focus();
+            }
+
+            // Right click opens an explicit menu instead of pasting immediately
+            this.$refs.terminal.addEventListener("contextmenu", this.handleContextMenu);
+
+            // Ctrl+V, Ctrl+Shift+V and Cmd+V are left to the browser, which pastes into the
+            // hidden xterm textarea. That keeps the exact text and never sends a stray "v".
+            this.terminal.attachCustomKeyEventHandler((event) => {
+                const isPasteShortcut = event.key.toLowerCase() === "v" && (event.ctrlKey || event.metaKey);
+
+                if (isPasteShortcut && event.type === "keydown") {
+                    return false;
+                }
+
+                // В выводе Tab уводит фокус дальше по странице, а не проваливается
+                // в терминал. В оболочке контейнера и в ограниченной консоли Tab -
+                // рабочая клавиша (дополнение имени), и туда он идет как прежде
+                if (this.mode === "displayOnly" && event.key === "Tab") {
+                    return false;
+                }
+
+                return true;
+            });
+
+            // The hidden textarea receives the real paste event, used by the limited console
+            if (this.mode === "mainTerminal" && this.terminal.textarea) {
+                this.terminal.textarea.addEventListener("paste", this.handleNativePaste);
+            }
+
+            // Add selection handler for copy to clipboard
+            this.terminal.onSelectionChange(() => {
+                this.handleSelection();
+            });
+
+            // Notify parent component when data is received
+            this.terminal.onCursorMove(() => {
+                console.debug("onData triggered");
+                if (this.first) {
+                    this.$emit("has-data");
+                    this.first = false;
+                }
+            });
+
+            this.bind();
+
+            // Create a new Terminal
+            if (this.mode === "mainTerminal") {
+                this.$root.emitAgent(this.endpoint, "mainTerminal", this.name, (res) => {
+                    if (!res.ok) {
+                        this.$root.toastRes(res);
+                    }
+                });
+            } else if (this.mode === "interactive") {
+                console.debug("Create Interactive terminal:", this.name);
+                this.$root.emitAgent(this.endpoint, "interactiveTerminal", this.stackName, this.serviceName, this.shell, (res) => {
+                    if (!res.ok) {
+                        this.$root.toastRes(res);
+                    }
+                });
+            }
+            // Fit the terminal width to the div container size after terminal is created.
+            this.updateTerminalSize();
+        },
+
+        /**
+         * Colours of the console surface, taken from the design tokens
+         * @returns {object} xterm theme: xterm draws pure black by default, and a
+         * black rectangle inside the near-black panel showed a visible seam
+         */
+        consoleTheme() {
+            const root = getComputedStyle(document.documentElement);
+            const token = (name, fallback) => root.getPropertyValue(name).trim() || fallback;
+            const surface = token("--surface-console", "#0b0e12");
+            const text = token("--text-on-console", "#dfe5ee");
+
+            return {
+                background: surface,
+                foreground: text,
+                cursor: text,
+                cursorAccent: surface,
+                selectionBackground: token("--surface-console-selection", "rgba(157, 172, 249, .32)"),
+            };
+        },
+
         bind(endpoint, name) {
             // Workaround: normally this.name should be set, but it is not sometimes, so we use the parameter, but eventually this.name and name must be the same name
             if (name) {
@@ -311,11 +388,19 @@ export default {
          * It then addes an event listener to the window object to listen for resize events and calls the fit method of the terminalFitAddOn.
          */
         updateTerminalSize() {
+            // Подгонять пока нечего: панель просит размер сразу, как появилась вкладка,
+            // а терминал ждет консольный шрифт. Открытие само закончится подгонкой,
+            // а заготовленный здесь аддон остался бы привязанным в пустоту
+            if (!this.terminal) {
+                return;
+            }
+
             if (!Object.hasOwn(this, "terminalFitAddOn")) {
                 this.terminalFitAddOn = new FitAddon();
                 this.terminal.loadAddon(this.terminalFitAddOn);
                 window.addEventListener("resize", this.onResizeEvent);
             }
+
             this.terminalFitAddOn.fit();
 
             // The PTY was started with default dimensions, so the first fit has to be reported
@@ -462,16 +547,45 @@ export default {
 </script>
 
 <style scoped lang="scss">
+// Консольная поверхность без рамки и радиуса: их дает панель вокруг терминала,
+// поэтому один и тот же терминал одинаково выглядит на странице и во вкладке
+.terminal-box {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--surface-console);
+
+    // Поле ввода у xterm скрытое и размером в пиксель, поэтому кольцо фокуса
+    // рисует коробка вокруг него: без этого приход в консоль с клавиатуры
+    // ничем не отмечался, а из вывода еще и стрелками прокручивают.
+    // Кольцо - слой поверх, а не `outline`: холсты xterm лежат выше контура
+    // и закрывали его целиком, даже шестипиксельный
+    &:focus-within::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: var(--layer-sticky);
+        border: 2px solid var(--accent-text);
+        pointer-events: none;
+    }
+}
+
 .main-terminal {
     height: 100%;
 }
 </style>
 
 <style lang="scss">
-// Консоль рисует xterm своей тёмной темой, поэтому поверхность берётся токеном,
-// а не чистым чёрным: в светлой теме чёрный прямоугольник читался как дырка
+// Консоль рисует xterm своей темной темой, поэтому поверхность берется токеном,
+// а не чистым черным: в светлой теме черный прямоугольник читался как дырка
 .terminal {
     background-color: var(--surface-console) !important;
     height: 100%;
+}
+
+// Свою подложку xterm красит чистым черным прямо в xterm.css, и она видна по
+// краям холста и под полосой прокрутки: поверхность задается токеном
+.terminal .xterm-viewport {
+    background-color: var(--surface-console) !important;
 }
 </style>

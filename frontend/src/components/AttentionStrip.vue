@@ -1,7 +1,7 @@
 <template>
     <!-- Полоса внимания: с главной видно, что именно сломалось, без выбора стека -->
-    <div v-if="stacks.length > 0" class="attention-strip" role="status">
-        <span class="badge-word">{{ $t("attentionBadge") }}</span>
+    <div v-if="stacks.length > 0" class="attention-strip attention-block" role="status">
+        <span class="attention-badge">{{ $t("attentionBadge") }}</span>
 
         <div class="reasons">
             <span v-for="item in shown" :key="item.name" class="reason">
@@ -20,7 +20,7 @@
 <script>
 import { ATTENTION } from "../../../common/util-common";
 
-/** Сколько стеков названо прямо в полосе: остальные - под «Ещё N» */
+/** Сколько стеков названо прямо в полосе: остальные - под "Еще N" */
 const SHOWN = 3;
 
 export default {
@@ -65,29 +65,13 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// Коробку и метку дает система (`.attention-block`, `.attention-badge`);
+// здесь только раскладка: на главной причины стоят в строку
 .attention-strip {
     display: flex;
     align-items: center;
     gap: var(--gap-md);
     flex-wrap: wrap;
-    padding: var(--gap-sm) var(--gap-md);
-    margin-bottom: var(--gap-md);
-    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
-    background-color: color-mix(in srgb, var(--state-attention) 8%, transparent);
-    border-radius: var(--radius-panel);
-    font-size: var(--text-sm);
-}
-
-.badge-word {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--text-xs);
-    color: var(--state-attention);
-    border: 1px solid color-mix(in srgb, var(--state-attention) 45%, transparent);
-    border-radius: var(--radius-chip);
-    padding: 1px 6px;
-    white-space: nowrap;
 }
 
 .reasons {
@@ -103,12 +87,12 @@ export default {
 .reason {
     display: inline-flex;
     align-items: baseline;
-    gap: 6px;
+    gap: var(--gap-sm);
     min-width: 0;
 }
 
 .stack {
-    font-weight: 600;
+    font-weight: var(--weight-strong);
     text-decoration: none;
 
     &:focus-visible {
@@ -125,5 +109,27 @@ export default {
 .more {
     color: var(--text-faint);
     font-size: var(--text-xs);
+}
+
+// На узком экране действие уходит на свою строку, а метка и причины делят
+// первую. В три колонки на телефоне причине оставалось десять знаков ширины,
+// и она рвалась посреди слова, а имя стека переносилось по дефису
+@media (max-width: 800px) {
+    .attention-strip {
+        align-items: flex-start;
+    }
+
+    .reasons {
+        flex: 1 1 12ch;
+    }
+
+    .reason {
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        flex: 1 0 100%;
+        justify-content: center;
+    }
 }
 </style>

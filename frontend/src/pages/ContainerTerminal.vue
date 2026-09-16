@@ -1,42 +1,48 @@
 <template>
     <transition name="slide-fade" appear>
-        <div>
-            <h1 class="mb-3">{{ $t("terminal") }} - {{ serviceName }} ({{ stackName }})</h1>
+        <div class="page page-fill">
+            <h1>{{ $t("terminal") }}</h1>
 
-            <div class="mb-3 d-flex align-items-center gap-2">
-                <span class="badge bg-primary">{{ shell }}</span>
+            <!-- Оболочка контейнера - панель той же анатомии, что терминал стека:
+                 сервис и оболочка в шапке, переключение оболочки рядом с именем -->
+            <section class="panel">
+                <div class="panel-bar">
+                    <h2 class="panel-title mono"><InterfaceIcon name="terminal" />{{ serviceName }} · {{ shell }}</h2>
+                    <span class="panel-meta">{{ stackName }}</span>
+                    <router-link :to="otherShellRoute" class="btn btn-sm btn-normal">
+                        {{ $t("switchToShell", [ otherShell ]) }}
+                    </router-link>
+                </div>
 
-                <!-- The button always offers the other shell and starts a separate session -->
-                <router-link :to="otherShellRoute" class="btn btn-normal">
-                    {{ $t("switchToShell", [ otherShell ]) }}
-                </router-link>
-            </div>
+                <div class="panel-console">
+                    <Terminal
+                        :key="terminalName"
+                        class="session-terminal"
+                        :rows="20"
+                        mode="interactive"
+                        :name="terminalName"
+                        :stack-name="stackName"
+                        :service-name="serviceName"
+                        :shell="shell"
+                        :endpoint="endpoint"
+                    ></Terminal>
+                </div>
 
-            <Terminal
-                :key="terminalName"
-                class="terminal"
-                :rows="20"
-                mode="interactive"
-                :name="terminalName"
-                :stack-name="stackName"
-                :service-name="serviceName"
-                :shell="shell"
-                :endpoint="endpoint"
-            ></Terminal>
+                <p class="panel-foot"><font-awesome-icon icon="info-circle" />{{ $t("sessionShellNote") }}</p>
+            </section>
         </div>
     </transition>
 </template>
 
 <script>
+import Terminal from "../components/Terminal.vue";
+import InterfaceIcon from "../components/InterfaceIcon.vue";
 import { CONTAINER_SHELLS, getContainerExecTerminalName, isContainerShell } from "../../../common/util-common";
 
 export default {
     components: {
-    },
-    data() {
-        return {
-
-        };
+        Terminal,
+        InterfaceIcon,
     },
     computed: {
         stackName() {
@@ -95,17 +101,12 @@ export default {
             return data;
         },
     },
-    mounted() {
-
-    },
-    methods: {
-
-    }
 };
 </script>
 
 <style scoped lang="scss">
-.terminal {
-    height: 410px;
+// Высоту тела дает `.page-fill`; здесь только то, что оболочка занимает его целиком
+.session-terminal {
+    height: 100%;
 }
 </style>

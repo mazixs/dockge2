@@ -1,32 +1,51 @@
 <template>
-    <div class="d-flex justify-content-center align-items-center">
-        <div class="logo d-flex flex-column justify-content-center align-items-center">
-            <object class="my-4" width="200" height="200" data="/icon.svg" />
-            <div class="fs-4 fw-bold">Dockge</div>
-            <div>{{ $t("Version") }}: {{ $root.info.version }}</div>
-            <div class="frontend-version">{{ $t("Frontend Version") }}: {{ $root.frontendVersion }}</div>
+    <!-- О программе: версия, ссылка на выпуски и выбор, проверять ли обновления.
+         Логотип не занимает экран - он здесь подпись, а не герой страницы -->
+    <section class="panel">
+        <div class="panel-bar">
+            <h2 class="panel-title"><InterfaceIcon name="box" />{{ $t("About") }}</h2>
+        </div>
 
-            <div v-if="!$root.isFrontendBackendVersionMatched" class="alert alert-warning mt-4" role="alert">
-                ⚠️ {{ $t("Frontend Version do not match backend version!") }}
+        <div class="panel-body about-body">
+            <div class="brand">
+                <object width="48" height="48" data="/icon.svg" aria-hidden="true" />
+                <div class="brand-text">
+                    <p class="wordmark"><BrandMark /></p>
+                    <p class="versions">{{ $t("Version") }} {{ $root.info.version }} · {{ $t("Frontend Version") }} {{ $root.frontendVersion }}</p>
+                </div>
             </div>
 
-            <div class="my-3 update-link"><a href="https://github.com/louislam/dockge/releases" target="_blank" rel="noopener">{{ $t("Check Update On GitHub") }}</a></div>
+            <p v-if="!$root.isFrontendBackendVersionMatched" class="alert alert-warning" role="alert">
+                <font-awesome-icon icon="triangle-exclamation" />{{ $t("Frontend Version do not match backend version!") }}
+            </p>
 
-            <div class="mt-1">
-                <div class="form-check">
-                    <label><input v-model="settings.checkUpdate" type="checkbox" @change="saveSettings()" /> {{ $t("Show update if available") }}</label>
-                </div>
-
-                <div class="form-check">
-                    <label><input v-model="settings.checkBeta" type="checkbox" :disabled="!settings.checkUpdate" @change="saveSettings()" /> {{ $t("Also check beta release") }}</label>
-                </div>
+            <div class="field">
+                <span class="form-label">{{ $t("aboutUpdates") }}</span>
+                <label class="form-check">
+                    <input v-model="settings.checkUpdate" class="form-check-input" type="checkbox" @change="saveSettings()" />
+                    <span class="form-check-label">{{ $t("Show update if available") }}</span>
+                </label>
+                <label class="form-check">
+                    <input v-model="settings.checkBeta" class="form-check-input" type="checkbox" :disabled="!settings.checkUpdate" @change="saveSettings()" />
+                    <span class="form-check-label">{{ $t("Also check beta release") }}</span>
+                </label>
             </div>
         </div>
-    </div>
+
+        <p class="panel-foot">
+            <font-awesome-icon icon="info-circle" />
+            <a href="https://github.com/mazixs/dockge2/releases" target="_blank" rel="noopener">{{ $t("Check Update On GitHub") }}</a>
+        </p>
+    </section>
 </template>
 
 <script>
+import BrandMark from "../BrandMark.vue";
+import InterfaceIcon from "../InterfaceIcon.vue";
+
 export default {
+    components: { BrandMark,
+        InterfaceIcon },
     computed: {
         settings() {
             return this.$parent.$parent.$parent.settings;
@@ -38,25 +57,44 @@ export default {
             return this.$parent.$parent.$parent.settingsLoaded;
         },
     },
-
-    watch: {
-
-    }
 };
 </script>
 
 <style lang="scss" scoped>
-.logo {
-    margin: 4em 1em;
+.about-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
 }
 
-.update-link {
-    font-size: 0.8em;
+.brand {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
 }
 
-.frontend-version {
-    font-size: 0.9em;
-    color: var(--text-muted);
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
 }
 
+.wordmark {
+    margin: 0;
+    font-size: var(--text-lg);
+    line-height: var(--line-lg);
+    font-weight: var(--weight-strong);
+    color: var(--text-strong);
+}
+
+.versions {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--line-xs);
+    color: var(--text-faint);
+}
+
+.alert {
+    margin: 0;
+}
 </style>
