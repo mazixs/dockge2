@@ -46,6 +46,7 @@ services:
       DOCKGE_PORT: ${DOCKGE_PORT:-5001}
       # Путь внутри контейнера, на хосте каталог задан томом выше.
       DOCKGE_DATA_DIR: /app/data
+      DOCKGE_MCP_DELEGATION_CONFIG: ${DOCKGE_MCP_DELEGATION_CONFIG:-}
       DOCKGE_STACKS_DIR: ${DOCKGE_STACKS_DIR:-/opt/stacks}
       # Панель знает, что живет в контейнере, и подсказывает обновление через compose.
       DOCKGE_IS_CONTAINER: "1"
@@ -55,13 +56,15 @@ services:
       PUID: ${PUID:-}
       PGID: ${PGID:-}
 
-      # Веб-консоль хоста выключена: она дает shell любому, кто вошел в панель.
+      # Веб-консоль хоста выключена: она дает shell владельцам и операторам.
       DOCKGE_ENABLE_CONSOLE: ${DOCKGE_ENABLE_CONSOLE:-false}
 
       # За обратным прокси нужны обе: первая заставляет верить заголовкам прокси,
       # вторая помечает cookie сессии как Secure.
       DOCKGE_TRUST_PROXY: ${DOCKGE_TRUST_PROXY:-}
       DOCKGE_SECURE_COOKIES: ${DOCKGE_SECURE_COOKIES:-}
+      DOCKGE_PUBLIC_URL: ${DOCKGE_PUBLIC_URL:-}
+      DOCKGE_BOOTSTRAP_TOKEN: ${DOCKGE_BOOTSTRAP_TOKEN:-}
       DOCKGE_TRUSTED_ORIGINS: ${DOCKGE_TRUSTED_ORIGINS:-}
 
       # Секрет подписи сессий. Пусто - генерируется и хранится в базе.

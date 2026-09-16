@@ -1,5 +1,7 @@
 # Should update .dockerignore as well
 .env
+.env.local
+.tmp/
 node_modules
 .idea
 data
@@ -18,3 +20,18 @@ coverage
 
 # Session of the e2e run
 test/e2e/.auth
+
+# Editors and OS
+.vscode
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# Local artifacts
+*.log
+npm-debug.log*
+*.tsbuildinfo
+.eslintcache
+.vite
+.claude/settings.local.json

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import Components from "unplugin-vue-components/vite";
@@ -18,6 +19,12 @@ export default defineConfig({
     root: "./frontend",
     build: {
         outDir: "../frontend-dist",
+
+        // Каталог сборки лежит выше корня Vite, а такой Vite сам не чистит и
+        // просит подтверждения явно. Без этого каждая сборка досыпала новый
+        // хешированный бандл к прежним: 1833 файла и 284 МБ, и все они попадают
+        // в образ, потому что docker/Dockerfile копирует каталог целиком
+        emptyOutDir: true,
     },
     css: {
         preprocessorOptions: {
@@ -33,6 +40,9 @@ export default defineConfig({
     plugins: [
         vue(),
         Components({
+            // Абсолютный путь, а не относительный корню Vite: сцена
+            // test/visual собирает те же компоненты из другого корня
+            dirs: [ fileURLToPath(new URL("src/components", import.meta.url)) ],
             resolvers: [ BootstrapVueNextResolver() ],
             dts: false,
         }),
