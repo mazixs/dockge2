@@ -6,9 +6,13 @@ test("MCP keys require a bearer secret and never accept query or cookie identiti
     assert.equal(parseBearer(undefined), null);
     assert.equal(parseBearer("Basic abc"), null);
     assert.equal(parseBearer("Bearer short"), null);
-    const key = "dg_" + "a".repeat(32) + "." + "b".repeat(64);
+    const key = "dg2_" + "a".repeat(32) + "." + "b".repeat(64);
     assert.equal(parseBearer("Bearer " + key), key);
     assert.notEqual(hashKey(key), key);
+    // Ключи, выпущенные до переименования, продолжают приниматься
+    const legacy = "dg_" + "a".repeat(32) + "." + "b".repeat(64);
+    assert.equal(parseBearer("Bearer " + legacy), legacy);
+    assert.equal(parseBearer("Bearer dg3_" + "a".repeat(32) + "." + "b".repeat(64)), null);
 });
 
 test("viewer denies every mutation and unknown tool independently of discovery", () => {

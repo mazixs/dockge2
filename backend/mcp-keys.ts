@@ -64,7 +64,7 @@ export class McpKeys {
             throw new Error("mcpInvalidScope");
         }
         const id = randomBytes(16).toString("hex");
-        const secret = `dg_${id}.${randomBytes(32).toString("hex")}`;
+        const secret = `dg2_${id}.${randomBytes(32).toString("hex")}`;
         await this.knex("mcp_key").insert({ id,
             name: data.name,
             user_id: data.userId,
@@ -128,10 +128,14 @@ export class McpKeys {
 
     /** Validate secret, expiry and current owner access without any session cache. */
     async authenticate(secret : string | null) : Promise<MachineIdentity> {
-        if (!secret || !/^dg_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(secret)) {
+        // Новые ключи несут имя продукта, но выпущенные до переименования
+        // продолжают работать: отзыв ключа - решение владельца, а не побочный
+        // эффект правки подписи
+        const match = /^dg2?_([a-f0-9]{32})\.[a-f0-9]{64}$/.exec(secret ?? "");
+        if (!secret || !match) {
             throw new Error("mcpUnauthorized");
         }
-        const id = secret.slice(3, 35);
+        const id = match[1] as string;
         const row = await this.knex("mcp_key").where({ id }).first();
         if (!row || row.revoked_at !== null || Number(row.expires_at) <= Date.now() || row.secret_hash.length !== 64 || !timingSafeEqual(Buffer.from(row.secret_hash, "hex"), Buffer.from(hashKey(secret), "hex"))) {
             throw new Error("mcpUnauthorized");
