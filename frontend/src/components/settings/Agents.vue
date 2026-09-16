@@ -66,7 +66,7 @@
                     <template v-if="connectingAgent">{{ $t("connecting") }}</template>
                     <template v-else>{{ $t("connect") }}</template>
                 </button>
-                <button type="button" class="btn btn-sm btn-normal" :disabled="connectingAgent" @click="showAgentForm = false">{{ $t("Cancel") }}</button>
+                <button type="button" class="btn btn-sm btn-normal" :disabled="connectingAgent" @click="showAgentForm = false">{{ $t("cancel") }}</button>
             </div>
         </form>
     </section>
