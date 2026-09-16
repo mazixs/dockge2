@@ -129,6 +129,7 @@ export class Stack {
                 envFileNames: [],
                 secretFiles: [],
                 needsComposeSelection: false,
+                unsupportedFileNames: [],
             };
             return this._inventory;
         }
@@ -285,6 +286,7 @@ export class Stack {
                 selectedEnvFileNames: inventory.config.envFileNames,
                 secretFiles: inventory.secretFiles,
                 needsComposeSelection: inventory.needsComposeSelection,
+                unsupportedFileNames: inventory.unsupportedFileNames,
             },
         };
     }
@@ -500,14 +502,7 @@ export class Stack {
     }
 
     async deploy(socket : DockgeSocket) : Promise<number> {
-        await this.validateComposeConfig();
-
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("up", "-d", "--remove-orphans"), this.path);
-        if (exitCode !== 0) {
-            throw new Error("Failed to deploy, please check the terminal output for more information.");
-        }
-        return exitCode;
+        return this.control("deploy", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
     async delete(socket: DockgeSocket) : Promise<number> {
@@ -998,33 +993,42 @@ export class Stack {
         return options;
     }
 
-    async start(socket: DockgeSocket) {
-        await this.validateComposeConfig();
-
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("up", "-d", "--remove-orphans"), this.path);
+    /** Run bounded lifecycle operations through the same command selection for UI and MCP. */
+    async control(action: "start" | "stop" | "restart" | "deploy" | "update", execute: (args: string[], cwd: string) => Promise<number>): Promise<number> {
+        if (![ "start", "stop", "restart", "deploy", "update" ].includes(action)) {
+            throw new Error("Unsupported stack control action");
+        }
+        if ([ "start", "deploy", "update" ].includes(action)) {
+            await this.validateComposeConfig();
+        }
+        if (action === "update") {
+            const pullCode = await execute(this.getComposeOptions("pull"), this.path);
+            if (pullCode !== 0) {
+                throw new Error("Stack image update failed; check the operation output.");
+            }
+            await this.updateStatus();
+            if (this.status !== RUNNING && this.status !== ATTENTION) {
+                return pullCode;
+            }
+        }
+        const options = [ "start", "deploy", "update" ].includes(action) ? this.getComposeOptions("up", "-d", "--remove-orphans") : this.getComposeOptions(action);
+        const exitCode = await execute(options, this.path);
         if (exitCode !== 0) {
-            throw new Error("Failed to start, please check the terminal output for more information.");
+            throw new Error("Stack control failed; check the operation output.");
         }
         return exitCode;
+    }
+
+    async start(socket: DockgeSocket) {
+        return this.control("start", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
     async stop(socket: DockgeSocket) : Promise<number> {
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("stop"), this.path);
-        if (exitCode !== 0) {
-            throw new Error("Failed to stop, please check the terminal output for more information.");
-        }
-        return exitCode;
+        return this.control("stop", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
     async restart(socket: DockgeSocket) : Promise<number> {
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("restart"), this.path);
-        if (exitCode !== 0) {
-            throw new Error("Failed to restart, please check the terminal output for more information.");
-        }
-        return exitCode;
+        return this.control("restart", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
     async down(socket: DockgeSocket) : Promise<number> {
@@ -1037,27 +1041,7 @@ export class Stack {
     }
 
     async update(socket: DockgeSocket) {
-        await this.validateComposeConfig();
-
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("pull"), this.path);
-        if (exitCode !== 0) {
-            throw new Error("Failed to pull, please check the terminal output for more information.");
-        }
-
-        // If the stack is not up, there is nothing to recreate.
-        // A degraded stack (ATTENTION) is up, so it does get the new images.
-        await this.updateStatus();
-        log.debug("update", "Status: " + this.status);
-        if (this.status !== RUNNING && this.status !== ATTENTION) {
-            return exitCode;
-        }
-
-        exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("up", "-d", "--remove-orphans"), this.path);
-        if (exitCode !== 0) {
-            throw new Error("Failed to restart, please check the terminal output for more information.");
-        }
-        return exitCode;
+        return this.control("update", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
     async joinCombinedTerminal(socket: DockgeSocket) {

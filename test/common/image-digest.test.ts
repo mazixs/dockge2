@@ -5,11 +5,11 @@ import { isNewerImage, parseLocalRepoDigest, parseRemoteDigest, parseSingleManif
 const DIGEST = "sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44";
 const OTHER = "sha256:80f8bb74f634d45d55967820a702c5fddf01cf92968bb29ed7a3573dd16b0e55";
 
-test("локальный отпечаток берётся из RepoDigests своего репозитория", () => {
+test("локальный отпечаток берется из RepoDigests своего репозитория", () => {
     const raw = JSON.stringify([ `other/image@${OTHER}`, `traefik/whoami@${DIGEST}` ]);
     assert.equal(parseLocalRepoDigest(raw, "traefik/whoami:latest"), DIGEST);
 
-    // Реестр с портом: двоеточие в нём - не тег
+    // Реестр с портом: двоеточие в нем - не тег
     assert.equal(
         parseLocalRepoDigest(JSON.stringify([ `localhost:5000/app@${DIGEST}` ]), "localhost:5000/app:dev"),
         DIGEST,
@@ -42,7 +42,7 @@ test("запасной путь работает только для одноа�
 test("вывод делается только когда известны оба отпечатка", () => {
     assert.equal(isNewerImage(DIGEST, OTHER), true);
     assert.equal(isNewerImage(DIGEST, DIGEST), false);
-    // Образ не скачан или реестр недоступен: это «неизвестно», а не «обновлений нет»
+    // Образ не скачан или реестр недоступен: это "неизвестно", а не "обновлений нет"
     assert.equal(isNewerImage(null, OTHER), null);
     assert.equal(isNewerImage(DIGEST, null), null);
 });

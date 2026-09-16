@@ -4,6 +4,8 @@ import { log } from "./log";
 import { Agent } from "./models/agent";
 import { isDev, LooseObject, sleep } from "../common/util-common";
 import semver from "semver";
+import { signInAgent, invalidateAgentSession } from "./agent-auth";
+import { authorizeSocketEvent, viewerStackSummary } from "./auth-access";
 import dayjs, { Dayjs } from "dayjs";
 
 /**
@@ -25,49 +27,12 @@ export class AgentManager {
         return this._firstConnectTime;
     }
 
-    test(url : string, username : string, password : string) : Promise<void> {
-        return new Promise((resolve, reject) => {
-            let obj = new URL(url);
-            let endpoint = obj.host;
-
-            if (!endpoint) {
-                reject(new Error("Invalid Dockge URL"));
-            }
-
-            if (this.agentSocketList[endpoint]) {
-                reject(new Error("The Dockge URL already exists"));
-            }
-
-            let client = io(url, {
-                reconnection: false,
-                extraHeaders: {
-                    endpoint,
-                }
-            });
-
-            client.on("connect", () => {
-                client.emit("login", {
-                    username: username,
-                    password: password,
-                }, (res : LooseObject) => {
-                    if (res.ok) {
-                        resolve();
-                    } else {
-                        reject(new Error(res.msg));
-                    }
-                    client.disconnect();
-                });
-            });
-
-            client.on("connect_error", (err) => {
-                if (err.message === "xhr poll error") {
-                    reject(new Error("Unable to connect to the Dockge instance"));
-                } else {
-                    reject(err);
-                }
-                client.disconnect();
-            });
-        });
+    async test(url : string, username : string, password : string) : Promise<void> {
+        const endpoint = new URL(url).host;
+        if (this.agentSocketList[endpoint]) {
+            throw new Error("The Dockge URL already exists");
+        }
+        await signInAgent(url, username, password);
     }
 
     /**
@@ -89,6 +54,7 @@ export class AgentManager {
         const agent = await Agent.deleteByUrl(url);
 
         if (agent) {
+            invalidateAgentSession(agent.url, agent.username, agent.password);
             const endpoint = agent.endpoint;
             this.disconnect(endpoint);
             this.sendAgentList();
@@ -112,7 +78,7 @@ export class AgentManager {
         }
     }
 
-    connect(url : string, username : string, password : string) {
+    async connect(url : string, username : string, password : string) {
         let obj = new URL(url);
         let endpoint = obj.host;
 
@@ -132,8 +98,21 @@ export class AgentManager {
         }
 
         log.info("agent-manager", "Connecting to the socket server: " + endpoint);
+        let cookie : string;
+        try {
+            cookie = await signInAgent(url, username, password);
+        } catch (error) {
+            this.socket.emit("agentStatus", { endpoint,
+                status: "offline",
+                msg: error instanceof Error && error.message.startsWith("auth") ? error.message : "authAgentLoginFailed" });
+            return;
+        }
+        if (!this.socket.connected || this.agentSocketList[endpoint]) {
+            return;
+        }
         let client = io(url, {
             extraHeaders: {
+                cookie,
                 endpoint,
             }
         });
@@ -141,27 +120,41 @@ export class AgentManager {
         client.on("connect", () => {
             log.info("agent-manager", "Connected to the socket server: " + endpoint);
 
-            client.emit("login", {
-                username: username,
-                password: password,
-            }, (res : LooseObject) => {
-                if (res.ok) {
-                    log.info("agent-manager", "Logged in to the socket server: " + endpoint);
-                    this.agentLoggedInList[endpoint] = true;
-                    this.socket.emit("agentStatus", {
-                        endpoint: endpoint,
-                        status: "online",
-                    });
-                } else {
-                    log.error("agent-manager", "Failed to login to the socket server: " + endpoint);
-                    this.agentLoggedInList[endpoint] = false;
-                    this.socket.emit("agentStatus", {
-                        endpoint: endpoint,
-                        status: "offline",
-                    });
-                }
-            });
         });
+
+        client.on("authIdentity", () => {
+            this.agentLoggedInList[endpoint] = true;
+            this.socket.emit("agentStatus", { endpoint,
+                status: "online" });
+        });
+        let renewing = false;
+        const renewSession = async () => {
+            if (renewing || !this.socket.connected) {
+                return;
+            }
+            renewing = true;
+            this.agentLoggedInList[endpoint] = false;
+            invalidateAgentSession(url, username, password, cookie);
+            client.disconnect();
+            this.socket.emit("agentStatus", { endpoint,
+                status: "connecting" });
+            try {
+                cookie = await signInAgent(url, username, password);
+                if (this.socket.connected && this.agentSocketList[endpoint] === client) {
+                    client.io.opts.extraHeaders = { endpoint,
+                        cookie };
+                    client.connect();
+                }
+            } catch (error) {
+                this.socket.emit("agentStatus", { endpoint,
+                    status: "offline",
+                    msg: error instanceof Error && error.message.startsWith("auth") ? error.message : "authAgentLoginFailed" });
+            } finally {
+                renewing = false;
+            }
+        };
+        client.on("needAuth", renewSession);
+        client.on("refresh", renewSession);
 
         client.on("connect_error", (err) => {
             log.error("agent-manager", "Error from the socket server: " + endpoint);
@@ -171,7 +164,12 @@ export class AgentManager {
             });
         });
 
-        client.on("disconnect", () => {
+        client.on("disconnect", (reason) => {
+            this.agentLoggedInList[endpoint] = false;
+            if (reason === "io server disconnect") {
+                void renewSession();
+                return;
+            }
             log.info("agent-manager", "Disconnected from the socket server: " + endpoint);
             this.socket.emit("agentStatus", {
                 endpoint: endpoint,
@@ -180,6 +178,19 @@ export class AgentManager {
         });
 
         client.on("agent", (...args : unknown[]) => {
+            if (!this.socket.connected) {
+                return;
+            }
+            if (this.socket.userRole === "viewer" && args[0] !== "stackList") {
+                return;
+            }
+            if (this.socket.userRole === "viewer" && args[0] === "stackList") {
+                const response = args[1] as { stackList? : Record<string, object> };
+                if (response?.stackList) {
+                    args[1] = { ...response,
+                        stackList: Object.fromEntries(Object.entries(response.stackList).map(([ name, stack ]) => [ name, viewerStackSummary(stack) ])) };
+                }
+            }
             this.socket.emit("agent", ...args);
         });
 
@@ -224,7 +235,11 @@ export class AgentManager {
             if (!agent) {
                 continue;
             }
-            this.connect(agent.url, agent.username, agent.password);
+            this.connect(agent.url, agent.username, agent.password).catch(() => {
+                this.socket.emit("agentStatus", { endpoint,
+                    status: "offline",
+                    msg: "authAgentLoginFailed" });
+            });
         }
     }
 
@@ -266,6 +281,8 @@ export class AgentManager {
             }
         }
 
+        // Waiting for a remote connection must not preserve permissions revoked meanwhile.
+        await authorizeSocketEvent(this.socket, eventName, true);
         client.emit("agent", endpoint, eventName, ...args);
     }
 
@@ -296,7 +313,8 @@ export class AgentManager {
             if (!agent) {
                 continue;
             }
-            result[endpoint] = agent.toJSON();
+            result[endpoint] = this.socket.userRole === "admin" ? agent.toJSON() : { endpoint,
+                name: agent.name };
         }
 
         this.socket.emit("agentList", {

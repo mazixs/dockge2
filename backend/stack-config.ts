@@ -1,6 +1,6 @@
 import fs, { promises as fsAsync } from "fs";
 import path from "path";
-import { classifyStackFile, isSafeNameSegment, isSafeStackFileName, pickDefaultComposeFile } from "../common/stack-files";
+import { classifyStackFile, isSafeNameSegment, isSafeStackFileName, looksLikeStackFile, pickDefaultComposeFile } from "../common/stack-files";
 import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
 import { log } from "./log";
 import { Settings } from "./settings";
@@ -11,6 +11,9 @@ export const STACK_FILES_SETTING_KEY = "stackFiles";
 
 /** Settings type, so the general settings screen cannot overwrite this entry */
 export const STACK_FILES_SETTING_TYPE = "stackFiles";
+
+/** Control characters never reach the screen: a name only ever becomes text there */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
 /**
  * Resolve a file of a stack directory and make sure it stays inside it.
@@ -324,6 +327,7 @@ export class StackConfig {
         const composeFileNames : string[] = [];
         const envFileNames : string[] = [];
         const secretFileNames : string[] = [];
+        const unsupportedFileNames : string[] = [];
 
         let entries : string[] = [];
         try {
@@ -333,9 +337,13 @@ export class StackConfig {
         }
 
         for (const entry of entries) {
+            let stat;
+
             // A symlink is not a stack file: it could point anywhere
             try {
-                if ((await fsAsync.lstat(path.join(stackDir, entry))).isSymbolicLink()) {
+                stat = await fsAsync.lstat(path.join(stackDir, entry));
+
+                if (stat.isSymbolicLink()) {
                     continue;
                 }
             } catch (e) {
@@ -353,6 +361,12 @@ export class StackConfig {
                     secretFileNames.push(entry);
                     break;
                 default:
+                    // A refused name is reported, not silently dropped: the file is
+                    // visible on disk, so a screen that never mentions it looks broken.
+                    // Control characters are stripped, the name only ever becomes text
+                    if (stat.isFile() && looksLikeStackFile(entry)) {
+                        unsupportedFileNames.push(entry.replace(CONTROL_CHARACTERS, ""));
+                    }
                     break;
             }
         }
@@ -360,6 +374,7 @@ export class StackConfig {
         composeFileNames.sort();
         envFileNames.sort();
         secretFileNames.sort();
+        unsupportedFileNames.sort();
 
         const stored = await this.get(stackName);
         const config = emptyStackFileConfig();
@@ -419,6 +434,7 @@ export class StackConfig {
             envFileNames,
             secretFiles,
             needsComposeSelection: composeFileNames.length > 1 && !stored?.composeFileName,
+            unsupportedFileNames,
         };
     }
 }

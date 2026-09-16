@@ -74,6 +74,9 @@ test("a stack without metadata keeps its historic files", async () => {
             // Files that are neither compose, env nor secret are ignored
             assert.deepEqual(inventory.envFileNames, [ ".env" ]);
             assert.deepEqual(inventory.secretFiles, []);
+
+            // README не выдавал себя за файл стека, и в отказанных ему не место
+            assert.deepEqual(inventory.unsupportedFileNames, []);
         } finally {
             await rm(stackDir, { recursive: true,
                 force: true });
@@ -243,5 +246,32 @@ test("the stored selection of a deleted stack is forgotten", async () => {
 
         // Removing twice is not an error
         await StackConfig.remove("temp-stack");
+    });
+});
+
+test("a file the name list refuses is reported instead of disappearing", async () => {
+    await withDatabase(async () => {
+        const stackDir = await makeStackDir({
+            "compose.yaml": "services: {}\n",
+            ".env": "KEY=value\n",
+            // Имя вне латиницы: compose такой файл не получит, но на диске он виден,
+            // и экран, не упомянувший его ни словом, читался бы как потеря файла
+            "настройки.env": "KEY=value\n",
+            "compose.старый.yaml": "services: {}\n",
+            "README.md": "notes\n",
+        });
+
+        try {
+            const inventory = await StackConfig.inventory(stackDir, "refused-stack");
+
+            assert.deepEqual(inventory.unsupportedFileNames, [ "compose.старый.yaml", "настройки.env" ]);
+
+            // Отказанное имя остается только текстом: ни в один выбор оно не попадает
+            assert.deepEqual(inventory.composeFileNames, [ "compose.yaml" ]);
+            assert.deepEqual(inventory.envFileNames, [ ".env" ]);
+        } finally {
+            await rm(stackDir, { recursive: true,
+                force: true });
+        }
     });
 });

@@ -151,3 +151,27 @@ export function pickDefaultComposeFile(composeFileNames : readonly string[]) : s
 
     return [ ...composeFileNames ].sort()[0] ?? "";
 }
+
+/**
+ * Whether a refused name still looks like a stack file.
+ *
+ * The allow-list is deliberately narrow, and a name it turns down simply disappears
+ * from the inventory: the file lies in the directory, but no screen mentions it. That
+ * reads as data loss. Names of this shape are the ones a person meant as stack files -
+ * `настройки.env`, `compose.старый.yaml` - so the screen can say out loud why they are
+ * not on the list. Everything else in the directory (`README.md`, `data/`) was never
+ * a stack file and stays out.
+ * @param fileName Name found in the stack directory
+ * @returns True when the name was meant as a stack file but is not accepted
+ */
+export function looksLikeStackFile(fileName : string) : boolean {
+    if (classifyStackFile(fileName) !== null) {
+        return false;
+    }
+
+    const lower = fileName.toLowerCase();
+
+    return lower.endsWith(".yaml") || lower.endsWith(".yml")
+        || lower.startsWith(".env") || lower.endsWith(".env")
+        || lower.startsWith(".secret") || lower.endsWith(".secret");
+}

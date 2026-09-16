@@ -33,7 +33,7 @@ test("сводка по реестрам считает и упорядочив�
     ]);
 });
 
-test("одинаковые счётчики упорядочены по имени, чтобы чип не прыгал", () => {
+test("одинаковые счетчики упорядочены по имени, чтобы чип не прыгал", () => {
     const first = summariseRegistries([ "ghcr.io/a/b", "redis" ]);
     const second = summariseRegistries([ "redis", "ghcr.io/a/b" ]);
     assert.deepEqual(first, second);

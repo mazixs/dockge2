@@ -84,9 +84,9 @@ test("Stack validates, saves and reads compose files using the real filesystem",
         assert.equal(stack.isManagedByDockge, false);
         assert.equal(stack.status, UNKNOWN);
         assert.equal(stack.fullPath, path.join(stacksDir, "demo-stack"));
-        // Строка списка несёт и сводку сервисов, и источник каталога: до обхода списка
-        // они пусты, но поле обязано быть, иначе интерфейс не отличит «нет данных»
-        // от «поле не пришло»
+        // Строка списка несет и сводку сервисов, и источник каталога: до обхода списка
+        // они пусты, но поле обязано быть, иначе интерфейс не отличит "нет данных"
+        // от "поле не пришло"
         assert.deepEqual(stack.toSimpleJSON("localhost"), {
             name: "demo-stack",
             status: UNKNOWN,

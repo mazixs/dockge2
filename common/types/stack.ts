@@ -52,4 +52,10 @@ export interface StackFileInventory {
      * The server keeps using a deterministic choice, but the UI has to ask.
      */
     needsComposeSelection : boolean;
+    /**
+     * Files that lie in the directory, were meant as stack files and were refused by the
+     * name allow-list. They are reported so the screen can explain the absence instead of
+     * leaving a file the person can see on disk missing from every list.
+     */
+    unsupportedFileNames : string[];
 }

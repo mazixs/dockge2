@@ -19,7 +19,7 @@ test("длительность читается из настоящих фраз
 });
 
 test("фраза без длительности не превращается в число", () => {
-    // «Created» ничего не говорит о времени, и выдумывать его нельзя
+    // "Created" ничего не говорит о времени, и выдумывать его нельзя
     assert.equal(parseDockerDuration("Created"), null);
     assert.equal(parseDockerDuration(""), null);
     assert.equal(parseDockerDuration("Up"), null);

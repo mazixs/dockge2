@@ -28,7 +28,7 @@ function tempDir() : string {
     return mkdtempSync(path.join(os.tmpdir(), "dockge-source-"));
 }
 
-test("обычный каталог не выдаётся за репозиторий", async () => {
+test("обычный каталог не выдается за репозиторий", async () => {
     const dir = tempDir();
 
     try {
@@ -64,7 +64,7 @@ test("рабочее дерево читается вместе с ветвью,
     const work = tempDir();
 
     try {
-        // Отдельный «удалённый» репозиторий в файловой системе: сеть не нужна
+        // Отдельный "удаленный" репозиторий в файловой системе: сеть не нужна
         await git(upstream, [ "init", "--bare", "--initial-branch=main", "." ]);
 
         await git(work, [ "init", "--initial-branch=main", "." ]);
@@ -85,7 +85,7 @@ test("рабочее дерево читается вместе с ветвью,
         assert.equal(clean.behind, 0);
         assert.ok(clean.remote.includes(path.basename(upstream)), clean.remote);
 
-        // Незакоммиченная правка обязана быть видна: обновление из Git её перепишет
+        // Незакоммиченная правка обязана быть видна: обновление из Git ее перепишет
         writeFileSync(path.join(work, "compose.yaml"), "services: {}\n# правка\n");
         clearStackSourceCache();
         assert.equal((await readStackSource(work)).dirty, true);
@@ -114,7 +114,7 @@ test("отставание считается по локальным ссылк
         await git(first, [ "remote", "add", "origin", upstream ]);
         await git(first, [ "push", "-u", "origin", "main" ]);
 
-        // Второе рабочее дерево отстаёт на два коммита после fetch
+        // Второе рабочее дерево отстает на два коммита после fetch
         await git(second, [ "clone", upstream, "." ]);
         for (const message of [ "second", "third" ]) {
             writeFileSync(path.join(first, `${message}.txt`), `${message}\n`);
@@ -135,7 +135,7 @@ test("отставание считается по локальным ссылк
     }
 });
 
-test("ответ переиспользуется, пока не истёк срок кеша", async () => {
+test("ответ переиспользуется, пока не истек срок кеша", async () => {
     const dir = tempDir();
 
     try {
@@ -155,7 +155,7 @@ test("ответ переиспользуется, пока не истёк ср
     }
 });
 
-test("учётные данные из адреса удаляются, потому что адрес виден в интерфейсе", () => {
+test("учетные данные из адреса удаляются, потому что адрес виден в интерфейсе", () => {
     assert.equal(cleanRemote("https://user:token@github.com/mazix/stack.git"), "github.com/mazix/stack");
     assert.equal(cleanRemote("git@github.com:mazix/stack.git"), "github.com/mazix/stack");
     assert.equal(cleanRemote("https://github.com/mazix/stack/"), "github.com/mazix/stack");

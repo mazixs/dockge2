@@ -12,7 +12,7 @@ function convert(command : string) : string {
     return composerize(command, "", "latest").split("\n").slice(1).join("\n");
 }
 
-test("команда разбирается так же, как её читает оболочка", () => {
+test("команда разбирается так же, как ее читает оболочка", () => {
     assert.deepEqual(
         tokeniseCommand("docker run -d --name web -p 8080:80 nginx"),
         [ "docker", "run", "-d", "--name", "web", "-p", "8080:80", "nginx" ],
@@ -66,12 +66,12 @@ test("короткие флаги читаются слитно и группа�
     ]);
 });
 
-test("перенесённые флаги видны в отчёте по настоящему выводу конвертера", () => {
+test("перенесенные флаги видны в отчете по настоящему выводу конвертера", () => {
     const command = "docker run -d --name web -p 8080:80 -v /srv/data:/data -e TZ=Europe/Moscow --restart unless-stopped nginx";
     const report = analyseConversion(command, convert(command));
 
     const carried = report.carried.map((item) => item.flag);
-    assert.ok(carried.includes("--name"), `--name не признан перенесённым: ${JSON.stringify(report)}`);
+    assert.ok(carried.includes("--name"), `--name не признан перенесенным: ${JSON.stringify(report)}`);
     assert.ok(carried.includes("-p"));
     assert.ok(carried.includes("-v"));
     assert.ok(carried.includes("-e"));
@@ -81,7 +81,7 @@ test("перенесённые флаги видны в отчёте по нас
     assert.equal(report.dropped.some((item) => item.flag === "-d"), false);
 });
 
-test("флаг, который конвертер не перенёс, попадает в потери", () => {
+test("флаг, который конвертер не перенес, попадает в потери", () => {
     // Проверяем на настоящем выводе: если composerize однажды научится
     // переносить --device, тест это заметит и его нужно будет обновить
     const command = "docker run -d --name jellyfin --device /dev/dri:/dev/dri -p 8096:8096 jellyfin/jellyfin";
@@ -92,15 +92,15 @@ test("флаг, который конвертер не перенёс, попа�
     const reported = report.dropped.find((item) => item.flag === "--device");
 
     if (carriesDevices) {
-        assert.equal(reported, undefined, "конвертер перенёс --device, отчёт не должен звать это потерей");
+        assert.equal(reported, undefined, "конвертер перенес --device, отчет не должен звать это потерей");
     } else {
-        assert.ok(reported, `--device потерян, но в отчёте его нет: ${JSON.stringify(report)}`);
+        assert.ok(reported, `--device потерян, но в отчете его нет: ${JSON.stringify(report)}`);
         assert.equal(reported?.value, "/dev/dri:/dev/dri");
         assert.equal(reported?.reason, "flagNoComposeKey");
     }
 });
 
-test("отчёт следует за конвертером, а не за нашими предположениями", () => {
+test("отчет следует за конвертером, а не за нашими предположениями", () => {
     const command = "docker run -d --gpus all --label-file ./labels.txt -P nginx";
     const compose = convert(command);
     const report = analyseConversion(command, compose);
@@ -112,7 +112,7 @@ test("отчёт следует за конвертером, а не за наш
     assert.ok(dropped.includes("-P"), `-P: ${JSON.stringify(report)}`);
 
     // А --gpus он переносит в deploy.resources, и звать это потерей было бы ложью
-    assert.ok(/driver: nvidia/.test(compose), "конвертер перестал переносить --gpus, отчёт надо обновить");
+    assert.ok(/driver: nvidia/.test(compose), "конвертер перестал переносить --gpus, отчет надо обновить");
     assert.ok(carried.includes("--gpus"), `--gpus: ${JSON.stringify(report)}`);
 });
 
@@ -127,7 +127,7 @@ test("флаги, требующие внимания, не путаются с 
     // --rm не имеет аналога и должен быть назван потерей, а не тихо исчезнуть
     assert.ok(dropped.includes("--rm"), `--rm не назван: ${JSON.stringify(report)}`);
 
-    // env-file и network требуют взгляда человека, если конвертер их перенёс
+    // env-file и network требуют взгляда человека, если конвертер их перенес
     for (const flag of [ "--env-file", "--network" ]) {
         assert.ok(
             review.includes(flag) || dropped.includes(flag),
@@ -146,8 +146,8 @@ test("незнакомый флаг не исчезает молча", () => {
     assert.equal(unknown?.reason, "flagUnknown");
 });
 
-test("сломанный YAML не превращает перенесённые флаги в перенесённые", () => {
-    // Если конвертер вернул мусор, о переносе судить нельзя: всё уходит в потери
+test("сломанный YAML не превращает перенесенные флаги в перенесенные", () => {
+    // Если конвертер вернул мусор, о переносе судить нельзя: все уходит в потери
     const report = analyseConversion("docker run -p 8080:80 nginx", "не: [yaml");
     assert.equal(report.carried.length, 0);
     assert.equal(report.dropped.some((item) => item.flag === "-p"), true);
