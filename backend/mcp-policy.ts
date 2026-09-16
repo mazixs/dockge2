@@ -6,7 +6,7 @@ export const MCP_READ_TOOLS = [ "servers_list", "stacks_list", "containers_list"
 
 /** Machine credentials are accepted exclusively in the Bearer header. */
 export function parseBearer(header : string | undefined) : string | null {
-    return /^Bearer dg_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(header ?? "") ? header!.slice(7) : null;
+    return /^Bearer dg2?_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(header ?? "") ? header!.slice(7) : null;
 }
 
 /** High entropy secrets need a one-way digest, never reversible encryption. */

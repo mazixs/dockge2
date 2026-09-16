@@ -59,7 +59,7 @@ test.describe("owner MCP key management", () => {
             issueStatus = issued.status();
             await settings.locator(".mcp-secret").waitFor({ state: "visible" });
             // Return a boolean only. The key never enters a Node variable or assertion message.
-            validReveal = await page.evaluate(() => /^dg_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(document.querySelector(".mcp-secret")?.textContent ?? ""));
+            validReveal = await page.evaluate(() => /^dg2_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(document.querySelector(".mcp-secret")?.textContent ?? ""));
         } finally {
             // Scrub the rendered credential before any fallible assertion or diagnostic capture.
             await page.evaluate(() => {

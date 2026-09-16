@@ -35,7 +35,10 @@
                         </select>
                     </div>
                 </div>
-                <p class="form-text">{{ $t("authUsernameHint") }} {{ $t("usersRoleHint") }}</p>
+                <ul class="form-hints">
+                    <li>{{ $t("authUsernameHint") }}</li>
+                    <li>{{ $t("usersRoleHint") }}</li>
+                </ul>
                 <div class="actions">
                     <button class="btn btn-primary" :disabled="busy">{{ $t("Create") }}</button>
                     <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
@@ -110,7 +113,6 @@
                     <StateChip
                         :state="user.suspended ? 'stopped' : 'running'"
                         :label="$t(user.suspended ? 'usersSuspended' : 'usersActive')"
-                        compact
                     />
 
                     <div class="actions">
@@ -287,6 +289,16 @@ export default {
     gap: var(--gap-md);
 }
 
+// Подсказки формы - список, а не абзац: две разные мысли подряд сливались
+// в одну фразу без начала и конца
+.form-hints {
+    margin: 0;
+    padding-left: var(--gap-lg);
+    color: var(--text-faint);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+}
+
 .user-identity {
     display: flex;
     flex-direction: column;
@@ -316,9 +328,17 @@ export default {
     line-height: var(--line-sm);
 }
 
+// Роль - бирка рядом с бирой доступа: два свойства одного человека читаются
+// парой, а не надписью и значком разного вида
 .user-role {
+    padding: 0 var(--gap-sm);
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-pill);
+    background-color: var(--surface-raised);
     color: var(--text-muted);
     font-size: var(--text-sm);
+    line-height: var(--control-height-sm);
+    white-space: nowrap;
 }
 
 @media (max-width: 600px) {

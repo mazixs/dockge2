@@ -8,7 +8,7 @@
 
         <div class="panel-body about-body">
             <div class="brand">
-                <object width="48" height="48" data="/icon.svg" aria-hidden="true" />
+                <span class="brand-tile" aria-hidden="true"><InterfaceIcon name="box" /></span>
                 <div class="brand-text">
                     <p class="wordmark"><BrandMark /></p>
                     <p class="versions">{{ $t("Version") }} {{ $root.info.version }} · {{ $t("Frontend Version") }} {{ $root.frontendVersion }}</p>
@@ -71,6 +71,21 @@ export default {
     display: flex;
     align-items: center;
     gap: var(--gap-md);
+}
+
+// Знак продукта рисуется тем же контуром, что в шапке, а не файлом значка
+// вкладки: у файла свой непрозрачный фон и своя зелень, и на панели он читался
+// как чужая наклейка поверх темы
+.brand-tile {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border: 1px solid var(--line-hair);
+    border-radius: var(--radius-card);
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--text-title-sm);
 }
 
 .brand-text {
