@@ -108,7 +108,6 @@ export default {
 
 .more {
     color: var(--text-faint);
-    font-size: var(--text-xs);
 }
 
 // На узком экране действие уходит на свою строку, а метка и причины делят
