@@ -1,0 +1,9 @@
+# The smallest stack that still exercises the whole path: create, deploy, open
+# a published port, read the journal, restart, remove. No volumes and no state,
+# so it can be thrown away and created again as often as a test needs.
+services:
+  hello:
+    image: traefik/whoami:v1.10
+    ports:
+      - "8099:80"
+    restart: unless-stopped
