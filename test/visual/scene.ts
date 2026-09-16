@@ -24,6 +24,7 @@ import Login from "../../frontend/src/components/Login.vue";
 import Setup from "../../frontend/src/pages/Setup.vue";
 import { FontAwesomeIcon } from "../../frontend/src/icon";
 import ru from "../../frontend/src/lang/ru.json";
+import pkg from "../../package.json";
 import { i18n } from "../../frontend/src/i18n";
 import responsive from "../../frontend/src/mixins/responsive";
 import theme from "../../frontend/src/mixins/theme";
@@ -588,9 +589,11 @@ const scene = createApp({
     mixins: [ responsive, theme ],
     data() {
         return { appReady: true,
+            // Версия берется из манифеста: вписанная руками она осталась на 1.5.0
+            // и экран "О программе" показывал версию, которой у форка никогда не было
             info: { primaryHostname: "localhost",
-                version: "1.5.0" },
-            frontendVersion: "1.5.0",
+                version: pkg.version },
+            frontendVersion: pkg.version,
             isFrontendBackendVersionMatched: true,
             loggedIn: true,
             canManageStacks: true,
