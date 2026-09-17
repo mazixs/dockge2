@@ -44,12 +44,14 @@
                 <template #button-content>
                     <font-awesome-icon icon="plus" />{{ $t("openShell") }}
                 </template>
-                <BDropdownItem
-                    v-for="service in shellTargets" :key="service"
-                    @click="openShell({ serviceName: service, shell: 'sh' })"
-                >
-                    <font-awesome-icon icon="terminal" />{{ service }} · sh
-                </BDropdownItem>
+                <template v-for="service in shellTargets" :key="service">
+                    <BDropdownItem @click="openShell({ serviceName: service, shell: 'sh' })">
+                        <font-awesome-icon icon="terminal" />{{ service }} · sh
+                    </BDropdownItem>
+                    <BDropdownItem @click="openShell({ serviceName: service, shell: 'bash' })">
+                        <font-awesome-icon icon="terminal" />{{ service }} · bash
+                    </BDropdownItem>
+                </template>
                 <BDropdownItem v-if="shellTargets.length === 0" disabled>{{ $t("noRunningServices") }}</BDropdownItem>
             </BDropdown>
         </div>
@@ -58,14 +60,25 @@
              консоль появляется вместе с первой оболочкой -->
         <div v-if="sessions.length === 0" class="panel-body terminal-start">
             <p class="start-note">{{ shellTargets.length > 0 ? $t("terminalPickService") : $t("noRunningServices") }}</p>
+            <!-- Две оболочки на выбор: sh есть почти везде, bash удобнее и
+                 встречается в больших образах. Если его в образе нет, сессия не
+                 открывается и об этом говорится прямо, а не молча -->
             <div class="start-targets">
-                <button
-                    v-for="service in shellTargets" :key="service"
-                    class="btn btn-sm btn-normal" type="button"
-                    @click="openShell({ serviceName: service, shell: 'sh' })"
-                >
-                    <font-awesome-icon icon="terminal" />{{ service }} · sh
-                </button>
+                <span v-for="service in shellTargets" :key="service" class="start-target">
+                    <button
+                        class="btn btn-sm btn-normal" type="button"
+                        @click="openShell({ serviceName: service, shell: 'sh' })"
+                    >
+                        <font-awesome-icon icon="terminal" />{{ service }} · sh
+                    </button>
+                    <button
+                        class="btn btn-sm btn-normal shell-alt" type="button"
+                        :aria-label="`${$t('openShell')}: ${service} · bash`"
+                        @click="openShell({ serviceName: service, shell: 'bash' })"
+                    >
+                        bash
+                    </button>
+                </span>
             </div>
         </div>
 
@@ -368,6 +381,24 @@ export default {
     display: flex;
     flex-wrap: wrap;
     gap: var(--gap-sm);
+}
+
+// Пара кнопок одного сервиса - одна вещь: sh обычный выбор, bash запасной.
+// С зазором между ними вторая кнопка читалась как отдельный сервис
+.start-target {
+    display: inline-flex;
+
+    > .btn:first-child {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+}
+
+.shell-alt {
+    margin-left: -1px;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    color: var(--text-muted);
 }
 
 .terminal-body {

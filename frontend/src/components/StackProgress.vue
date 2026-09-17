@@ -596,6 +596,13 @@ export default {
     background-color: var(--state-failed);
 }
 
+// Окно вывода открывают, чтобы что-то прочитать, а не чтобы смотреть, как оно
+// выезжает: 300 миллисекунд Bootstrap здесь заметно медленнее самой нужды
+.log-dialog.fade,
+.log-dialog .modal-dialog {
+    transition-duration: var(--motion-fast);
+}
+
 @keyframes thread-sweep {
     from { transform: translateX(-100%); }
     to { transform: translateX(333%); }
@@ -609,11 +616,11 @@ export default {
 }
 
 .strip-enter-active {
-    transition: opacity var(--motion-base) var(--motion-ease), transform var(--motion-slow) var(--motion-ease);
+    transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-base) var(--motion-ease);
 }
 
 .strip-leave-active {
-    transition: opacity var(--motion-base) var(--motion-ease-in), transform var(--motion-base) var(--motion-ease-in);
+    transition: opacity var(--motion-fast) var(--motion-ease-in), transform var(--motion-fast) var(--motion-ease-in);
 }
 
 .mark-icon {

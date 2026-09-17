@@ -189,18 +189,19 @@
                                             <td v-if="showUsage" class="service-usage">{{ usageLabel(service) || "-" }}</td>
                                             <td v-if="$root.canManageStacks" class="service-actions">
                                                 <button
-                                                    class="row-action" type="button" :title="$t('openLogs')"
-                                                    :aria-label="`${$t('openLogs')}: ${service.name}`" @click="openLogs"
+                                                    class="row-action" type="button" :title="$t('openShell')"
+                                                    :disabled="!service.running"
+                                                    :aria-label="`${$t('openShell')}: ${service.name}`" @click="openShell(service.name)"
                                                 >
                                                     <InterfaceIcon name="terminal" />
                                                 </button>
                                                 <details class="service-menu" @toggle="placeServiceMenu" @keydown.esc="closeServiceMenu">
                                                     <summary :aria-label="`${$t('moreActions')}: ${service.name}`">⋯</summary><div @click="closeServiceMenu">
                                                         <button
-                                                            v-if="service.running" class="menu-action" type="button"
-                                                            :aria-label="`${$t('openShell')}: ${service.name}`" @click="openShell(service.name)"
+                                                            class="menu-action" type="button"
+                                                            :aria-label="`${$t('openLogs')}: ${service.name}`" @click="openLogs"
                                                         >
-                                                            <font-awesome-icon icon="terminal" fixed-width /> {{ $t("openShell") }}
+                                                            <font-awesome-icon icon="list" fixed-width /> {{ $t("openLogs") }}
                                                         </button>
                                                         <button
                                                             v-if="!service.running" class="menu-action" type="button"
@@ -1526,6 +1527,11 @@ export default {
     &:focus-visible {
         outline: var(--focus-ring);
         outline-offset: var(--focus-offset);
+    }
+
+    // Остановленный контейнер: оболочки в нем нет, и кнопка честно об этом говорит
+    &[disabled] {
+        opacity: 0.4;
     }
 }
 

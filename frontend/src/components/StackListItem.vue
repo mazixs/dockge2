@@ -10,7 +10,7 @@
         <div class="stack-item-text">
             <div class="line">
                 <span v-ellipsis-title class="name">{{ stackName }}</span>
-                <span v-if="isFresh" class="fresh-badge">{{ $t("justNow") }}</span>
+                <span v-if="isFresh" class="fresh-badge" :title="$t('justNow')" :aria-label="$t('justNow')" role="img"><InterfaceIcon name="check" /></span>
             </div>
 
             <div class="meta">
@@ -307,12 +307,13 @@ a.item {
     color: var(--state-attention);
 }
 
+// Только что созданный стек уже подсвечен строкой. Слово здесь ничего не
+// добавляло бы и устаревало бы молча, поэтому остается один знак
 .fresh-badge {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
     color: var(--state-running);
-    border: 1px solid color-mix(in srgb, var(--state-running) 45%, transparent);
-    border-radius: var(--radius-chip);
-    padding: 0 var(--gap-xs);
+    font-size: var(--icon-sm);
 }
 </style>

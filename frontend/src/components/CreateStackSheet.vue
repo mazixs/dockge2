@@ -119,10 +119,18 @@
                 </div>
             </div>
 
-            <!-- Развертывание: тот же слой, список контейнеров и время -->
+            <!-- Развертывание: тот же слой, список контейнеров и время. Команду
+                 видно, пока она идет, и ее можно прервать: раньше кнопка обрыва
+                 была только в коде -->
             <div v-else class="progress">
+                <div class="progress-head">
+                    <span class="pulse" aria-hidden="true"></span>
+                    <span class="progress-title">{{ $t("deployRunning", [ elapsed ]) }}</span>
+                    <span class="spacer"></span>
+                    <button class="btn btn-quiet btn-sm" type="button" @click="abort">{{ $t("abortRunning") }}</button>
+                </div>
                 <div v-for="service in progressServices" :key="service" class="prow">
-                    <span class="name">{{ service }}</span>
+                    <span v-ellipsis-title class="name">{{ service }}</span>
                     <span class="sub">{{ $t("deployWaiting") }}</span>
                 </div>
                 <p class="sub">{{ $t("deployOutputInTerminal") }}</p>
@@ -253,6 +261,7 @@ export default {
                 return;
             }
             this.scheduleRecognition();
+            this.inheritComposeName();
         },
         initialEndpoint(value) {
             if (!this.deploying && !this.saving) {
@@ -462,21 +471,60 @@ export default {
          * @returns {string} Предлагаемое имя
          */
         suggestName(composeYAML) {
-            let candidate = this.serviceNames(composeYAML)[0] ?? "";
+            return this.containerName(composeYAML) || this.stackNameFrom(this.serviceNames(composeYAML)[0] ?? "");
+        },
 
+        /**
+         * Явно названный контейнер из compose-файла.
+         * Только `container_name`: если человек его написал, он уже назвал эту
+         * вещь. Имени сервиса здесь нет намеренно - оно есть всегда, и подставлять
+         * его значило бы называть стек за пользователя.
+         * @param {string} composeYAML Содержимое compose-файла
+         * @returns {string} Имя, пригодное для каталога, или пустая строка
+         */
+        containerName(composeYAML) {
             try {
                 const services = parse(composeYAML)?.services ?? {};
-                const first = Object.values(services)[0];
 
-                if (first?.container_name) {
-                    candidate = String(first.container_name);
+                for (const service of Object.values(services)) {
+                    if (service?.container_name) {
+                        return this.stackNameFrom(String(service.container_name));
+                    }
                 }
             } catch {
-                // Незаконченный YAML: остается имя сервиса
+                // Незаконченный YAML - обычное состояние поля во время правки
             }
 
+            return "";
+        },
+
+        /**
+         * Привести имя к тому, что допустимо для каталога стека
+         * @param {string} candidate Исходное имя
+         * @returns {string} Имя стека
+         */
+        stackNameFrom(candidate) {
             // Имя стека - это каталог, поэтому только то, что проходит барьер путей
             return candidate.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+        },
+
+        /**
+         * Наследовать имя стека из вставленного compose-файла.
+         * Пользователь может его сразу исправить: подстановка перестает работать
+         * с первым же нажатием в поле имени. Если контейнер не назван, поле
+         * остается пустым и продолжить нельзя - это прежнее поведение.
+         * @returns {void}
+         */
+        inheritComposeName() {
+            if (this.nameTouched || this.looksLikeDockerRun(this.source)) {
+                return;
+            }
+
+            const inherited = this.containerName(this.source);
+
+            if (inherited) {
+                this.name = inherited;
+            }
         },
 
         /**
@@ -639,6 +687,9 @@ export default {
 header {
     display: flex;
     align-items: center;
+    // Имя стека бывает длинным, а рабочая область под слоем - узкой: строка
+    // переносится, а не сжимает заголовок в столбик по букве
+    flex-wrap: wrap;
     gap: var(--gap-md);
     padding: var(--gap-md) var(--gap-lg);
     border-bottom: 1px solid var(--line-hair);
@@ -893,7 +944,8 @@ textarea {
 
     .prow {
         display: flex;
-        gap: var(--gap-md);
+        flex-wrap: wrap;
+        gap: var(--gap-xs) var(--gap-md);
         align-items: baseline;
         min-height: var(--row-height-dense);
         padding-bottom: var(--gap-sm);
@@ -901,11 +953,49 @@ textarea {
         font-size: var(--text-sm);
     }
 
+    // Имя сервиса занимает строку, а не держит колонку в 200 пикселей: в узкой
+    // области та колонка выдавливала состояние за край
     .name {
-        min-width: 200px;
+        min-width: 0;
+        flex: 1 1 12ch;
         font-family: var(--font-mono);
         color: var(--text-strong);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
+}
+
+// Шапка развертывания: что идет, сколько уже идет и чем это прервать
+.progress-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gap-sm);
+    padding-bottom: var(--gap-sm);
+    border-bottom: 1px solid var(--line-hair);
+    font-size: var(--text-sm);
+}
+
+.progress-title {
+    color: var(--text-strong);
+}
+
+.pulse {
+    width: var(--gap-sm);
+    height: var(--gap-sm);
+    flex: none;
+    border-radius: 50%;
+    background-color: var(--state-attention);
+    animation: pulse-fade 1.2s var(--motion-ease) infinite;
+}
+
+@keyframes pulse-fade {
+    50% { opacity: .3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pulse { animation: none; }
 }
 
 footer {
