@@ -55,5 +55,11 @@ test.describe("ход команды стека", () => {
         await page.getByRole("link", { name: /^(overview|обзор)$/i }).click();
         await page.getByRole("button", { name: /^(stop|остановить)$/i }).click();
         await expect(page.locator(".run-strip")).toBeVisible();
+
+        // Спек уходит только тогда, когда остановка закончилась. `compose down`
+        // убирает сеть стека, а это меняет сеть самой машины: страница, которую
+        // в этот момент грузит следующий спек, теряет соединение с vite и
+        // остается пустой. Кнопка запуска возвращается ровно по концу команды
+        await expect(page.getByRole("button", { name: /^(start|запустить)$/i })).toBeVisible({ timeout: 60_000 });
     });
 });
