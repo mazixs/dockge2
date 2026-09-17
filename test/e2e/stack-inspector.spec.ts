@@ -25,10 +25,13 @@ test.describe("список и инспектор", () => {
         await expect(controls.getByRole("menuitem", { name: /^(update images|обновить образы)$/i })).toBeVisible();
         await page.keyboard.press("Escape");
 
-        // Действия строки сервиса озвучиваются вместе с именем сервиса
+        // Действия строки сервиса озвучиваются вместе с именем сервиса. В строке
+        // стоит терминал - то же, что рисует ее значок; журнал и остальное живут
+        // под тремя точками
         const service = inspector.locator(".service-row").first();
-        await expect(service.getByRole("button", { name: /logs|журнал|логи/i })).toBeVisible();
+        await expect(service.getByRole("button", { name: /^(open shell|открыть оболочку):\s.+/i })).toBeVisible();
         await service.locator(".service-menu > summary").click();
+        await expect(service.getByRole("button", { name: /^(logs|логи|журнал):\s.+/i })).toBeVisible();
         await expect(service.getByRole("button", { name: /^(restart|перезапустить):\s.+/i })).toBeVisible();
     });
 
