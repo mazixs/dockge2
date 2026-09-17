@@ -24,7 +24,17 @@ export interface ImageUpdate {
 }
 
 /** One registry call must not hold the panel */
-const TIMEOUT_MS = 20_000;
+const TIMEOUT_MS = 8_000;
+
+/**
+ * How many images are asked about at once.
+ *
+ * Serially the wait was the sum of every image: a stack of six unreachable images
+ * spent minutes before the preview said anything. In parallel it is roughly the
+ * slowest one, and the limit keeps a large stack from spawning a docker process per
+ * service at the same moment.
+ */
+const CONCURRENCY = 4;
 
 /** Answers are reused for this long, so repeated presses do not hammer the registry */
 const CACHE_MS = 10 * 60_000;
@@ -113,33 +123,47 @@ async function remoteDigest(image : string) : Promise<string> {
 export async function readImageUpdates(images : readonly string[], now = Date.now()) : Promise<ImageUpdate[]> {
     const unique = [ ...new Set(images.filter((image) => image.trim() !== "")) ];
     const answers = new Map<string, ImageUpdate>();
+    const pending : string[] = [];
 
     for (const image of unique) {
         const cached = cache.get(image);
 
         if (cached && now - cached.readAt < CACHE_MS) {
             answers.set(image, cached.update);
-            continue;
+        } else {
+            pending.push(image);
         }
-
-        const [ local, remote ] = await Promise.all([ localDigest(image), remoteDigest(image) ]);
-        const newer = isNewerImage(local || null, remote || null);
-
-        let reason = "";
-        if (newer === null) {
-            reason = local ? "registryUnreachable" : "notPulled";
-        }
-
-        const update : ImageUpdate = { image,
-            local,
-            remote,
-            newer,
-            reason };
-
-        cache.set(image, { update,
-            readAt: now });
-        answers.set(image, update);
     }
+
+    const queue = [ ...pending ];
+
+    /**
+     * Take images off the queue one by one until it is empty
+     * @returns Nothing: the answers go into the shared map
+     */
+    const worker = async () : Promise<void> => {
+        for (let image = queue.shift(); image !== undefined; image = queue.shift()) {
+            const [ local, remote ] = await Promise.all([ localDigest(image), remoteDigest(image) ]);
+            const newer = isNewerImage(local || null, remote || null);
+
+            let reason = "";
+            if (newer === null) {
+                reason = local ? "registryUnreachable" : "notPulled";
+            }
+
+            const update : ImageUpdate = { image,
+                local,
+                remote,
+                newer,
+                reason };
+
+            cache.set(image, { update,
+                readAt: now });
+            answers.set(image, update);
+        }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker()));
 
     return unique.map((image) => answers.get(image) as ImageUpdate);
 }

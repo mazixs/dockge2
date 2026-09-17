@@ -11,7 +11,7 @@
         <!-- Порядок блоков карточки: сначала шаг, на котором стоит пользователь,
              потом способ завести стек, потом сама форма. Шаг - рамка для всего
              остального, поэтому он не может стоять ниже выбора источника -->
-        <section v-if="!result" class="panel create-card" :aria-busy="busy">
+        <section v-if="!result" class="panel create-card" :class="{ wide: composeBusy }" :aria-busy="busy">
             <div class="create-top">
                 <ol class="create-steps" :aria-label="$t('gitUiCreationSteps')">
                     <li :class="{ active: currentStep === 1, done: currentStep === 2 }"><b>1</b>{{ $t("gitUiSource") }}</li>
@@ -277,6 +277,12 @@ export default {
     width: 100%;
     max-width: 560px;
     margin: 0 auto;
+}
+
+// Пока стек разворачивается, в карточке уже не форма, а ход команды: список
+// сервисов и время в колонке шириной с поле ввода читались как обрезанные
+.create-card.wide {
+    max-width: 820px;
 }
 
 // Знак, имя экрана и строка объяснения стоят на одной оси с формой

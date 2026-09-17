@@ -140,11 +140,21 @@
                             </button>
                         </div>
 
+                        <!-- Переменные окружения свернуты, пока их не попросят показать:
+                             экран открывают при людях, и пароль в .env не должен
+                             появляться на нем сам собой -->
+                        <p v-if="!envShown" class="panel-body env-hidden">
+                            <span>{{ $t("envHidden") }}</span>
+                            <button class="btn btn-sm btn-normal" type="button" @click="envRevealed = true">
+                                <font-awesome-icon icon="eye" />{{ $t("envReveal") }}
+                            </button>
+                        </p>
+
                         <!-- Пустой файл говорит об этом словами: черный прямоугольник с одной
                              строкой читался как сбой загрузки, а не как файл без переменных -->
-                        <p v-if="!isEditMode && envIsEmpty" class="panel-body empty-file">{{ $t("envFileEmpty") }}</p>
+                        <p v-if="envShown && !isEditMode && envIsEmpty" class="panel-body empty-file">{{ $t("envFileEmpty") }}</p>
 
-                        <div v-show="isEditMode || !envIsEmpty" class="editor-box" :class="{'edit-mode' : isEditMode}">
+                        <div v-show="envShown && (isEditMode || !envIsEmpty)" class="editor-box" :class="{'edit-mode' : isEditMode}">
                             <code-mirror
                                 ref="envEditor"
                                 v-model="stack.composeENV"
@@ -159,7 +169,7 @@
                             />
                         </div>
 
-                        <p v-if="isEditMode || !envIsEmpty" class="panel-foot kept"><ShieldCheck />{{ $t("fileSourceNote") }}</p>
+                        <p v-if="envShown && (isEditMode || !envIsEmpty)" class="panel-foot kept"><ShieldCheck />{{ $t("fileSourceNote") }}</p>
                     </section>
 
                     <!-- Контейнеры: один список в одной панели. Каждый сервис - строка,
@@ -380,6 +390,8 @@ export default {
             explicitNetworkRemoval: false,
             dockerStats: {},
             isEditMode: false,
+            // Значения .env показываются только по просьбе: см. панель env в шаблоне
+            envRevealed: false,
             submitted: false,
             newContainerName: "",
             stopServiceStatusTimeout: false,
@@ -476,6 +488,15 @@ export default {
          * create. While viewing, a file that is not on disk would be an empty promise.
          * @returns {boolean} True when the panel is shown
          */
+        /**
+         * Whether the env values are on screen.
+         * A new stack has nothing to hide yet, so its field is open from the start.
+         * @returns {boolean} True when the file contents are shown
+         */
+        envShown() {
+            return this.envRevealed || this.isAdd;
+        },
+
         envPanelVisible() {
             if (this.isAdd || this.isEditMode) {
                 return true;
@@ -517,6 +538,11 @@ export default {
         },
     },
     watch: {
+        // Другой стек - другие переменные: раскрытие не переезжает между стеками
+        "$route.params.stackName"() {
+            this.envRevealed = false;
+        },
+
         "stack.composeYAML": {
             handler() {
                 if (this.editorFocus) {
@@ -1175,6 +1201,16 @@ h1 {
 // Пустой файл - строка на поверхности панели, а не консольная подложка: место,
 // где нечего читать, не должно выглядеть как погасший экран
 .empty-file {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+}
+
+.env-hidden {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
     margin: 0;
     color: var(--text-muted);
     font-size: var(--text-sm);
