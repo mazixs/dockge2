@@ -39,8 +39,8 @@ been rewritten. Do not report issues of this fork upstream.
 ## Install
 
 On a fresh server, one script does the whole thing - it checks what is missing, asks for the port
-and the directories, builds the image, starts the panel and prints the address and the one-use
-setup code:
+and the directories, shows them for review, builds the image, starts the panel and prints the
+address and the one-use setup code:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mazixs/dockge2/main/install.sh -o install.sh
@@ -60,14 +60,28 @@ bash install.sh --yes --port 8080 --stacks-dir /srv/stacks --dir /opt/dockge2
 | `--stacks-dir` | `/opt/stacks` | Where your stacks live. Absolute path only, see the note below. |
 | `--dir` | `/opt/dockge2` | Where this repository is checked out. |
 | `--data-dir` | `<install dir>/data` | SQLite database, settings and secrets. |
-| `--branch` | `main` | Branch to install from. |
-| `--update` | - | Rebuild an existing installation instead of asking anything. |
-| `--yes` | - | Take the defaults, ask nothing. Also what happens without a terminal. |
+| `--branch` | `main` | Branch to install from. On an update it is the branch the checkout is already on. |
+| `--update` | - | Rebuild the installation the script lives in, without asking for the directories again. |
+| `--yes` | - | Take the defaults and ask nothing. Required when there is no terminal at all, such as in cron. |
+
+Before anything is written, the answers are shown as a numbered list: Enter accepts them, a number
+asks that one again, `q` leaves the machine as it was. Until that point nothing has changed.
 
 The script writes only inside those three directories, never stops or changes containers it did not
-create, and reads every answer it already has from the existing `.env` when it runs again. Sudo is
-used only where it is actually needed - not at all when you are in the `docker` group and the
-directories are yours.
+create, and reads every answer it already has from the existing `.env` when it runs again. An option
+given on the command line wins over that `.env` and is written into it, so `--port 8080` on a second
+run really moves the panel instead of printing an address that answers nothing. Sudo is used only
+where it is actually needed - not at all when you are in the `docker` group and the directories are
+yours.
+
+Nothing is decided silently. Without a terminal - in cron, or in a pipeline - the installer stops
+and asks for `--yes` rather than agreeing to install Docker or to rebuild a running panel on your
+behalf. An interrupted first install removes the half-written directory instead of leaving one the
+next run would refuse. A failed build or a panel that never became healthy prints the container
+state, the last log lines, and the two commands that put back the image and the commit that were
+running before - the previous image is tagged `dockge2:rollback-<date>` before the rebuild starts.
+Local changes in the checkout are never reset, stashed or overwritten: the update only
+fast-forwards, and says so when it cannot.
 
 When it finishes, open the printed address and the first visit asks for the setup code together
 with the owner account - see [Sign in](#sign-in). On a public server, put it behind a reverse proxy
@@ -212,6 +226,9 @@ The installer does exactly that and needs nothing else on the host:
 cd /opt/dockge2
 ./install.sh --update
 ```
+
+`--update` works on the checkout the script itself lives in, so an installation made with `--dir`
+updates from its own directory without naming it again.
 
 The same sequence is also available as a bundled command, which prints what it will do first. It is
 fixed and non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then
