@@ -35,6 +35,13 @@ RUN npm run build:frontend
 ############################################
 FROM mazixs/dockge2:base AS release
 WORKDIR /app
+# Стеки из Git - часть продукта: без git и ssh панель не может ни склонировать
+# стек, ни сказать, отстал ли он от ветки. Ставится здесь, а не только в
+# Base.Dockerfile, потому что базовый образ публикуется отдельно и редко;
+# когда он выйдет с этими пакетами, apt здесь просто ничего не сделает
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
 COPY --chown=node:node --from=build_healthcheck /app/extra/healthcheck /app/extra/healthcheck
 COPY --from=build /app/node_modules /app/node_modules
 COPY --chown=node:node  . .
