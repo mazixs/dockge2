@@ -148,6 +148,23 @@ Dockge2 also provides opt-in MCP access for AI clients, with individual expiring
 explicit server/stack scopes, observer and operator roles, and optional owner approval.
 See [MCP access and verified client compatibility](docs/mcp.md). MCP is disabled by default.
 
+### A stack from a private repository
+
+Git is part of the product - the panel clones a stack, tells you how far behind its branch it is
+and applies an update - and the image carries `git` and `ssh` for that. How it authenticates is
+deliberately narrow:
+
+- No prompt is ever shown (`GIT_TERMINAL_PROMPT=0`), credential helpers are disabled and the global
+  Git configuration is ignored. A command that would ask for a password fails instead of hanging.
+- A token inside the repository URL is rejected outright, so a secret cannot end up in the
+  configuration, in a list or in a log.
+- That leaves one way in: an SSH key, mounted into the container, without a passphrase, plus a
+  `known_hosts` entry for the host. Uncomment the `/root/.ssh` line in `docker-compose.yml`.
+
+A private repository without that key does not half work: the clone fails with the authentication
+error from Git, and the panel shows it as it came. Nothing in the panel needs the `gh` CLI - it
+speaks to Git directly, never to the GitHub API.
+
 ### Behind a reverse proxy
 
 Dockge accepts requests whose origin matches the address the browser asked for, so a LAN
