@@ -17,6 +17,20 @@ COPY --chown=node:node  ./package-lock.json ./package-lock.json
 RUN npm ci --omit=dev --ignore-scripts
 
 ############################################
+# Frontend
+############################################
+# Фронтенд собирается здесь, а не на хосте: установка на чистом сервере не
+# должна требовать ни Node, ни npm - только Docker. Отдельная ступень нужна,
+# чтобы vite и его зависимости остались за пределами итогового образа.
+FROM mazixs/dockge2:base AS build_frontend
+WORKDIR /app
+COPY --chown=node:node  ./package.json ./package.json
+COPY --chown=node:node  ./package-lock.json ./package-lock.json
+RUN npm ci --ignore-scripts
+COPY --chown=node:node  . .
+RUN npm run build:frontend
+
+############################################
 # ⭐ Main Image
 ############################################
 FROM mazixs/dockge2:base AS release
@@ -24,6 +38,7 @@ WORKDIR /app
 COPY --chown=node:node --from=build_healthcheck /app/extra/healthcheck /app/extra/healthcheck
 COPY --from=build /app/node_modules /app/node_modules
 COPY --chown=node:node  . .
+COPY --chown=node:node --from=build_frontend /app/frontend-dist /app/frontend-dist
 RUN mkdir ./data
 
 
