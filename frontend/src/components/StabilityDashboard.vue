@@ -28,8 +28,9 @@
         <div class="counts" aria-live="polite">
             <router-link
                 v-for="state in states" :key="state"
-                :to="{ path: '/', query: { filter: state } }"
-                :class="[ `count-${state}`, { zero: counts[state] === 0 } ]"
+                :to="filterLink(state)"
+                :class="[ `count-${state}`, { zero: counts[state] === 0, on: activeFilter === state } ]"
+                :aria-pressed="String(activeFilter === state)"
                 :title="$t('stabilityCountLink', { state: $t(`stabilityState_${state}`) })"
             >
                 <strong>{{ counts[state] }}</strong> {{ $t(`stabilityState_${state}`) }}
@@ -56,7 +57,7 @@
 
             <div v-else-if="host.error || host.overview?.error || hostIsStale(host)" class="panel-body host-message" role="status">
                 <span>{{ hostMessage(host) }}</span>
-                <button v-if="host.online" class="btn btn-sm btn-normal" type="button" :disabled="host.loading" @click="loadHost(host.endpoint)">{{ $t("stabilityRetry") }}</button>
+                <button v-if="host.online && hostCanRetry(host)" class="btn btn-sm btn-normal" type="button" :disabled="host.loading" @click="loadHost(host.endpoint)">{{ $t("stabilityRetry") }}</button>
             </div>
 
             <p v-if="host.overview && !hostIsStale(host) && !host.overview.stacks.length" class="panel-body host-message">{{ $t("stabilityEmpty") }}</p>
@@ -177,6 +178,9 @@ export default defineComponent({
                 error: this.errors[endpoint] ?? false,
             }));
         },
+        activeFilter() : string {
+            return String(this.$route.query.filter ?? "");
+        },
         loading() : boolean {
             return Object.values(this.pending).some(Boolean);
         },
@@ -263,6 +267,35 @@ export default defineComponent({
                 }
                 this.now = Date.now();
             });
+        },
+        /**
+         * Where a count leads. The same count twice is the same question asked
+         * twice, and the answer to it is the whole list back
+         * @param state Состояние, которое считает эта ссылка
+         * @returns Адрес для router-link
+         */
+        filterLink(state : StabilityState) : { path : string; query : Record<string, string> } {
+            const query = { ...this.$route.query } as Record<string, string>;
+
+            if (this.activeFilter === state) {
+                delete query.filter;
+            } else {
+                query.filter = state;
+            }
+
+            return { path: "/",
+                query };
+        },
+        /**
+         * Whether repeating the request could change anything.
+         * Первое наблюдение приходит по времени, а не по просьбе: страница
+         * перечитывает данные сама каждые тридцать секунд, и кнопка здесь
+         * обещала бы ускорение, которого нет
+         * @param host Сервер, о котором идет речь
+         * @returns Истина, если повтор запроса имеет смысл
+         */
+        hostCanRetry(host : HostView) : boolean {
+            return host.overview?.error !== "noObservation";
         },
         hostIsStale(host : HostView) : boolean {
             return !host.online || host.error || !host.overview || host.overview.stale || !host.overview.observedAt || this.now - host.overview.observedAt > STABILITY_STALE_MS;
@@ -490,6 +523,23 @@ export default defineComponent({
     overflow-x: auto;
     overflow-y: hidden;
     position: relative;
+    animation: table-in var(--motion-base) var(--motion-ease) both;
+}
+
+// Наблюдения приходят по сети, и таблица возникает через долю секунды после
+// остальной страницы. Без перехода это выглядит как рывок верстки, поэтому
+// она проявляется и подтягивается на несколько пикселей вверх
+@keyframes table-in {
+    from {
+        opacity: 0;
+        transform: translateY(var(--gap-xs));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .container-table-wrap {
+        animation: none;
+    }
 }
 
 .container-table {
@@ -590,6 +640,13 @@ export default defineComponent({
 // на серый оказывалась в одной из тем заметнее живого "Остановлены"
 .counts > a.zero {
     opacity: 0.5;
+}
+
+// Нажатый счет - это включенный фильтр списка слева, и нажать его еще раз
+// значит снять фильтр. Подложка говорит, что кнопка сейчас удерживается
+.counts > a.on {
+    background: var(--accent-soft);
+    opacity: 1;
 }
 
 .count-running { color: var(--state-running); }
