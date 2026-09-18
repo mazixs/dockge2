@@ -70,12 +70,28 @@ test("every language in the switcher has a catalogue to load", () => {
     assert.deepEqual(missing, [], "listed but no lang/<code>.json");
 });
 
-test("every catalogue is reachable from the switcher", () => {
+test("the switcher offers a language only when it is fully translated", () => {
+    const english = keysOf(catalogue("en"));
     const listed = new Set(listedCodes());
-    const orphans = fileCodes().filter((code) => !listed.has(code));
+    const wrong : string[] = [];
 
-    // A catalogue nobody can select is dead weight that still has to be kept in step
-    assert.deepEqual(orphans, [], "lang/<code>.json with no entry in languageList");
+    // Half a panel in one language and half in another is not a choice of language,
+    // it is a fault. A catalogue that is behind stays in the repository and out of
+    // the menu until it catches up, and one that is complete has no reason to hide
+    for (const code of fileCodes()) {
+        const keys = new Set(keysOf(catalogue(code)));
+        const missing = english.filter((key) => !keys.has(key));
+
+        if (missing.length > 0 && listed.has(code)) {
+            wrong.push(`${code}: offered but ${missing.length} key(s) are missing`);
+        }
+
+        if (missing.length === 0 && !listed.has(code)) {
+            wrong.push(`${code}: complete but not in languageList`);
+        }
+    }
+
+    assert.deepEqual(wrong, []);
 });
 
 test("English carries every key the other catalogues rely on", () => {

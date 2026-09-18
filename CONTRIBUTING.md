@@ -96,6 +96,10 @@ You can use Vue.js devtools Chrome extension for debugging.
 npm run build:frontend
 ```
 
+The production image does this on its own (`docker/Dockerfile`, stage `build_frontend`), so a
+deployment never needs Node on the host. Locally the command is still useful to see the built
+bundle without a Docker build.
+
 ## Tests
 
 ```bash
