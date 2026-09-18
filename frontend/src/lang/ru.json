@@ -425,6 +425,8 @@
     "updatePreviewUnknownNotPulled": "образ еще не скачан",
     "updatePreviewUnknownRegistry": "реестр не ответил",
     "updatePreviewSteps": "Шаги: проверка конфигурации, затем подъем с вытягиванием образов и ожиданием готовности",
+    "updatePreviewBuilds": "Образы собираются из Dockerfile: они будут пересобраны, и правки применятся",
+    "updatePreviewStepsBuild": "Шаги: проверка конфигурации, pull, пересборка, затем up с ожиданием здоровья",
     "updatePreviewRun": "Обновить",
     "abortRunning": "Прервать",
     "deployRunningFor": "идет {0} с",

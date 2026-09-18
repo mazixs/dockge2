@@ -98,7 +98,9 @@
                             </template>
                         </dl>
 
-                        <p class="preview-line faint">{{ $t("updatePreviewSteps") }}</p>
+                        <p v-if="preview.builds" class="preview-line">{{ $t("updatePreviewBuilds") }}</p>
+
+                        <p class="preview-line faint">{{ preview.builds ? $t("updatePreviewStepsBuild") : $t("updatePreviewSteps") }}</p>
 
                         <div class="preview-actions">
                             <button class="btn btn-sm btn-primary" :disabled="processing" @click="runUpdate">{{ $t("updatePreviewRun") }}</button>
