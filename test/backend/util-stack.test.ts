@@ -238,3 +238,55 @@ test("Stack validates names, YAML and environment files and converts statuses", 
     assert.equal(Stack.statusConvert("running(1)"), RUNNING);
     assert.equal(Stack.statusConvert("unknown"), UNKNOWN);
 });
+
+test("a stack that builds its own image is deployed with a build", async () => {
+    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-build-test-"));
+    const server = { stacksDir } as never;
+
+    try {
+        const built = new Stack(server, "built-stack", "services:\n  app:\n    build: .\n", "", true);
+        const pulled = new Stack(server, "pulled-stack", "services:\n  app:\n    image: alpine\n", "", true);
+
+        // Compose обошелся бы готовым образом, и правка в Dockerfile не доехала бы
+        // до контейнера. Проверку конфигурации подменяем: она зовет настоящий docker
+        for (const stack of [ built, pulled ]) {
+            (stack as unknown as { validateComposeConfig : () => Promise<void> }).validateComposeConfig = async () => {};
+            (stack as unknown as { updateStatus : () => Promise<void> }).updateStatus = async () => {};
+        }
+
+        const builtCommands : string[][] = [];
+        await built.control("deploy", async (args) => {
+            builtCommands.push(args);
+            return 0;
+        });
+
+        const plainCommands : string[][] = [];
+        await pulled.control("deploy", async (args) => {
+            plainCommands.push(args);
+            return 0;
+        });
+
+        assert.equal(builtCommands.length, 1);
+        assert.ok(builtCommands[0]!.includes("--build"), "a built stack has to be rebuilt on deploy");
+        assert.equal(plainCommands.length, 1);
+        assert.equal(plainCommands[0]!.includes("--build"), false, "an image from a registry is not built");
+
+        // Обновление тянет базовый образ и пересобирает поверх него, а не просто up
+        const updateCommands : string[][] = [];
+        (built as unknown as { _status : number })._status = RUNNING;
+        await built.control("update", async (args) => {
+            updateCommands.push(args);
+            return 0;
+        });
+
+        assert.deepEqual(updateCommands.map((args) => args.filter((arg) => !arg.startsWith("-") && arg !== "compose" && !arg.endsWith(".yaml"))), [
+            [ "pull" ],
+            [ "build" ],
+            [ "up" ],
+        ]);
+        assert.ok(updateCommands[1]!.includes("--pull"), "the base image of a Dockerfile is only refreshed by build --pull");
+    } finally {
+        await rm(stacksDir, { recursive: true,
+            force: true });
+    }
+});

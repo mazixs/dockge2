@@ -5,7 +5,7 @@ import { Stack } from "../stack";
 import { readAvailability } from "../observations";
 import { readImageUpdates } from "../image-updates";
 import { readStackSource } from "../stack-source";
-import { readComposeImages } from "../../common/compose-status";
+import { hasBuildServices, readComposeImages } from "../../common/compose-status";
 import { Terminal } from "../terminal";
 import { getComposeTerminalName } from "../../common/util-common";
 import { ContainerInstanceStatus } from "../../common/compose-status";
@@ -285,6 +285,9 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     ok: true,
                     source: await readStackSource(stack.path),
                     images: await readImageUpdates(images),
+                    // A built image has no registry to ask, and the preview would
+                    // otherwise be an empty list with nothing said about it
+                    builds: hasBuildServices(stack.composeYAML),
                 }, callback);
             } catch (e) {
                 callbackError(e, callback);

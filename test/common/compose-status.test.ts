@@ -7,6 +7,7 @@ import {
     readComposeServices,
     readOneShotServices,
     resolveComposePsStatus,
+    hasBuildServices,
     readComposeImages,
     resolveStackStatus,
     summariseServices,
@@ -488,4 +489,13 @@ test("образы читаются из файла, а собираемые с�
     assert.deepEqual(readComposeImages(compose), [ "nginx:1.27" ]);
     assert.deepEqual(readComposeImages("не: [yaml"), []);
     assert.deepEqual(readComposeImages(""), []);
+});
+
+test("a stack knows whether it builds any of its images", () => {
+    assert.equal(hasBuildServices("services:\n  app:\n    build: .\n"), true);
+    assert.equal(hasBuildServices("services:\n  app:\n    build:\n      context: ./app\n"), true);
+    assert.equal(hasBuildServices("services:\n  web:\n    image: nginx\n  app:\n    build: ./app\n"), true);
+    assert.equal(hasBuildServices("services:\n  app:\n    image: alpine\n"), false);
+    assert.equal(hasBuildServices("services:\n  app:\n    build: \"\"\n"), false);
+    assert.equal(hasBuildServices("не: [yaml"), false);
 });

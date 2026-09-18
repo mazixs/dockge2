@@ -15,6 +15,7 @@ import {
     COMPOSE_WORKING_DIR_LABEL,
     DockerPsRaw,
     fromDockerPs,
+    hasBuildServices,
     normaliseInstance,
     readComposeServices,
     readOneShotServices,
@@ -1006,17 +1007,34 @@ export class Stack {
         if ([ "start", "deploy", "update" ].includes(action)) {
             await this.validateComposeConfig();
         }
+        // Стек, который собирает свой образ сам, иначе не увидел бы ни одной правки:
+        // готовый образ уже лежит на машине, и `compose up` берет его как есть.
+        // Повторная сборка без изменений ничего не стоит - слои берутся из кеша,
+        // и контейнер не пересоздается
+        const builds = hasBuildServices(this.composeYAML);
+
         if (action === "update") {
+            // Для собираемых сервисов `pull` тянуть нечего, и он их пропускает,
+            // а вот базовый образ из их Dockerfile обновляет только `build --pull`
             const pullCode = await execute(this.getComposeOptions("pull"), this.path);
             if (pullCode !== 0) {
                 throw new Error("Stack image update failed; check the operation output.");
+            }
+            if (builds) {
+                const buildCode = await execute(this.getComposeOptions("build", "--pull"), this.path);
+                if (buildCode !== 0) {
+                    throw new Error("Stack image update failed; check the operation output.");
+                }
             }
             await this.updateStatus();
             if (this.status !== RUNNING && this.status !== ATTENTION) {
                 return pullCode;
             }
         }
-        const options = [ "start", "deploy", "update" ].includes(action) ? this.getComposeOptions("up", "-d", "--remove-orphans") : this.getComposeOptions(action);
+        const upOptions = builds && action !== "update"
+            ? this.getComposeOptions("up", "-d", "--build", "--remove-orphans")
+            : this.getComposeOptions("up", "-d", "--remove-orphans");
+        const options = [ "start", "deploy", "update" ].includes(action) ? upOptions : this.getComposeOptions(action);
         const exitCode = await execute(options, this.path);
         if (exitCode !== 0) {
             throw new Error("Stack control failed; check the operation output.");

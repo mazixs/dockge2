@@ -553,3 +553,31 @@ export function readComposeImages(composeYAML : string) : string[] {
         return [];
     }
 }
+
+/**
+ * Whether the stack builds any of its images itself.
+ *
+ * A built image is not a registry answer but a local artefact, and `compose up`
+ * reuses it as long as it exists: an edited Dockerfile or source tree changes
+ * nothing until the build is asked for. Knowing this about a stack is what lets
+ * deployment ask for it.
+ * @param composeYAML Compose file content
+ * @returns True when at least one service declares `build`
+ */
+export function hasBuildServices(composeYAML : string) : boolean {
+    try {
+        const parsed = yaml.parse(composeYAML) as { services? : Record<string, { build? : unknown }> } | null;
+        const services = parsed?.services;
+
+        if (!services || typeof services !== "object") {
+            return false;
+        }
+
+        return Object.values(services).some((service) => {
+            const build = service?.build;
+            return typeof build === "string" ? build.trim() !== "" : build !== null && typeof build === "object";
+        });
+    } catch (e) {
+        return false;
+    }
+}

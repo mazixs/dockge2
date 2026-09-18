@@ -428,6 +428,8 @@
     "updatePreviewUnknownNotPulled": "not pulled yet",
     "updatePreviewUnknownRegistry": "the registry did not answer",
     "updatePreviewSteps": "Steps: config check, then up with pull and health wait",
+    "updatePreviewBuilds": "Images built from a Dockerfile: they are rebuilt, so edits take effect",
+    "updatePreviewStepsBuild": "Steps: config check, pull, rebuild, then up with a health wait",
     "updatePreviewRun": "Update",
     "abortRunning": "Stop",
     "deployRunningFor": "running for {0} s",
