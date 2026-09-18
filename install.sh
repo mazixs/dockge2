@@ -135,6 +135,17 @@ if [ "$DO_UPDATE" = "0" ]; then
     STACKS_DIR="$(ask 'Directory for your stacks' "$STACKS_DIR")"
 fi
 
+# An existing installation has already answered all of this, and its .env is the
+# answer. Re-asking would invent a second truth next to the running container
+read_env() {
+    sed -n "s/^$1=//p" "$INSTALL_DIR/.env" 2>/dev/null | tail -1
+}
+if [ -f "$INSTALL_DIR/.env" ]; then
+    [ -n "$(read_env DOCKGE_STACKS_DIR)" ] && STACKS_DIR="$(read_env DOCKGE_STACKS_DIR)"
+    [ -n "$(read_env DOCKGE_DATA_DIR)" ] && DATA_DIR="$(read_env DOCKGE_DATA_DIR)"
+    [ -z "$PORT" ] && PORT="$(read_env DOCKGE_PORT)"
+fi
+
 case "$STACKS_DIR" in /*) ;; *) die "The stacks directory must be an absolute path: docker compose runs inside the container but is executed by the daemon on the host, which gets exactly this path." ;; esac
 [ -z "$DATA_DIR" ] && DATA_DIR="$INSTALL_DIR/data"
 
@@ -244,13 +255,15 @@ if command -v ufw >/dev/null 2>&1 && { [ -z "$SUDO" ] || $SUDO -n true 2>/dev/nu
     fi
 fi
 
-TOKEN_FILE="$DATA_DIR/bootstrap-token"
+# The token file is 0600 and owned by root, so it is read from inside the
+# container rather than from the host, where the installer may be an ordinary user
 say "Setup code for the first sign-in"
-if $FSUDO test -r "$TOKEN_FILE"; then
-    info "$($FSUDO cat "$TOKEN_FILE")"
+TOKEN="$($DOCKER compose -f docker-compose.yml exec -T dockge cat /app/data/bootstrap-token 2>/dev/null | tr -d '\r\n')"
+if [ -n "$TOKEN" ]; then
+    info "$TOKEN"
     info "It works once. The first visit asks for it together with the owner account."
 else
-    warn "No bootstrap-token file: this installation already has an owner, or DOCKGE_BOOTSTRAP_TOKEN is set."
+    warn "No setup code: this installation already has an owner, or DOCKGE_BOOTSTRAP_TOKEN is set."
 fi
 
 cat <<'NEXT'

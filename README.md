@@ -30,30 +30,61 @@ been rewritten. Do not report issues of this fork upstream.
 
 ## Requirements
 
-- [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
-  `podman-docker`.
 - Linux on `amd64`, `arm64` or `armv7`. Debian/Raspbian Bullseye or newer, Ubuntu, Fedora, CentOS,
   ArchLinux. Windows is not supported.
-- [Node.js](https://nodejs.org/) 22.23.2 or 24.19.0, to build the image from this repository.
+- [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
+  `podman-docker`. The installer offers to install Docker when it is missing.
+- `git` and `curl`. Nothing else: the image builds its own frontend, so the server needs no Node.
 
-## How to install
+## Install
 
-There is no published image yet, so the image is built from this repository.
+On a fresh server, one script does the whole thing - it checks what is missing, asks for the port
+and the directories, builds the image, starts the panel and prints the address and the one-use
+setup code:
 
 ```bash
-# Where the panel lives and where your stacks live
+curl -fsSL https://raw.githubusercontent.com/mazixs/dockge2/main/install.sh -o install.sh
+less install.sh          # it runs as root, so read it first
+bash install.sh
+```
+
+Answer nothing and take every default with `bash install.sh --yes`, or say it all upfront:
+
+```bash
+bash install.sh --yes --port 8080 --stacks-dir /srv/stacks --dir /opt/dockge2
+```
+
+| Option | Default | What it is |
+|---|---|---|
+| `--port` | `5001` | The port the panel answers on. The installer refuses a port that is already taken and offers another. |
+| `--stacks-dir` | `/opt/stacks` | Where your stacks live. Absolute path only, see the note below. |
+| `--dir` | `/opt/dockge2` | Where this repository is checked out. |
+| `--data-dir` | `<install dir>/data` | SQLite database, settings and secrets. |
+| `--branch` | `main` | Branch to install from. |
+| `--update` | - | Rebuild an existing installation instead of asking anything. |
+| `--yes` | - | Take the defaults, ask nothing. Also what happens without a terminal. |
+
+The script writes only inside those three directories, never stops or changes containers it did not
+create, and reads every answer it already has from the existing `.env` when it runs again. Sudo is
+used only where it is actually needed - not at all when you are in the `docker` group and the
+directories are yours.
+
+When it finishes, open the printed address and the first visit asks for the setup code together
+with the owner account - see [Sign in](#sign-in). On a public server, put it behind a reverse proxy
+with HTTPS or reach it over an SSH tunnel first; the installer warns when `ufw` is on and the port
+is closed, and it does not open it for you.
+
+### By hand
+
+The script does nothing magic, and the same thing without it is:
+
+```bash
 sudo mkdir -p /opt/stacks
 git clone https://github.com/mazixs/dockge2.git /opt/dockge2
 cd /opt/dockge2
-
 cp .env.example .env     # ports, paths, proxy settings - read the comments
-npm install
-npm run build:frontend   # the image copies the ready frontend-dist directory
-
-docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml up -d --build --wait
 ```
-
-The panel is now on http://localhost:5001 and asks for a setup code (see [Sign in](#sign-in)).
 
 `docker-compose.yml` is the production configuration and it is documented line by line inside the
 file. Three settings deserve attention before the first start:
@@ -158,8 +189,15 @@ rather than configuring it, so it is the last resort, not the first.
 ## How to Update
 
 The deployment is a Git checkout and the image is built from it, so updating means rebuilding.
-The bundled command runs a fixed, non-destructive sequence - `git pull --ff-only`, `npm ci`,
-`npm run build:frontend`, `docker compose config --quiet`, then
+The installer does exactly that and needs nothing else on the host:
+
+```bash
+cd /opt/dockge2
+./install.sh --update
+```
+
+The same sequence is also available as a bundled command, which prints what it will do first. It is
+fixed and non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then
 `docker compose up -d --build --wait --wait-timeout 60`:
 
 ```bash
@@ -228,7 +266,9 @@ command, not a browser action.
 
 - Bug reports: https://github.com/mazixs/dockge2/issues
 - Questions and discussions: https://github.com/mazixs/dockge2/discussions
-- Translation: see [the translation guide](frontend/src/lang/README.md)
+- Translation: see [the translation guide](frontend/src/lang/README.md). The switcher offers only
+  languages that are translated in full - currently English and Russian; the other catalogues are in
+  `frontend/src/lang/` waiting to be finished, and a complete one joins the menu automatically
 - Pull requests: read [CONTRIBUTING.md](CONTRIBUTING.md) first, not every kind of change is accepted
 - Security: see [SECURITY.md](SECURITY.md), never report a vulnerability in a public issue
 

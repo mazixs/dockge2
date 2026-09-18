@@ -34,11 +34,8 @@ export function buildUpdateCommands(forceRecreate : boolean, branch : string = D
         { command: "git",
             args: [ "pull", "--ff-only", "origin", branch ] },
         // Образ собирается из этого репозитория, поэтому обновление кода - это
-        // пересборка, а не pull: зависимости и фронтенд попадают внутрь на сборке
-        { command: "npm",
-            args: [ "ci", "--no-audit", "--no-fund" ] },
-        { command: "npm",
-            args: [ "run", "build:frontend" ] },
+        // пересборка, а не pull. Зависимости и фронтенд собираются внутри образа,
+        // и хосту для обновления не нужен ни Node, ни npm
         { command: "docker",
             args: [ "compose", "config", "--quiet" ] },
         {

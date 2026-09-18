@@ -52,8 +52,9 @@ test("the application i18n instance runs in Composition API mode", async () => {
     assert.equal((i18n.global.locale as unknown as { value : string }).value, "ru");
 
     // The language list does not depend on the i18n internals
+    // Only complete catalogues are offered, so the count follows the translations
     const languages = availableLanguages();
-    assert.ok(languages.length > 5);
+    assert.ok(languages.length >= 2);
     assert.ok(languages.every((language) => typeof language.code === "string" && language.name.length > 0));
     assert.ok(languages.some((language) => language.code === "en"));
 });
