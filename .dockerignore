@@ -3,6 +3,8 @@
 .env.local
 .tmp/
 node_modules
+frontend/node_modules
+frontend-dist
 .idea
 data
 stacks
@@ -14,7 +16,6 @@ docker
 docker-compose.local.yml
 local.sh
 .env.example
-frontend
 coverage
 .editorconfig
 .eslintrc.cjs
