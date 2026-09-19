@@ -91,6 +91,9 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.where.outputs.images }}
+          # `latest` is decided below, by whether the tag is a pre-release. Left on
+          # auto, the action adds its own on top and the tag is pushed twice.
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ env.TAG }}
             type=semver,pattern={{major}},value=${{ env.TAG }},enable=${{ steps.where.outputs.stable == 'true' }}
@@ -134,5 +137,10 @@ jobs:
           echo "Published:"
           echo "${{ steps.meta.outputs.tags }}"
           echo
-          echo "If this is the first publish, make the package public:"
+          echo "The package inherits the repository's visibility, so a public repository"
+          echo "needs nothing done by hand. Check what an anonymous machine sees with:"
+          echo "  curl -s \"https://ghcr.io/token?scope=repository:${{ github.repository }}:pull&service=ghcr.io\""
+          echo "  # then GET https://ghcr.io/v2/${{ github.repository }}/manifests/latest with that token"
+          echo
+          echo "If it is private after all, that is where it is changed:"
           echo "  https://github.com/users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/settings"
