@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dockge2: аудит кода и план правок</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1a1d21; --muted:#5b6470; --line:#dfe3e8;
+  --accent:#2f6feb; --p0:#c0392b; --p1:#c77700; --p2:#3d7a3d; --code:#f1f3f5;
+  --block:#7a3ba8; --open:#19647e;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#15181c; --panel:#1c2026; --ink:#e7eaee; --muted:#9aa4b0; --line:#2c323a;
+    --accent:#6f9bff; --p0:#ff7b6b; --p1:#e8a33d; --p2:#79c479; --code:#232830;
+    --block:#c08ae0; --open:#5fb8cf;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0 16px 80px; background:var(--bg); color:var(--ink);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+.wrap{max-width:1040px; margin:0 auto}
+header{padding:40px 0 24px; border-bottom:1px solid var(--line); margin-bottom:28px}
+h1{font-size:30px; line-height:1.25; margin:0 0 10px}
+h2{font-size:22px; margin:40px 0 14px; padding-top:8px}
+h3{font-size:17px; margin:26px 0 8px}
+.sub{color:var(--muted); font-size:14px; margin:0}
+.sub b{color:var(--ink); font-weight:600}
+p{margin:10px 0}
+code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px;
+  background:var(--code); padding:1px 5px; border-radius:4px; word-break:break-word}
+.grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:18px 0}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px}
+.card .n{font-size:24px; font-weight:650; line-height:1.2}
+.card .l{font-size:13px; color:var(--muted); margin-top:4px}
+.item{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--line);
+  border-radius:10px; padding:16px 18px; margin:14px 0}
+.item.p0{border-left-color:var(--p0)}
+.item.p1{border-left-color:var(--p1)}
+.item.p2{border-left-color:var(--p2)}
+.item.blk{border-left-color:var(--block)}
+.item.opn{border-left-color:var(--open)}
+.item h3{margin-top:0; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap}
+.tag{font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  padding:3px 8px; border-radius:20px; color:#fff; white-space:nowrap}
+.tag.p0{background:var(--p0)} .tag.p1{background:var(--p1)} .tag.p2{background:var(--p2)}
+.tag.blk{background:var(--block)} .tag.opn{background:var(--open)}
+.meta{font-size:13px; color:var(--muted); margin:6px 0 10px}
+dl{margin:10px 0 0; display:grid; grid-template-columns:max-content 1fr; gap:6px 14px}
+dt{font-weight:650; color:var(--muted); font-size:13px; padding-top:1px}
+dd{margin:0}
+table{width:100%; border-collapse:collapse; margin:14px 0; font-size:14px;
+  background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden}
+th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+th{background:var(--code); font-size:13px; font-weight:650}
+tr:last-child td{border-bottom:none}
+ul,ol{margin:8px 0; padding-left:22px}
+li{margin:5px 0}
+.note{background:var(--panel); border:1px solid var(--line); border-radius:10px;
+  padding:14px 18px; margin:18px 0; font-size:14px; color:var(--muted)}
+.note b{color:var(--ink)}
+footer{margin-top:50px; padding-top:18px; border-top:1px solid var(--line);
+  font-size:13px; color:var(--muted)}
+.toc{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 18px}
+.toc ol{margin:0; padding-left:20px; columns:2; column-gap:30px}
+.toc a{color:var(--accent); text-decoration:none}
+.toc a:hover{text-decoration:underline}
+@media (max-width:640px){
+  dl{grid-template-columns:1fr; gap:2px 0}
+  dt{padding-top:8px}
+  .toc ol{columns:1}
+  h1{font-size:24px}
+}
+@media print{
+  body{background:#fff; color:#000; padding:0}
+  .item,.card,table,.note,.toc{break-inside:avoid; border-color:#bbb}
+  header{padding-top:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Dockge2: аудит кода, блокеры и предварительный план правок</h1>
+  <p class="sub">Дата: <b>19.09.2026</b> &middot; ветка <b>main</b>, коммит <b>1371a1a</b>, рабочее дерево чистое &middot;
+  объем: <b>145</b> файлов TS и Vue, около <b>14 500</b> строк серверного и общего кода, <b>51</b> компонент Vue</p>
+  <p class="sub">Аудит проведен по исходникам, тестам, конфигурации CI и документации. Находки с пометкой
+  "проверено запуском" подтверждены исполнением кода, остальные - чтением исходников.</p>
+</header>
+
+<div class="toc">
+  <ol>
+    <li><a href="#metrics">Состояние в цифрах</a></li>
+    <li><a href="#p0">Дефекты, ломающие сценарий</a></li>
+    <li><a href="#p1">Производительность и корректность</a></li>
+    <li><a href="#p2">Технический долг</a></li>
+    <li><a href="#blockers">Блокеры исправлений</a></li>
+    <li><a href="#unknown">Что неизвестно</a></li>
+    <li><a href="#plan">План правок по этапам</a></li>
+  </ol>
+</div>
+
+<h2 id="metrics">1. Состояние в цифрах</h2>
+
+<div class="grid">
+  <div class="card"><div class="n">352</div><div class="l">теста node:test, все проходят</div></div>
+  <div class="card"><div class="n">81.09%</div><div class="l">покрытие строк при пороге 70%</div></div>
+  <div class="card"><div class="n">0</div><div class="l">уязвимостей по npm audit</div></div>
+  <div class="card"><div class="n">26</div><div class="l">устаревших пакетов, из них 5 мажорных</div></div>
+  <div class="card"><div class="n">2 из 19</div><div class="l">сообщений об ошибках в обработчиках имеют ключ перевода</div></div>
+  <div class="card"><div class="n">9 из 11</div><div class="l">каталогов перевода заполнены на 14-17%</div></div>
+</div>
+
+<table>
+  <tr><th>Проверка</th><th>Результат</th></tr>
+  <tr><td><code>npm run lint</code></td><td>чисто</td></tr>
+  <tr><td><code>npm run check-ts</code></td><td>чисто, режим strict с noUncheckedIndexedAccess и exactOptionalPropertyTypes</td></tr>
+  <tr><td><code>npm run test</code></td><td>352 теста, покрытие строк 81.09% при пороге 70%</td></tr>
+  <tr><td><code>npm audit</code></td><td>0 уязвимостей</td></tr>
+  <tr><td>Каталоги перевода</td><td>en 773, ru 773, de/es/fr/zh-CN 130, ja 127, id 120, pt/ur 114, ar 111</td></tr>
+  <tr><td>Покрытие компонентов Vue</td><td>юнит-тестов нет ни у одного; страховка - 14 спеков Playwright и снимки</td></tr>
+</table>
+
+<div class="note">
+<b>Что важно понять про 81.09%.</b> Файл <code>.c8rc.json</code> исключает из подсчета
+<code>backend/dockge-server.ts</code>, <code>agent-manager.ts</code>, <code>terminal-socket-handler.ts</code>,
+<code>agent-proxy-socket-handler.ts</code>, <code>manage-agent-socket-handler.ts</code>, <code>routers/**</code>,
+<code>check-version.ts</code>, <code>migrations/**</code>, а также <code>index.ts</code>,
+<code>router.ts</code>, <code>socket-handler.ts</code> и <code>agent-socket-handler.ts</code>. То есть сборка сервера, мультиагентность и терминалы
+в цифру не входят вовсе, и именно в этих местах найдены дефекты из раздела 2.
+</div>
+
+<h2 id="p0">2. Дефекты, ломающие пользовательский сценарий</h2>
+
+<div class="item p0">
+<h3><span class="tag p0">P0-1</span> Отказ терминала не доходит до браузера, интерфейс остается заблокированным</h3>
+<p class="meta"><code>backend/terminal.ts:375</code> &rarr; <code>backend/util-server.ts:52</code> &rarr; <code>frontend/src/pages/Compose.vue:838</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd>Когда имя терминала занято, <code>Terminal.exec</code> делает
+  <code>reject("Another operation is already running, please try again later.")</code> - отклоняет строкой,
+  а не объектом Error. Функция <code>callbackError</code> разбирает только <code>ValidationError</code> и
+  <code>Error</code>; для всего остального она пишет <code>log.debug("console", "Unknown error: " + error)</code>
+  и <b>не вызывает callback вообще</b>.</dd>
+  <dt>Следствие</dt>
+  <dd>Браузер ждет ack, который никогда не придет. В <code>Compose.vue</code> метод <code>deployStack</code>
+  ставит <code>processing = true</code> и снимает флаг только в колбэке, поэтому кнопки стека остаются
+  неактивными до перезагрузки страницы. Пользователь не видит ни ошибки, ни причины.</dd>
+  <dt>Нюансы</dt>
+  <dd>Перед вызовом <code>Compose.vue</code> посылает <code>run-start</code>, а <code>run-end</code> шлет
+  только из колбэка, поэтому в <code>StackInspector.vue:298</code> часы прогресса тоже не останавливаются.
+  Одна вкладка воспроизвести это не может: кнопки заблокированы флагом <code>processing</code>.
+  Воспроизводится второй вкладкой или вторым пользователем на том же стеке. Тот же путь у
+  start, stop, restart, update и delete - все они идут через <code>Terminal.exec</code>.</dd>
+  <dt>Статус</dt>
+  <dd>Проверено запуском: пробный вызов <code>callbackError</code> со строкой дал "callback вызван: false".</dd>
+  <dt>Правка</dt>
+  <dd>Два независимых исправления: (1) в <code>terminal.ts</code> отклонять через <code>new Error(...)</code>
+  с ключом перевода; (2) в <code>callbackError</code> добавить ветку по умолчанию, которая всегда отвечает
+  клиенту общим сообщением и логирует исходное значение на уровне error, а не debug. Вторая правка закрывает
+  весь класс подобных мест сразу.</dd>
+  <dt>Проверка</dt>
+  <dd>Юнит-тест <code>callbackError</code> со строкой, числом и <code>undefined</code>; тест
+  <code>Terminal.exec</code> при занятом имени; ручной прогон развертывания с параллельной операцией.</dd>
+</dl>
+</div>
+
+<div class="item p0">
+<h3><span class="tag p0">P0-2</span> Серверные сообщения помечены как переводимые, но ключей перевода не имеют</h3>
+<p class="meta"><code>backend/util-server.ts:58-70</code> &rarr; <code>frontend/src/main.ts:82-88</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd><code>callbackError</code> в обеих ветках ставит <code>msgi18n: true</code>. Фронт в
+  <code>translateServerMessage</code> проверяет <code>$te(key)</code> и, не найдя ключ, показывает
+  <code>$t("unexpectedServerError", { detail: key })</code>, то есть "Unexpected error:" плюс сырой текст.
+  В обработчиках <code>backend/socket-handlers</code> и <code>backend/agent-socket-handlers</code> из 19
+  уникальных текстов ошибок ключами являются только два: <code>authInvalidUserData</code> и
+  <code>authAccountExists</code>. Успешных ответов это не касается: все их сообщения
+  (<code>Deployed</code>, <code>Saved</code>, <code>Stopped</code> и остальные) в каталоге есть.</dd>
+  <dt>Следствие</dt>
+  <dd>Пользователь в подавляющем большинстве отказов видит "Unexpected error: Terminal name must be a string."
+  вместо человеческого сообщения на своем языке. Ошибка выглядит как сбой панели, а не как отказ операции.</dd>
+  <dt>Правка</dt>
+  <dd>Завести ключи в <code>en.json</code> и <code>ru.json</code> для сообщений, которые видит пользователь;
+  остальные (нарушение контракта, а не пользовательская ситуация) отдавать с <code>msgi18n: false</code>
+  и общим текстом. Ставить <code>msgi18n: true</code> только там, где ключ действительно существует.</dd>
+  <dt>Проверка</dt>
+  <dd>Тест, который проходит по всем вызовам <code>callbackError</code> в обработчиках и требует, чтобы
+  сообщение с <code>msgi18n: true</code> имелось в <code>en.json</code>. Это дешевле разовой чистки и
+  не дает проблеме вернуться.</dd>
+</dl>
+</div>
+
+<div class="item p0">
+<h3><span class="tag p0">P0-3</span> Русские строки интерфейса приходят с сервера</h3>
+<p class="meta"><code>backend/agent-socket-handlers/git-socket-handler.ts:26,44,58,71,89,103,119,132,148</code>, весь <code>backend/stack-git.ts</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd>Git-поток отдает клиенту готовые русские предложения: "Укажите адрес репозитория.",
+  "Выбранный результат не прошел проверку Compose...", "Файлы сохранены, но развертывание не завершено...".
+  Все сообщения <code>StackGitError</code> в <code>stack-git.ts</code> тоже на русском. Все 43 строковых литерала с кириллицей в backend лежат в этих двух файлах; еще в семи файлах
+  кириллица есть только в комментариях.</dd>
+  <dt>Следствие</dt>
+  <dd>Нарушено правило проекта из <code>AGENTS.md</code>: продукт ведется на английском, остальные языки
+  переводятся с него. Практически: англоязычный пользователь в главном сценарии продукта (Git-поток)
+  получает русский текст, и перевести его нечем - строки не проходят через каталоги.</dd>
+  <dt>Правка</dt>
+  <dd>Перевести на английский и одновременно с P0-2 перевести на ключи. Работы немного, поскольку это тот же
+  набор сообщений, но делать надо одним изменением, иначе придется трогать файлы дважды.</dd>
+</dl>
+</div>
+
+<div class="item p0">
+<h3><span class="tag p0">P0-4</span> Причина отказа Compose теряется полностью</h3>
+<p class="meta"><code>backend/agent-socket-handlers/git-socket-handler.ts:43-45</code> и <code>:70-72</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd>Функция <code>validate</code> оборачивает весь блок в <code>catch { throw new StackGitError(...) }</code>.
+  Исходная ошибка не логируется и не сохраняется нигде. То же в <code>result</code>: неуспешное развертывание
+  превращается в общий текст без записи причины.</dd>
+  <dt>Следствие</dt>
+  <dd>Пользователю говорят "не прошел проверку Compose", а в журнале сервера пусто. Диагностировать
+  нечем ни ему, ни поддержке. Это единственная точка, где могла бы быть видна реальная ошибка
+  <code>docker compose config</code>.</dd>
+  <dt>Правка</dt>
+  <dd>Логировать причину на сервере (<code>log.warn</code> с именем стека), клиенту оставить общий текст.
+  Решение не показывать вывод docker клиенту верное и его надо сохранить: вывод может содержать
+  учетные данные из URL репозитория.</dd>
+</dl>
+</div>
+
+<h2 id="p1">3. Производительность и корректность</h2>
+
+<div class="item p1">
+<h3><span class="tag p1">P1-1</span> Docker опрашивается вдвое чаще, чем нужно</h3>
+<p class="meta"><code>backend/dockge-server.ts:524-534</code>, <code>:731</code>, <code>:754</code>; <code>backend/stack.ts:559-630</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd>Крон на 10 секунд вызывает подряд <code>observeStacks()</code> и <code>sendStackList(true)</code>.
+  Каждый из них независимо вызывает <code>Stack.getStackList</code>. Кеш <code>managedStackList</code>
+  экономит только чтение каталога стеков: <code>docker compose ls --all</code> и <code>getInstanceMap()</code>
+  (то есть <code>docker ps</code>) выполняются при любом значении флага кеша.</dd>
+  <dt>Следствие</dt>
+  <dd>Четыре вызова docker за тик вместо двух: 8 640 тиков в сутки, то есть около 17 280 лишних запусков процессов.
+  На хосте с большим числом контейнеров это заметная фоновая нагрузка, которой никто не просил.</dd>
+  <dt>Правка</dt>
+  <dd>Получить список один раз в теле крона и передать его обоим потребителям. Сигнатуры
+  <code>observeStacks</code> и <code>sendStackList</code> принимают уже готовую карту.</dd>
+  <dt>Проверка</dt>
+  <dd>Тест с подменой <code>spawn</code>, считающий вызовы docker на один тик.</dd>
+</dl>
+</div>
+
+<div class="item p1">
+<h3><span class="tag p1">P1-2</span> Кеш проверки обновлений образов растет без ограничения</h3>
+<p class="meta"><code>backend/image-updates.ts:47</code>, <code>:175</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd><code>const cache = new Map&lt;string, CacheEntry&gt;()</code> не имеет ни предела размера, ни выселения
+  по времени. Функция <code>clearImageUpdateCache()</code> не вызывается нигде, кроме тестов.</dd>
+  <dt>Следствие</dt>
+  <dd>Запись на каждый когда-либо встреченный тег образа живет до перезапуска процесса. Панель работает
+  месяцами, поэтому утечка медленная, но безусловная.</dd>
+  <dt>Правка</dt>
+  <dd>Выселение по времени жизни записи плюс жесткий предел числа записей. Тест на вытеснение.</dd>
+</dl>
+</div>
+
+<div class="item p1">
+<h3><span class="tag p1">P1-3</span> Запись наблюдений на каждом тике</h3>
+<p class="meta"><code>backend/observations.ts</code>, <code>backend/stability.ts</code></p>
+<dl>
+  <dt>Суть</dt>
+  <dd><code>recordStatus</code> на каждом тике выполняет <code>UPDATE observed_until</code> для каждого
+  стека, и это по замыслу: availability считается только по подтвержденным интервалам, поэтому
+  интервал надо продлевать каждым наблюдением. INSERT происходит только при смене статуса или
+  после разрыва наблюдений.</dd>
+  <dt>Следствие</dt>
+  <dd>Один UPDATE на стек каждые 10 секунд плюс <code>fillAvailability</code> читает историю каждого
+  стека на каждом тике для рассылки списка. При десятках стеков это постоянная фоновая работа SQLite,
+  но не дефект.</dd>
+  <dt>Правка</dt>
+  <dd>Не требуется. Если появится измерение, что это заметно на реальной установке, продление
+  интервала можно делать одним UPDATE по списку id, а не по одному на стек.</dd>
+</dl>
+</div>
+
+<h2 id="p2">4. Технический долг</h2>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-1</span> Компоненты Vue не покрыты юнит-тестами</h3>
+<p>В <code>test/frontend</code> проверяются только чистые модули: каталоги переводов, множественные числа,
+токены оформления, форматирование, разметка статусов. Ни один из 51 компонента не имеет юнит-теста.
+Единственная страховка - 14 спеков Playwright и снимки, то есть самая медленная и хрупкая часть пирамиды.
+Логика в <code>StackInspector.vue</code>, <code>Compose.vue</code> и <code>CreateStackSheet.vue</code>
+проверяется только через браузер.</p>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-2</span> Девять каталогов перевода заполнены на 14-17%</h3>
+<p>При 773 ключах в <code>en.json</code> и <code>ru.json</code> остальные языки содержат 111-130 ключей:
+de, es, fr, zh-CN по 130, ja 127, id 120, pt и ur по 114, ar 111. Интерфейс на этих языках наполовину
+английский. Вопрос "кто переводит" в мастер-плане открыт - см. раздел блокеров.</p>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-3</span> RTL не сверстан, но языки RTL предлагаются</h3>
+<p>В <code>frontend/src/i18n.ts</code> массив <code>rtlLangs</code> пуст, при этом ar и ur присутствуют
+в списке языков. Арабский и урду отображаются слева направо. Либо верстка, либо временное изъятие
+языков из списка - промежуточного состояния быть не должно.</p>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-4</span> Мертвый код и мертвые ключи</h3>
+<ul>
+  <li><code>backend/database.ts</code>: тип <code>DBConfig.type</code> допускает <code>"mysql"</code>,
+  хотя <code>connect</code> на нем бросает "Unknown Database type". Тип обещает то, чего нет.</li>
+  <li><code>getSize()</code> и <code>shrink()</code> вызываются только из тестов.</li>
+  <li>Около 48 ключей <code>en.json</code> не встречаются в коде (подсчет сделан с исключением
+  динамически собираемых префиксов вида <code>serviceState_</code>, <code>gitUiFile_</code>,
+  <code>mcpPermission_</code>).</li>
+  <li>96 ключей каталога записаны не в camelCase, вразрез с остальными.</li>
+</ul>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-5</span> Комментарии на русском в коде, который ведется на английском</h3>
+<p>Кириллица в комментариях: 9 файлов backend и 138 строк во frontend (в основном комментарии в шаблонах
+Vue). Строк интерфейса среди них нет - на фронте это именно комментарии. В мастер-плане пункт уже стоит
+как осознанный и низкоприоритетный, поэтому здесь он зафиксирован, но в план правок вынесен последним.</p>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-6</span> CI не проверяет два пути поставки</h3>
+<p><code>.github/workflows/ci.yml</code> прогоняет lint, check-ts, test, сборку фронта,
+<code>update-docker --dry-run</code>, <code>test:install</code>, docker-integration и e2e. Не прогоняются:
+<code>shellcheck</code> по <code>install.sh</code> (это один из двух способов установить продукт) и
+визуальные тесты. Визуальные, вероятно, исключены намеренно из-за нестабильности снимков в CI, но
+shellcheck дешев и его отсутствие ничем не оправдано.</p>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-7</span> 26 устаревших пакетов при нулевых уязвимостях</h3>
+<table>
+  <tr><th>Пакет</th><th>Сейчас</th><th>Доступно</th><th>Характер</th></tr>
+  <tr><td>typescript</td><td>5.9.3</td><td>7.0.2</td><td>мажорный, затрагивает весь проект</td></tr>
+  <tr><td>express + @types/express</td><td>4.22.3 / 4.17.25</td><td>5.2.1 / 5.0.6</td><td>мажорный, меняет маршруты и обработку ошибок</td></tr>
+  <tr><td>vue-router</td><td>4.5.1</td><td>5.3.1</td><td>мажорный</td></tr>
+  <tr><td>dotenv</td><td>17.4.2</td><td>18.0.1</td><td>мажорный</td></tr>
+  <tr><td>@types/node</td><td>24.13.3</td><td>26.6.2</td><td>мажорный, привязан к версии Node</td></tr>
+  <tr><td>Остальные 20</td><td colspan="3">минорные и патчи: better-auth, vue, vite, sass, zod, eslint и другие</td></tr>
+</table>
+<p>Минорные обновления безопасны и делаются пакетом. Мажорные требуют отдельного цикла с полным CI.</p>
+</div>
+
+<div class="item p2">
+<h3><span class="tag p2">P2-8</span> Продакшн исполняет TypeScript через загрузчик</h3>
+<p><code>tsx</code> находится в <code>dependencies</code>, запуск - <code>node --import tsx ./backend/index.ts</code>.
+Компиляции бэкенда нет. Это решение унаследовано от Dockge и работает, но означает: загрузчик в рантайме
+продакшн-образа, дополнительное время старта и отсутствие проверки, что артефакт сборки вообще собирается.
+Само по себе не дефект, но должно быть осознанным решением, а не умолчанием.</p>
+</div>
+
+<h2 id="blockers">5. Блокеры исправлений</h2>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Нет чистого хоста для проверки на живом Docker</h3>
+<p>На машине разработки <code>docker ps</code> показывает чужие стеки, а правила проекта прямо запрещают
+их трогать при тестировании. Полноценно проверить P1-1 (частота опроса Docker), e2e и
+<code>test:docker-integration</code> в условиях, приближенных к продакшену, здесь нельзя.
+Нужен отдельный хост или изолированное окружение с <code>DOCKGE_STACKS_DIR</code> и своим набором стеков.</p>
+</div>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Мажорные обновления нельзя накатывать без полного прогона</h3>
+<p>typescript 7, express 5 и vue-router 5 меняют поведение. Для express 5 это маршруты и обработка ошибок,
+то есть напрямую монтирование <code>/api/auth/*</code> до парсеров тела запроса. Ручной прогон потока
+аутентификации обязателен, а он упирается в предыдущий блокер.</p>
+</div>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Переводы ждут решения о том, кто их делает</h3>
+<p>Пункт уже стоит в мастер-плане как открытый. Пока нет ответа, девять каталогов заполнять нечем:
+машинный перевод без ревью носителем даст худший результат, чем честный английский по умолчанию.</p>
+</div>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Копии стеков ждут решения о консистентности тома</h3>
+<p>Открытый вопрос мастер-плана. Без ответа, допустимо ли копировать том на работающем стеке или стек надо
+останавливать, проектировать функцию нельзя - от этого зависит и интерфейс, и гарантии, которые панель дает.</p>
+</div>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Правка P0-2 меняет контракт ответа</h3>
+<p>Перевод сообщений на ключи затрагивает поле <code>msg</code> в ack всех обработчиков. Нужно решить,
+остается ли <code>msg</code> техническим текстом для журнала при <code>msgi18n: false</code>, или поле
+целиком отдается под ключ. От этого зависит, сколько мест придется поменять и что увидит агент,
+подключенный к другой версии сервера.</p>
+</div>
+
+<h3>Блокеры из-за невыбранной практики</h3>
+<p>Эти два пункта отличаются от предыдущих: препятствие не в коде и не в окружении, а в том, что
+решение о подходе никем не принято. Пока его нет, соответствующий этап плана начать нельзя.</p>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Нет инструмента для юнит-тестов компонентов Vue</h3>
+<p>В <code>package.json</code> нет ни <code>vitest</code>, ни <code>@vue/test-utils</code>, ни DOM-окружения
+(<code>jsdom</code>, <code>happy-dom</code>). Все тесты идут на <code>node:test</code> с <code>c8</code>.
+Этап 6 плана требует решения: подключать DOM-окружение и <code>@vue/test-utils</code> к
+<code>node:test</code>, чтобы остался один раннер и одна цифра покрытия, или вводить <code>vitest</code>
+как второй. Первый вариант проще для CI, второй привычнее для фронтенда. Пока не выбрано, писать тесты
+компонентов не во что.</p>
+</div>
+
+<div class="item blk">
+<h3><span class="tag blk">Блокер</span> Нет политики совместимости сервера и агента</h3>
+<p>Версия контракта Socket.IO нигде не объявлена: агент любой версии подключается к серверу любой версии,
+и ни одна сторона это не проверяет. Этап 2 меняет формат поля <code>msg</code> в ack, и без правила,
+что делает новый сервер с ответом старого агента (принимает как есть, переводит, отклоняет), это
+изменение нельзя выкатывать на установки с несколькими узлами. Нужно либо объявить версию контракта
+в рукопожатии, либо зафиксировать, что сервер и агенты обновляются только вместе.</p>
+</div>
+
+<h2 id="unknown">6. Что сейчас неизвестно и каких данных не хватает</h2>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 1</span> Кто переводит каталоги</h3>
+<p>Варианты: профессиональный перевод, машинный с обязательным ревью носителем, или сокращение списка
+языков до тех, что реально поддерживаются. Без ответа заполнять 9 каталогов по 640 ключей бессмысленно.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 2</span> RTL: верстаем или изымаем</h3>
+<p>Нужно решение: делать верстку под ar и ur в этом цикле, или убрать их из списка языков до готовности.
+Текущее состояние (язык предлагается, верстка не поддерживает) - худшее из трех.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 3</span> Есть ли изолированное окружение для тестов</h3>
+<p>Нужен ответ: доступен ли отдельный хост или виртуальная машина, где можно запускать e2e и
+docker-integration, не задевая чужие стеки. Без этого часть правок проверяется только на уровне юнит-тестов.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 4</span> Рантайм продакшена: tsx или сборка</h3>
+<p>Оставляем исполнение TypeScript через загрузчик или собираем бэкенд в JS при сборке образа. Второе
+дает проверяемый артефакт и более быстрый старт, но меняет Dockerfile и процесс выпуска.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 5</span> Что делать с исключениями покрытия</h3>
+<p>Снимаем исключения в <code>.c8rc.json</code> и покрываем <code>dockge-server.ts</code>, <code>agent-manager.ts</code>
+и обработчики терминалов, или признаем их зоной ответственности e2e. Сейчас именно там найдены дефекты P0,
+и это аргумент в пользу первого варианта.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 6</span> Приоритет мажорных обновлений</h3>
+<p>Делаем ли typescript 7 и express 5 в этом цикле или откладываем до закрытия функциональных задач
+мастер-плана. Цена мажорных обновлений - отдельный цикл проверок, а не полдня.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 7</span> Куда писать причину сбоя Compose</h3>
+<p>В общий журнал сервера или в журнал конкретного стека, видимый пользователю. Второе полезнее, но
+требует уверенности, что в текст не попадут учетные данные из URL репозитория.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 8</span> Данных нет по фактической нагрузке</h3>
+<p>Не измерено: сколько стеков и контейнеров у типичной установки, сколько занимает
+<code>docker compose ls --all</code> плюс <code>docker ps</code> на таком хосте, какова доля пустых записей
+в <code>stack_observation</code> за сутки. Эти три числа определяют, насколько срочны P1-1 и P1-3.</p>
+</div>
+
+<div class="item opn">
+<h3><span class="tag opn">Вопрос 9</span> Заголовки безопасности</h3>
+<p>Сервер не ставит ни CSP, ни <code>X-Frame-Options</code>, ни другие защитные заголовки
+(<code>helmet</code> не подключен). Для панели за обратным прокси это обычно закрывает сам прокси,
+но по умолчанию продукт ставится и без него. Нужно решение, ставит ли заголовки само приложение;
+для CSP это отдельная работа, потому что Vue и CodeMirror используют inline-стили.</p>
+</div>
+
+<h2 id="plan">7. Предварительный план правок</h2>
+
+<p>Этапы независимы и упорядочены по отношению пользы к риску. Первые три не требуют ответов на открытые
+вопросы и могут начинаться сразу. Каждый этап заканчивается <code>npm run check</code>.</p>
+
+<table>
+  <tr><th>Этап</th><th>Что делаем</th><th>Файлы</th><th>Оценка</th><th>Проверка</th></tr>
+  <tr>
+    <td><b>1</b><br><span class="tag p0">P0</span></td>
+    <td>Отказ терминала отдается объектом Error; в <code>callbackError</code> появляется ветка по умолчанию,
+    которая всегда отвечает клиенту и логирует на уровне error</td>
+    <td><code>backend/terminal.ts</code>, <code>backend/util-server.ts</code></td>
+    <td>полдня</td>
+    <td>новые юнит-тесты на <code>callbackError</code> и <code>Terminal.exec</code>; ручная проверка,
+    что кнопки стека разблокируются</td>
+  </tr>
+  <tr>
+    <td><b>2</b><br><span class="tag p0">P0</span></td>
+    <td>Сообщения Git-потока переводятся на английский и на ключи; ключи заводятся в
+    <code>en.json</code> и <code>ru.json</code>; <code>msgi18n: true</code> ставится только при наличии ключа</td>
+    <td><code>backend/agent-socket-handlers/git-socket-handler.ts</code>, <code>backend/stack-git.ts</code>,
+    <code>backend/util-server.ts</code>, каталоги</td>
+    <td>1-2 дня</td>
+    <td>тест, требующий наличия ключа в <code>en.json</code> для каждого сообщения с
+    <code>msgi18n: true</code>; e2e Git-потока</td>
+  </tr>
+  <tr>
+    <td><b>3</b><br><span class="tag p0">P0</span> <span class="tag p1">P1</span></td>
+    <td>Причина сбоя Compose и развертывания логируется на сервере; список стеков получается один раз
+    на тик крона</td>
+    <td><code>git-socket-handler.ts</code>, <code>backend/dockge-server.ts</code></td>
+    <td>полдня</td>
+    <td>тест числа вызовов docker на тик; прогон <code>test:docker-integration</code> в изолированном
+    окружении</td>
+  </tr>
+  <tr>
+    <td><b>4</b><br><span class="tag p1">P1</span></td>
+    <td>Выселение в кеше проверки образов</td>
+    <td><code>backend/image-updates.ts</code></td>
+    <td>полдня</td>
+    <td>тест вытеснения по времени и по размеру</td>
+  </tr>
+  <tr>
+    <td><b>5</b><br><span class="tag p2">P2</span></td>
+    <td>Чистка: тип mysql из <code>DBConfig</code>, неиспользуемые ключи каталога, приведение 96 ключей
+    к camelCase, решение по <code>getSize</code> и <code>shrink</code></td>
+    <td><code>backend/database.ts</code>, каталоги</td>
+    <td>день</td>
+    <td><code>npm run check</code>; тест целостности каталогов</td>
+  </tr>
+  <tr>
+    <td><b>6</b><br><span class="tag p2">P2</span></td>
+    <td>shellcheck в CI; юнит-тесты для трех ключевых компонентов
+    (<code>StackInspector</code>, <code>Compose</code>, <code>CreateStackSheet</code>);
+    решение по исключениям <code>.c8rc.json</code></td>
+    <td><code>.github/workflows/ci.yml</code>, <code>test/frontend</code>, <code>.c8rc.json</code></td>
+    <td>1-2 дня</td>
+    <td>CI целиком; порог покрытия не понижается</td>
+  </tr>
+  <tr>
+    <td><b>7</b><br><span class="tag p2">P2</span></td>
+    <td>Минорные обновления пакетом (20 штук)</td>
+    <td><code>package.json</code>, <code>package-lock.json</code></td>
+    <td>полдня</td>
+    <td>полный CI включая e2e</td>
+  </tr>
+  <tr>
+    <td><b>8</b><br><span class="tag blk">ждет</span></td>
+    <td>Мажорные обновления: typescript 7, express 5, vue-router 5, dotenv 18, @types/node 26</td>
+    <td>весь проект</td>
+    <td>отдельный цикл</td>
+    <td>полный CI плюс ручная проверка аутентификации на изолированном хосте</td>
+  </tr>
+  <tr>
+    <td><b>9</b><br><span class="tag blk">ждет</span></td>
+    <td>Переводы девяти каталогов и RTL</td>
+    <td><code>frontend/src/lang/</code>, <code>frontend/src/i18n.ts</code>, стили</td>
+    <td>зависит от ответа</td>
+    <td>тест полноты каталогов; визуальная приемка RTL</td>
+  </tr>
+  <tr>
+    <td><b>10</b><br><span class="tag p2">P2</span></td>
+    <td>Перевод комментариев на английский</td>
+    <td>9 файлов backend, шаблоны Vue</td>
+    <td>фоновая работа</td>
+    <td>lint</td>
+  </tr>
+</table>
+
+<div class="note">
+<b>Чего в плане намеренно нет.</b> Не предлагаются: изменение архитектуры Socket.IO на REST, отказ от
+хранения стеков в файлах, новые разделы интерфейса. Все это выходит за рамки продукта, описанные в
+<code>AGENTS.md</code>, и не следует ни из одной находки. Также не предлагается понижать порог покрытия
+или расширять исключения <code>.c8rc.json</code> ради прохождения проверок.
+</div>
+
+<footer>
+Аудит от 19.09.2026 по состоянию репозитория на коммите 1371a1a. Документ автономный: открывается без
+сети, внешних ресурсов не загружает. Числа получены прогоном <code>npm run test</code>,
+<code>npm audit</code>, <code>npm outdated</code> и подсчетами по исходникам; ссылки на строки
+соответствуют указанному коммиту.
+</footer>
+
+</div>
+</body>
+</html>
