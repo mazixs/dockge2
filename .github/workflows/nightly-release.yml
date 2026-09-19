@@ -60,7 +60,7 @@ jobs:
       - name: Build and push the nightly image
         run: |
           docker buildx build \
-              --platform linux/amd64,linux/arm64,linux/arm/v7 \
+              --platform linux/amd64,linux/arm64 \
               ${{ steps.where.outputs.tags }} \
               --target nightly \
               -f ./docker/Dockerfile . \

@@ -102,7 +102,10 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           target: release
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          # node:24.x is published for amd64, arm64 and ppc64le only. armv7 came
+          # from upstream, which was on an older Node, and a build for it fails at
+          # the first FROM with "no match for platform in manifest".
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

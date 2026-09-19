@@ -30,8 +30,8 @@ been rewritten. Do not report issues of this fork upstream.
 
 ## Requirements
 
-- Linux on `amd64`, `arm64` or `armv7`. Debian/Raspbian Bullseye or newer, Ubuntu, Fedora, CentOS,
-  ArchLinux. Windows is not supported.
+- Linux on `amd64` or `arm64` - the architectures the published image is built for.
+  Debian/Raspbian Bullseye or newer, Ubuntu, Fedora, CentOS, ArchLinux. Windows is not supported.
 - [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
   `podman-docker`. The installer offers to install Docker when it is missing.
 - `git` and `curl`. Nothing else: the image builds its own frontend, so the server needs no Node.
