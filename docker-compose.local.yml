@@ -7,12 +7,14 @@ name: dockge2-local
 
 services:
   dev:
-    # Тот же базовый образ, что и у production: node 24.19.0 из .nvmrc плюс docker CLI
-    # и плагин compose. Голый node не подходит - панель выполняет команды docker compose
-    # внутри контейнера, а без клиента их выполнить нечем.
+    # Тот же базовый образ, что и у production - буквально та же ступень того же
+    # файла: node 24.19.0 из .nvmrc плюс docker CLI и плагин compose. Голый node
+    # не подходит - панель выполняет команды docker compose внутри контейнера,
+    # а без клиента их выполнить нечем.
     build:
       context: .
-      dockerfile: docker/Base.Dockerfile
+      dockerfile: docker/Dockerfile
+      target: base
     image: dockge2-dev:latest
     working_dir: /app
     # Обновляем зависимости при изменении lockfile или Node.js, сохраняя быстрый
