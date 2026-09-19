@@ -548,7 +548,7 @@
     "stabilityObservedAt": "Observed {0}",
     "stabilityLoading": "Reading saved observations...",
     "stabilityRetry": "Retry",
-    "stabilityEmpty": "Docker was checked. No containers on this server.",
+    "stabilityEmpty": "Docker was checked. Nothing to watch here yet - the panel does not measure its own container.",
     "stabilityStandalone": "Outside Compose",
     "stabilityHostTableCaption": "Containers on {0}",
     "stabilityContainer": "Container",

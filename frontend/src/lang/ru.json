@@ -545,7 +545,7 @@
     "stabilityObservedAt": "Проверено {0}",
     "stabilityLoading": "Читаем сохраненные наблюдения...",
     "stabilityRetry": "Повторить",
-    "stabilityEmpty": "Docker проверен. На этом сервере нет контейнеров.",
+    "stabilityEmpty": "Docker проверен. Наблюдать пока нечего - собственный контейнер панель не учитывает.",
     "stabilityStandalone": "Вне Compose",
     "stabilityHostTableCaption": "Контейнеры на сервере {0}",
     "stabilityContainer": "Контейнер",
