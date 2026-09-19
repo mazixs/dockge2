@@ -58,6 +58,7 @@ case "$*" in
     "ps --format {{.Names}}") : ;;
     "ps -a --filter label=com.docker.compose.project=dockge2 --format {{.Names}}") [ "${STUB_OTHER_PROJECT:-0}" = "1" ] && echo dockge2-dockge-1 ;;
     "image inspect "*) [ "${STUB_HAS_IMAGE:-1}" = "1" ]; exit $? ;;
+    "pull "*) [ "${STUB_PULL_OK:-0}" = "1" ] || { echo "Error response from daemon: manifest unknown" >&2; exit 1; }; echo "$2" >> "$STUB_PULLED" ;;
     "tag "*) echo "$3" >> "$STUB_TAGS" ;;
     "image ls --format {{.Repository}}:{{.Tag}} dockge2") [ -f "$STUB_TAGS" ] && cat "$STUB_TAGS" ;;
     "image rm "*) if grep -qx "$3" "$STUB_TAGS" 2>/dev/null; then grep -vx "$3" "$STUB_TAGS" > "$STUB_TAGS.new"; mv "$STUB_TAGS.new" "$STUB_TAGS"; else exit 1; fi ;;
@@ -127,6 +128,7 @@ run() {
     STUB_LOG="$WORK/log-$N.txt"
     : > "$STUB_LOG"
     PATH="$WORK/bin:$PATH" STUB_LOG="$STUB_LOG" STUB_ROOT="$WORK" STUB_TAGS="$WORK/tags" \
+        STUB_PULL_OK="${STUB_PULL_OK:-0}" STUB_PULLED="$WORK/pulled" \
         STUB_PUBLISHED="${STUB_PUBLISHED:-$PORT}" STUB_HAS_IMAGE="${STUB_HAS_IMAGE:-1}" \
         STUB_FAIL_BUILD="${STUB_FAIL_BUILD:-0}" STUB_FAIL_UP="${STUB_FAIL_UP:-0}" STUB_COMPOSE="${STUB_COMPOSE:-2.29.0}" DOCKGE2_REPO="$ORIGIN" \
         bash "$@" > "$OUT" 2>&1 < /dev/null
@@ -144,7 +146,8 @@ run_tty() {
     STUB_LOG="$WORK/log-$N.txt"
     : > "$STUB_LOG"
     printf '%b' "$keys" | PATH="$WORK/bin:$PATH" STUB_LOG="$STUB_LOG" STUB_ROOT="$WORK" \
-        STUB_TAGS="$WORK/tags" STUB_PUBLISHED="${STUB_PUBLISHED:-$PORT}" STUB_HAS_IMAGE="${STUB_HAS_IMAGE:-1}" \
+        STUB_TAGS="$WORK/tags" STUB_PULL_OK="${STUB_PULL_OK:-0}" STUB_PULLED="$WORK/pulled" \
+        STUB_PUBLISHED="${STUB_PUBLISHED:-$PORT}" STUB_HAS_IMAGE="${STUB_HAS_IMAGE:-1}" \
         STUB_FAIL_BUILD="${STUB_FAIL_BUILD:-0}" STUB_FAIL_UP="${STUB_FAIL_UP:-0}" STUB_COMPOSE="${STUB_COMPOSE:-2.29.0}" DOCKGE2_REPO="$ORIGIN" \
         script -qfec "bash $*" /dev/null 2>&1 | tr -d '\r' > "$OUT"
     CODE=${PIPESTATUS[1]}
@@ -353,6 +356,49 @@ scenario_review_menu_fixes_a_bad_path_and_port() {
     expect_grep "has to be a number between 1 and 65535" "$OUT" "port asked again"
     expect_grep "Dockge2 is running" "$OUT" "finished"
     expect_eq "$(sed -n 's/^DOCKGE_PORT=//p' "$WORK/s14/.env")" "$PORT" ".env port"
+}
+
+scenario_published_image_is_downloaded_instead_of_built() {
+    # What a small server needs: the build is the part that wants a gigabyte,
+    # and a published image removes it from the install entirely
+    rm -f "$WORK/pulled"
+    STUB_HAS_IMAGE=0 STUB_PULL_OK=1 run "$INSTALLER" --yes --port "$PORT" --dir "$WORK/s15" --stacks-dir "$WORK/stacks"
+    expect_eq "$CODE" 0 "exit code"
+    expect_grep "Looking for a published image" "$OUT" "the search is announced"
+    expect_grep "ghcr.io/mazixs/dockge2:latest" "$STUB_LOG" "pulled the default image"
+    expect_no_grep "compose -f docker-compose.yml build" "$STUB_LOG" "nothing was built"
+    expect_eq "$(sed -n 's/^DOCKGE_IMAGE=//p' "$WORK/s15/.env")" "ghcr.io/mazixs/dockge2:latest" ".env points at the pulled image"
+    expect_grep "Dockge2 is running" "$OUT" "finished"
+}
+
+scenario_missing_published_image_falls_back_to_building() {
+    # Today there is no published image at all, so this is the path every
+    # install takes: say it plainly and build instead of stopping
+    STUB_HAS_IMAGE=0 run "$INSTALLER" --yes --port "$PORT" --dir "$WORK/s16" --stacks-dir "$WORK/stacks"
+    expect_eq "$CODE" 0 "exit code"
+    expect_grep "There is none to download" "$OUT" "says why it builds"
+    expect_grep "compose -f docker-compose.yml build" "$STUB_LOG" "built instead"
+    expect_grep "Dockge2 is running" "$OUT" "finished"
+}
+
+scenario_build_option_ignores_a_published_image() {
+    # --build is how a branch gets installed: a release image would be the
+    # wrong code, however available it is
+    rm -f "$WORK/pulled"
+    STUB_HAS_IMAGE=0 STUB_PULL_OK=1 run "$INSTALLER" --yes --build --port "$PORT" --dir "$WORK/s17" --stacks-dir "$WORK/stacks"
+    expect_eq "$CODE" 0 "exit code"
+    expect_no_grep "docker pull" "$STUB_LOG" "the registry was not asked"
+    expect_grep "compose -f docker-compose.yml build" "$STUB_LOG" "built from the sources"
+}
+
+scenario_named_image_that_cannot_be_pulled_stops() {
+    # An image named by hand is an instruction. Quietly building something else
+    # would install code the user did not ask for
+    STUB_HAS_IMAGE=0 STUB_PULL_OK=0 run "$INSTALLER" --yes --image ghcr.io/mazixs/dockge2:v9.9.9 \
+        --port "$PORT" --dir "$WORK/s18" --stacks-dir "$WORK/stacks"
+    expect_eq "$CODE" 1 "stops"
+    expect_grep "cannot be downloaded" "$OUT" "says what failed"
+    expect_no_grep "compose -f docker-compose.yml build" "$STUB_LOG" "did not build instead"
 }
 
 ########################################

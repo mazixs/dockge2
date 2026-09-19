@@ -20,6 +20,10 @@ DEFAULT_BRANCH="main"
 DEFAULT_INSTALL_DIR="/opt/dockge2"
 DEFAULT_STACKS_DIR="/opt/stacks"
 DEFAULT_PORT="5001"
+# Where a released image is looked for. Building is the expensive part of an
+# install, so it is the fallback, not the first move
+DEFAULT_IMAGE_REPO="ghcr.io/mazixs/dockge2"
+DEFAULT_IMAGE_CHANNEL="latest"
 
 BRANCH=""
 INSTALL_DIR=""
@@ -36,6 +40,10 @@ ENV_FILE=""
 CLEANUP_DIR=""
 ROLLBACK_IMAGE=""
 ROLLBACK_COMMIT=""
+IMAGE_REPO="${DOCKGE2_IMAGE_REPO:-$DEFAULT_IMAGE_REPO}"
+IMAGE_CHANNEL="${DOCKGE2_IMAGE_CHANNEL:-$DEFAULT_IMAGE_CHANNEL}"
+IMAGE_REF=""
+BUILD_FROM_SOURCE=0
 
 # Every explicit answer is remembered as explicit: an existing .env is the truth
 # for everything the user did not name on the command line, and the command line
@@ -67,9 +75,16 @@ Dockge2 installer.
   --data-dir PATH     database, settings and secrets (default <install dir>/data)
   --port NUMBER       the port the panel answers on (default 5001)
   --branch NAME       branch to install from (default main, or the one already checked out)
+  --image REF         use this published image instead of looking for one
+  --build             build from the sources, do not look for a published image
   --update            rebuild an existing installation
   -y, --yes           take the defaults and ask nothing
   -h, --help          this text
+
+By default a published image is downloaded and nothing is built here: building needs
+about 1 GB of memory, running the panel needs about 170 MB. When no published image is
+available the installer builds from the sources and says so. --build always builds, and
+is the way to install the code of a branch rather than the last release.
 
 Without a terminal the installer cannot ask anything, so it stops and asks for --yes
 rather than deciding on its own.
@@ -89,6 +104,8 @@ while [ $# -gt 0 ]; do
         --data-dir) need_value "$1" "${2:-}"; DATA_DIR="$2"; DATA_SET=1; shift 2 ;;
         --port) need_value "$1" "${2:-}"; PORT="$2"; PORT_SET=1; shift 2 ;;
         --branch) need_value "$1" "${2:-}"; BRANCH="$2"; BRANCH_SET=1; shift 2 ;;
+        --image) need_value "$1" "${2:-}"; IMAGE_REF="$2"; shift 2 ;;
+        --build) BUILD_FROM_SOURCE=1; shift ;;
         --update) DO_UPDATE=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage ;;
@@ -598,9 +615,8 @@ $DOCKER compose -f docker-compose.yml config --quiet \
     || die "docker-compose.yml plus .env do not form a valid configuration. Nothing was started; the message above says which value is wrong."
 
 ########################################
-# 4. Build and start
+# 4. Get the image and start
 ########################################
-say "Building the image (a few minutes on a small server)"
 
 # One fixed tag means the running image loses its only name during a rebuild.
 # Naming it first is what makes going back possible at all
@@ -621,13 +637,67 @@ how_to_go_back() {
     return 0
 }
 
-if ! $DOCKER compose -f docker-compose.yml build; then
-    warn "The build failed. The usual reasons, in order:"
-    info "  - no space left on $DOCKER_ROOT (df -h $DOCKER_ROOT)"
-    info "  - the registry refused the base image: rate limit, or no network (docker pull mazixs/dockge2:base)"
-    info "  - a package mirror was unreachable during apt or npm"
-    how_to_go_back
-    die "The image was not built. What runs now, if anything, is untouched."
+# Building is the expensive half of an install, and the cost is memory: the
+# frontend bundler keeps the whole module graph in native memory and peaks near
+# a gigabyte. It does not fit itself into a smaller machine - it gets killed
+# there, silently, and the install ends with a container that never appears.
+# Running the panel afterwards takes about 170 MB. So a published image is
+# downloaded when there is one, and built only when there is not
+enough_memory_to_build() {
+    local total_kb swap_kb total_mb
+    [ -r /proc/meminfo ] || return 0
+    total_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0)"
+    swap_kb="$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0)"
+    total_mb=$(( (total_kb + swap_kb) / 1024 ))
+    [ "$total_mb" -ge 1200 ] && return 0
+    warn "Building needs about 1 GB, and this machine has $total_mb MB of memory and swap together."
+    info "  - the usual way out is a published image, which is downloaded instead of built"
+    info "  - or give the machine swap for the build:"
+    info "      ${SUDO:+$SUDO }fallocate -l 1G /swapfile && ${SUDO:+$SUDO }chmod 600 /swapfile"
+    info "      ${SUDO:+$SUDO }mkswap /swapfile && ${SUDO:+$SUDO }swapon /swapfile"
+    confirm "Build anyway?" || return 1
+    return 0
+}
+
+FROM_REGISTRY=0
+if [ "$BUILD_FROM_SOURCE" = "0" ]; then
+    CANDIDATE="${IMAGE_REF:-$IMAGE_REPO:$IMAGE_CHANNEL}"
+    say "Looking for a published image"
+    info "$CANDIDATE"
+    if $DOCKER pull "$CANDIDATE" >/dev/null 2>&1; then
+        set_env_var DOCKGE_IMAGE "$CANDIDATE"
+        IMAGE_TAG="$CANDIDATE"
+        FROM_REGISTRY=1
+        info "Downloaded. Nothing is built on this machine."
+    elif [ -n "$IMAGE_REF" ]; then
+        die "$CANDIDATE cannot be downloaded. Check the name, or leave out --image to build from the sources."
+    else
+        info "There is none to download, so the image is built here instead."
+        info "A published image would have made this step unnecessary; --build always skips the search."
+    fi
+fi
+
+if [ "$FROM_REGISTRY" = "0" ]; then
+    # What is built here is built under the local name, whatever a previous run
+    # from a registry left in .env
+    if [ -n "$(read_env DOCKGE_IMAGE)" ] && [ "$(read_env DOCKGE_IMAGE)" != "dockge2:latest" ]; then
+        set_env_var DOCKGE_IMAGE "dockge2:latest"
+        IMAGE_TAG="dockge2:latest"
+        info "DOCKGE_IMAGE is now dockge2:latest: this run builds the image instead of downloading it."
+    fi
+
+    enough_memory_to_build || die "Nothing was built, and what runs now, if anything, is untouched."
+
+    say "Building the image (a few minutes on a small server)"
+    if ! $DOCKER compose -f docker-compose.yml build; then
+        warn "The build failed. The usual reasons, in order:"
+        info "  - not enough memory: the frontend bundler needs about 1 GB and is killed without a message"
+        info "  - no space left on $DOCKER_ROOT (df -h $DOCKER_ROOT)"
+        info "  - Docker Hub refused node:24.19.0-bookworm-slim or golang:1.27.0-bookworm: rate limit, or no network"
+        info "  - a package mirror was unreachable during apt or npm"
+        how_to_go_back
+        die "The image was not built. What runs now, if anything, is untouched."
+    fi
 fi
 
 say "Starting the panel"
