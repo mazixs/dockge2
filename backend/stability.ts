@@ -67,8 +67,13 @@ export class StabilityCollector {
 
     constructor(private readRuntime : () => Promise<ContainerRuntime[]> = readDockerRuntime) {}
 
-    /** At most one batched Docker sample per minute, including failed attempts. */
-    async observe(stacks : ReadonlyMap<string, StackIdentity>, now = Date.now()) : Promise<void> {
+    /**
+     * At most one batched Docker sample per minute, including failed attempts.
+     * @param stacks The stacks known to the panel, used to tell managed from standalone
+     * @param now Current time, injectable for tests
+     * @param ownProject Compose project the panel itself runs as; its containers are skipped
+     */
+    async observe(stacks : ReadonlyMap<string, StackIdentity>, now = Date.now(), ownProject = "") : Promise<void> {
         if (this.inFlight || now - this.lastAttemptAt < STABILITY_SCAN_INTERVAL_MS) {
             return;
         }
@@ -76,7 +81,15 @@ export class StabilityCollector {
         this.inFlight = true;
         try {
             const runtime = await this.readRuntime();
-            const containers : StoredContainer[] = runtime.map((container) => {
+            // The panel does not record itself. Availability here is measured from
+            // observations the panel takes, so the one thing it can never observe is
+            // its own downtime: while it is down nobody is sampling, and the gap
+            // reads as "unknown" rather than as the outage it was. The row was also
+            // dead weight - the panel is not a stack of its own, so its name is not
+            // a link anywhere. That the panel is up is evident from the page being
+            // there at all
+            const observed = ownProject ? runtime.filter((container) => container.project !== ownProject) : runtime;
+            const containers : StoredContainer[] = observed.map((container) => {
                 const managed = [ ...stacks.values() ].find((stack) => stack.isManagedByDockge && stack.path === container.workingDir)
                     ?? stacks.get(container.project);
                 return { ...container,
@@ -186,7 +199,11 @@ export class StabilityCollector {
 
 export const stabilityCollector = new StabilityCollector();
 
-/** Hook for the existing background stack scan. */
-export async function observeContainerStability(stacks : ReadonlyMap<string, StackIdentity>) : Promise<void> {
-    await stabilityCollector.observe(stacks);
+/**
+ * Hook for the existing background stack scan.
+ * @param stacks The stacks known to the panel
+ * @param ownProject Compose project the panel itself runs as
+ */
+export async function observeContainerStability(stacks : ReadonlyMap<string, StackIdentity>, ownProject = "") : Promise<void> {
+    await stabilityCollector.observe(stacks, Date.now(), ownProject);
 }

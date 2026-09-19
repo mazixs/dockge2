@@ -741,7 +741,7 @@ export class DockgeServer {
             endpoint: "",
             status: stack.status,
         })));
-        await observeContainerStability(stackList);
+        await observeContainerStability(stackList, await Stack.getOwnProjectName());
     }
 
     async sendStackList(useCache = false) {
