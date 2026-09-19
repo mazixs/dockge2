@@ -7,6 +7,32 @@ import semver from "semver";
 import { signInAgent, invalidateAgentSession } from "./agent-auth";
 import { authorizeSocketEvent, viewerStackSummary } from "./auth-access";
 import dayjs, { Dayjs } from "dayjs";
+import { MIN_AGENT_PROTOCOL_VERSION } from "../common/agent-socket";
+
+/**
+ * Decide whether an agent is too old to talk to.
+ *
+ * A dockge2 agent states the generation of the agent protocol it speaks, and
+ * that is what gets compared. Its release number is useless here: this fork
+ * numbers releases from scratch, so 0.0.1 is a build far newer than upstream
+ * 1.4.0 and a version comparison would disconnect every agent.
+ *
+ * An upstream Dockge sends no protocol field. There the release number does
+ * mean something, because agents only exist from 1.4.0 on, so the old check
+ * still applies to it.
+ *
+ * The first packet of a connection carries neither field on purpose - it is
+ * sent before sign-in - and an agent is not judged on it.
+ * @param info The `info` packet received from the agent
+ * @returns true when the agent must be disconnected
+ */
+export function agentIsTooOld(info : { version? : unknown, agentProtocol? : unknown }) : boolean {
+    if (typeof info.agentProtocol === "number") {
+        return info.agentProtocol < MIN_AGENT_PROTOCOL_VERSION;
+    }
+
+    return typeof info.version === "string" && semver.satisfies(info.version, "< 1.4.0");
+}
 
 /**
  * Dockge Instance Manager
@@ -197,8 +223,7 @@ export class AgentManager {
         client.on("info", (res) => {
             log.debug("agent-manager", res);
 
-            // Disconnect if the version is lower than 1.4.0
-            if (!isDev && semver.satisfies(res.version, "< 1.4.0")) {
+            if (!isDev && agentIsTooOld(res)) {
                 this.socket.emit("agentStatus", {
                     endpoint: endpoint,
                     status: "offline",
