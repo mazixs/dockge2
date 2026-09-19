@@ -35,8 +35,11 @@ been rewritten. Do not report issues of this fork upstream.
 - [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
   `podman-docker`. The installer offers to install Docker when it is missing.
 - `git` and `curl`. Nothing else: the image builds its own frontend, so the server needs no Node.
-- About 200 MB of memory for the running panel - measured at 167 MB under a hard 800 MB limit, with
-  the stacks themselves on top. Building the image is the expensive part, about 1 GB: the bundler
+- About 200 MB of memory for the running panel, with the stacks themselves on top. The figure moves
+  with the room it is given, because V8 grows its heap to fit: 172 MB under a hard 800 MB limit,
+  219 MB on a 6 GB server with no limit at all. Neither is a leak, and a small server does not need
+  a bigger one - set `mem_limit` on the service and the panel settles lower.
+  Building the image is the expensive part, about 1 GB: the bundler
   holds the whole module graph, and no flag brings that under roughly 900 MB. The installer
   downloads a published image when there is one, so a 1 GB server only has to run the panel, not
   build it; below about 1.2 GB of memory and swap the installer says so before it starts a build

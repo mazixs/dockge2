@@ -189,7 +189,7 @@ require recovery from `.git/dockge-recovery-*`.
   `ghcr.io/mazixs/dockge2` with the built-in token. Docker Hub is optional and skipped without
   credentials. `latest` is only moved by a tag without a dash in it.
 - Memory is the reason the image is published at all: the frontend bundler peaks near 1 GB and no
-  flag brings it under about 900 MB, while running the panel takes about 170 MB. Installs and
+  flag brings it under about 900 MB, while running the panel takes about 200 MB. Installs and
   updates download the image and build only when there is none, so a 1 GB server stays usable.
 - `build:docker` and the release scripts push to a registry. They are not a routine check: read the
   command before running it.

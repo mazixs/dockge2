@@ -82,7 +82,7 @@ Dockge2 installer.
   -h, --help          this text
 
 By default a published image is downloaded and nothing is built here: building needs
-about 1 GB of memory, running the panel needs about 170 MB. When no published image is
+about 1 GB of memory, running the panel needs about 200 MB. When no published image is
 available the installer builds from the sources and says so. --build always builds, and
 is the way to install the code of a branch rather than the last release.
 
@@ -644,7 +644,7 @@ how_to_go_back() {
 # frontend bundler keeps the whole module graph in native memory and peaks near
 # a gigabyte. It does not fit itself into a smaller machine - it gets killed
 # there, silently, and the install ends with a container that never appears.
-# Running the panel afterwards takes about 170 MB. So a published image is
+# Running the panel afterwards takes about 200 MB. So a published image is
 # downloaded when there is one, and built only when there is not
 enough_memory_to_build() {
     local total_kb swap_kb total_mb
