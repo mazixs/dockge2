@@ -37,7 +37,7 @@ import { spawn } from "./child-process";
 import { AgentManager } from "./agent-manager";
 import { AgentProxySocketHandler } from "./socket-handlers/agent-proxy-socket-handler";
 import { AgentSocketHandler } from "./agent-socket-handler";
-import { AgentSocket } from "../common/agent-socket";
+import { AgentSocket, AGENT_PROTOCOL_VERSION } from "../common/agent-socket";
 import { ManageAgentSocketHandler } from "./socket-handlers/manage-agent-socket-handler";
 import { Terminal } from "./terminal";
 import { toNodeHandler } from "better-auth/node";
@@ -557,16 +557,22 @@ export class DockgeServer {
         let versionProperty;
         let latestVersionProperty;
         let isContainer;
+        let agentProtocolProperty;
 
         if (!hideVersion) {
             versionProperty = packageJSON.version;
             latestVersionProperty = checkVersion.latestVersion;
             isContainer = (process.env.DOCKGE_IS_CONTAINER === "1");
+            // Said alongside the version, not instead of it: a panel connecting to
+            // this one as an agent decides on the protocol, while the version is
+            // what a person reads. Both stay hidden before sign-in
+            agentProtocolProperty = AGENT_PROTOCOL_VERSION;
         }
 
         socket.emit("info", {
             version: versionProperty,
             latestVersion: latestVersionProperty,
+            agentProtocol: agentProtocolProperty,
             isContainer,
             primaryHostname: await Settings.get("primaryHostname"),
             //serverTimezone: await this.getTimezone(),
