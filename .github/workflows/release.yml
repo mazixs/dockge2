@@ -5,14 +5,14 @@ name: Release
 # memory: on a small VPS that is the difference between an install and an
 # out-of-memory kill.
 #
-# Runs on a tag like v2.0.0 or v2.0.0-rc.2, or by hand for a tag already pushed.
+# Runs on a tag like v0.0.1 or v0.0.2-rc.1, or by hand for a tag already pushed.
 on:
   push:
     tags: [ "v*" ]
   workflow_dispatch:
     inputs:
       tag:
-        description: "The tag to publish, for example v2.0.0"
+        description: "The tag to publish, for example v0.0.1"
         required: true
         type: string
 
@@ -77,7 +77,7 @@ jobs:
               [ "$HAS_DOCKERHUB" = "true" ] && echo "mazixs/dockge2"
               echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # A dash in the tag means a pre-release: v2.0.0-rc.1 must not become
+          # A dash in the tag means a pre-release: v0.0.2-rc.1 must not become
           # `latest`, or every machine that installs by default gets a candidate.
           case "$TAG" in
               *-*) echo "stable=false" >> "$GITHUB_OUTPUT" ;;
