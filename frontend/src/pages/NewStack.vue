@@ -145,7 +145,7 @@ export default {
     },
     computed: {
         sourceReady() {
-            return isSafeGitRepository(this.repository) && this.branch.trim()
+            return isSafeGitRepository(this.repository.trim()) && this.branch.trim()
                 && this.$root.agentStatusList[this.endpoint] === "online";
         },
         canCreate() {
@@ -155,7 +155,7 @@ export default {
         // Список веток запрашивается у чужого сервера, поэтому кнопка доступна
         // только когда адрес уже разобран и выбранный агент на связи
         canListBranches() {
-            return !this.branchesBusy && isSafeGitRepository(this.repository)
+            return !this.branchesBusy && isSafeGitRepository(this.repository.trim())
                 && this.$root.agentStatusList[this.endpoint] === "online";
         },
         // Дорожка шагов стоит над выбором источника, поэтому номер шага нужен

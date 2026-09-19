@@ -42,6 +42,7 @@ import {
 import { InteractiveTerminal, Terminal } from "./terminal";
 import { spawn } from "./child-process";
 import { readStackSource, type StackSource } from "./stack-source";
+import { composeArgs } from "./compose-args";
 import { readAvailability } from "./observations";
 import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
@@ -979,22 +980,11 @@ export class Stack {
      * @returns Argument array, never a shell string
      */
     getComposeOptions(command : string, ...extraOptions : string[]) {
-        const globalOptions : string[] = [];
+        const options = composeArgs({ composeFileName: this._composeFileName,
+            envFileNames: this.envFileNames,
+            globalEnvFile: fs.existsSync(path.join(this.server.stacksDir, "global.env")) ? "../global.env" : "" },
+        command, ...extraOptions);
 
-        // The global env file stays the outermost source, stack files override it
-        if (fs.existsSync(path.join(this.server.stacksDir, "global.env"))) {
-            globalOptions.push("--env-file", "../global.env");
-        }
-
-        for (const fileName of this.envFileNames) {
-            globalOptions.push("--env-file", "./" + fileName);
-        }
-
-        if (this._composeFileName) {
-            globalOptions.push("-f", this._composeFileName);
-        }
-
-        const options = [ "compose", ...globalOptions, command, ...extraOptions ];
         log.debug("getComposeOptions", options);
         return options;
     }

@@ -34,7 +34,6 @@ export interface GitUpdatePreview {
     currentCommit: string;
     targetCommit: string;
     files: GitPreviewFile[];
-    source: { commit?: string; changedFiles?: number | null; kind: "git" | "local"; remote: string; branch: string; behind: number | null; dirty: boolean | null };
 }
 
 export interface GitSaveResult {
@@ -42,5 +41,4 @@ export interface GitSaveResult {
     saved: true;
     deployed: boolean;
     deploymentError?: string;
-    source: GitUpdatePreview["source"];
 }

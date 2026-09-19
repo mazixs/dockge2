@@ -1,29 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "./child-process";
+import { runGit } from "./git-command";
 import { log } from "./log";
+import type { StackSource } from "../common/stack-source";
 
-/** Where the files of a stack come from, as far as reading the directory can tell */
-export interface StackSource {
-    /** git when the directory is a work tree, local when it is a plain directory */
-    kind : "git" | "local";
-    /** Full checked-out commit, empty for a local directory. */
-    commit? : string;
-    /** Number of modified/untracked status entries; not a count of failed services. */
-    changedFiles? : number | null;
-    /** Remote address without credentials, empty when there is no remote */
-    remote : string;
-    /** Checked out branch, empty when the head is detached or unreadable */
-    branch : string;
-    /**
-     * Commits the work tree is behind its upstream, null when it cannot be told.
-     * Nothing is fetched here, so this is the distance to the last known upstream
-     * state - the truth may be further away, and the UI must not pretend otherwise.
-     */
-    behind : number | null;
-    /** Whether the work tree has uncommitted changes, null when it cannot be told */
-    dirty : boolean | null;
-}
+export type { StackSource };
 
 /** How long one answer is reused, so the ten second cron does not run git per stack per tick */
 const CACHE_MS = 60_000;
@@ -40,51 +21,46 @@ const cache = new Map<string, CacheEntry>();
 
 /**
  * Run one git command inside a directory and return its trimmed output.
+ *
  * A failure is not an error here: an answer that cannot be read stays empty, because
- * the alternative is inventing a value for the UI.
+ * the alternative is inventing a value for the UI. The call itself is the hardened
+ * one every other git call of the panel goes through - reading a directory is not a
+ * reason to trust its configuration any more than updating it is.
  * @param dir Work tree
  * @param args Git arguments, fixed by the caller and never taken from a client
- * @returns Output without surrounding whitespace, empty when git failed
+ * @param unavailable Answer to return when git could not be asked
+ * @returns Output without surrounding whitespace, `unavailable` when git failed
  */
 async function git(dir : string, args : string[], unavailable = "") : Promise<string> {
     try {
-        const env: NodeJS.ProcessEnv = { ...process.env };
-        for (const key of Object.keys(env)) {
-            if (key.startsWith("GIT_")) {
-                delete env[key];
-            }
-        }
-        Object.assign(env, { GIT_CONFIG_NOSYSTEM: "1",
-            GIT_CONFIG_GLOBAL: "/dev/null",
-            GIT_TERMINAL_PROMPT: "0",
-            GIT_OPTIONAL_LOCKS: "0" });
-        const safeArgs = [ "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null" ];
+        const config : string[] = [];
+
+        // Содержимое репозитория может подменять себя при чтении через filter-драйверы.
+        // Для status они выключаются поименно: включенный драйвер выполнил бы чужую
+        // команду ради строки в списке стеков
         if (args[0] === "status") {
             try {
-                const filters = await spawn("git", [ ...safeArgs, "config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$" ], { cwd: dir,
-                    env,
-                    encoding: "utf-8",
+                const filters = await runGit([ "config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$" ], { cwd: dir,
                     maxBuffer: 64 * 1024,
                     timeoutMs: GIT_TIMEOUT_MS });
-                for (const key of String(filters.stdout ?? "").split("\0").filter(Boolean)) {
-                    safeArgs.push("-c", `${key}=${key.endsWith(".required") ? "false" : ""}`);
+
+                for (const key of filters.toString("utf-8").split("\0").filter(Boolean)) {
+                    config.push("-c", `${key}=${key.endsWith(".required") ? "false" : ""}`);
                 }
             } catch (error) {
                 // git config exits 1 when no filter keys exist; other failures must not run status unsafely.
-                if ((error as { code?: number }).code !== 1) {
+                if ((error as { code? : number }).code !== 1) {
                     throw error;
                 }
             }
         }
-        const res = await spawn("git", [ ...safeArgs, ...args ], {
-            cwd: dir,
-            env,
-            encoding: "utf-8",
-            maxBuffer: 64 * 1024,
-            timeoutMs: GIT_TIMEOUT_MS,
-        });
 
-        return (res.stdout?.toString() ?? "").trim();
+        const output = await runGit(args, { cwd: dir,
+            config,
+            maxBuffer: 64 * 1024,
+            timeoutMs: GIT_TIMEOUT_MS });
+
+        return output.toString("utf-8").trim();
     } catch (e) {
         if (e instanceof Error) {
             log.debug("stackSource", `git ${args[0]} could not read stack source`);
@@ -166,6 +142,7 @@ async function readFromDisk(dir : string) : Promise<StackSource> {
         branch: "",
         behind: null,
         dirty: null,
+        checkedAt: null,
     };
 
     // A work tree has .git as a directory, a linked work tree has it as a file
@@ -194,7 +171,51 @@ async function readFromDisk(dir : string) : Promise<StackSource> {
         branch: branch === "HEAD" ? "" : branch,
         behind,
         dirty: status === "\0" ? null : status !== "",
+        checkedAt: fetchedAt(dir),
     };
+}
+
+/**
+ * Directory holding the repository state of a work tree.
+ *
+ * `.git` is a directory in an ordinary clone and a file pointing elsewhere in a
+ * linked work tree. FETCH_HEAD belongs to the work tree that fetched, so the
+ * pointer has to be followed rather than assumed.
+ * @param dir Work tree
+ * @returns Absolute path of the git directory
+ */
+function gitDir(dir : string) : string {
+    const dot = path.join(dir, ".git");
+
+    if (fs.statSync(dot).isDirectory()) {
+        return dot;
+    }
+
+    const pointer = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dot, "utf-8"));
+
+    if (!pointer) {
+        throw new Error("no gitdir pointer");
+    }
+
+    return path.resolve(dir, pointer[1]!.trim());
+}
+
+/**
+ * When origin was last asked, from the modification time of FETCH_HEAD.
+ *
+ * Only a fetch writes that file, so the answer never claims a check that did not
+ * happen. A clone does not write it either: a stack that was created and never
+ * compared reports null, and the interface asks for one check instead of calling
+ * an unverified distance "in sync".
+ * @param dir Work tree
+ * @returns Milliseconds of the last fetch, null when nothing ever fetched here
+ */
+function fetchedAt(dir : string) : number | null {
+    try {
+        return Math.round(fs.statSync(path.join(gitDir(dir), "FETCH_HEAD")).mtimeMs);
+    } catch {
+        return null;
+    }
 }
 
 /**

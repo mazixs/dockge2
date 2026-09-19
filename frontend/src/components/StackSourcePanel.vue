@@ -11,11 +11,13 @@
             <template v-if="source?.kind === 'git'">
                 <p class="repository">{{ repositoryName }}</p>
                 <div class="git-version"><span><InterfaceIcon name="git" />{{ source.branch || '-' }}</span><code v-if="source.commit" :title="source.commit"><font-awesome-icon icon="code-commit" />{{ source.commit.slice(0, 7) }}</code></div>
-                <div class="source-status" :class="{ changed: hasChanges, unknown: source.dirty === null }"><font-awesome-icon :icon="hasChanges || source.dirty === null ? 'circle-exclamation' : 'circle-check'" /><span>{{ $t(hasChanges ? "familiarHasChanges" : source.dirty === null ? "familiarGitNotChecked" : "familiarGitClean") }}</span></div>
+                <div class="source-status" :class="{ changed: hasChanges, unknown: state === 'unreadable' || state === 'unchecked' }"><font-awesome-icon :icon="state === 'clean' ? 'circle-check' : 'circle-exclamation'" /><span>{{ stateText }}</span></div>
                 <p v-if="source.changedFiles" class="source-note">{{ $t("familiarFilesChanged", [source.changedFiles]) }}</p>
+                <!-- Давность проверки идет строкой, а не под раскрывашкой: "изменений
+                     нет" без нее читается как "проверено сейчас" -->
+                <p v-if="freshness" class="source-note">{{ freshness }}</p>
 
                 <router-link v-if="showCompare" :to="gitUrl" class="btn btn-normal">{{ $t(hasChanges ? "familiarGitCompare" : "familiarGitCheck") }}</router-link>
-                <details class="git-freshness"><summary>{{ $t("pagesGitFreshness") }}</summary><p v-if="source.behind > 0" class="source-note">{{ $t("sourceBehindShort", [source.behind]) }}</p><p class="source-note">{{ $t("familiarGitLocalState") }}</p></details>
             </template>
             <template v-else>
                 <p class="source-note">{{ $t("familiarLocalSource") }}</p>
@@ -30,6 +32,8 @@
 <script>
 import InterfaceIcon from "./InterfaceIcon.vue";
 import ShieldCheck from "./ShieldCheck.vue";
+import { formatDuration } from "../format";
+import { STACK_GIT_STATE_KEY, stackSourceDiffers, stackSourceState } from "../../../common/stack-source";
 export default {
     components: { InterfaceIcon,
         ShieldCheck },
@@ -47,8 +51,34 @@ export default {
             default: false },
     },
     computed: {
+        /** Состояние каталога тем же словом, которым его называет список стеков */
+        state() {
+            return stackSourceState(this.source);
+        },
+
         hasChanges() {
-            return this.source?.dirty || this.source?.behind > 0;
+            return stackSourceDiffers(this.state);
+        },
+
+        /** Что с файлами: правки на сервере, коммиты в Git или ни того, ни другого */
+        stateText() {
+            const key = STACK_GIT_STATE_KEY[this.state];
+
+            return key ? this.$t(key, this.source?.behind ?? 0) : "";
+        },
+
+        /**
+         * Когда в последний раз спрашивали origin. Без этой строки любое
+         * "изменений нет" читается как "проверено сейчас", хотя проверка могла
+         * быть неделю назад или не быть вовсе
+         * @returns {string} Давность проверки, пустая строка если о ней уже сказано
+         */
+        freshness() {
+            if (this.source?.checkedAt) {
+                return this.$t("familiarGitCheckedAgo", [ formatDuration(Date.now() - this.source.checkedAt, this.$t) ]);
+            }
+
+            return this.state === "unchecked" ? "" : this.$t("familiarGitNeverChecked");
         },
 
         /**
@@ -79,8 +109,4 @@ export default {
 .source-status.unknown { color: var(--text-muted); }
 .source-status.changed { color: var(--state-attention); }
 .source-body > .btn { display: flex; align-items: center; justify-content: center; gap: var(--gap-sm); width: 100%; margin-top: var(--gap-xs); font-size: var(--text-sm); }
-.git-freshness { font-size: var(--text-sm); }
-.git-freshness summary { cursor: pointer; color: var(--text-muted); }
-.git-freshness summary:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-.git-freshness .source-note { margin-top: var(--gap-xs); }
 </style>

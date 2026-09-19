@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { spawn } from "../../backend/child-process";
 import { cleanRemote, clearStackSourceCache, readStackSource } from "../../backend/stack-source";
+import { stackSourceState } from "../../common/stack-source";
 
 /**
  * Run git in a directory, failing the test when git itself fails
@@ -152,6 +153,50 @@ test("ответ переиспользуется, пока не истек ср
     } finally {
         rmSync(dir, { recursive: true,
             force: true });
+    }
+});
+
+test("время проверки берется из FETCH_HEAD, а не из факта клонирования", async () => {
+    const upstream = tempDir();
+    const work = tempDir();
+    const cloned = tempDir();
+
+    try {
+        await git(upstream, [ "init", "--bare", "--initial-branch=main", "." ]);
+
+        await git(work, [ "init", "--initial-branch=main", "." ]);
+        await git(work, [ "config", "user.email", "test@example.com" ]);
+        await git(work, [ "config", "user.name", "Test" ]);
+        writeFileSync(path.join(work, "compose.yaml"), "services: {}\n");
+        await git(work, [ "add", "." ]);
+        await git(work, [ "commit", "-m", "first" ]);
+        await git(work, [ "remote", "add", "origin", upstream ]);
+        await git(work, [ "push", "-u", "origin", "main" ]);
+
+        // Клон приносит файлы, но FETCH_HEAD не пишет: с этой минуты origin никто
+        // не спрашивал, и нулевое отставание означает "не проверяли", а не "свежее"
+        await git(cloned, [ "clone", upstream, "." ]);
+        clearStackSourceCache();
+        const fresh = await readStackSource(cloned);
+
+        assert.equal(fresh.behind, 0);
+        assert.equal(fresh.checkedAt, null);
+        assert.equal(stackSourceState(fresh), "unchecked");
+
+        const before = Date.now();
+        await git(cloned, [ "fetch", "origin" ]);
+        clearStackSourceCache();
+        const checked = await readStackSource(cloned);
+
+        assert.equal(typeof checked.checkedAt, "number");
+        // Минута запаса: файловые системы хранят время с разной точностью
+        assert.ok((checked.checkedAt ?? 0) >= before - 60_000, `${checked.checkedAt} раньше ${before}`);
+        assert.equal(stackSourceState(checked), "clean");
+    } finally {
+        for (const dir of [ upstream, work, cloned ]) {
+            rmSync(dir, { recursive: true,
+                force: true });
+        }
     }
 });
 

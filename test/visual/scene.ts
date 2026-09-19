@@ -42,13 +42,17 @@ const compose = `services:
   db:
     image: postgres:16-alpine
 `;
+// Время последней проверки задано относительно замороженных часов спеки:
+// иначе "проверено N назад" менялось бы на каждом прогоне
+const CHECKED_AT = new Date("2026-09-15T09:00:00Z").getTime();
 const source = { kind: "git",
     remote: "https://github.com/homelab/paperless.git",
     branch: "main",
     commit: "7a82b919f2c1ad00000000000000000000000000000",
     dirty: true,
     behind: 1,
-    changedFiles: 3 };
+    changedFiles: 3,
+    checkedAt: CHECKED_AT };
 const names = [ "paperless", "immich", "uptime-kuma", "vaultwarden", "jellyfin" ];
 const stacks = Object.fromEntries(names.map((name, index) => [ `${name}_`, {
     name,
@@ -65,9 +69,14 @@ const stacks = Object.fromEntries(names.map((name, index) => [ `${name}_`, {
         reason: "unhealthy",
         detail: "" }] : [],
     dir: `/opt/stacks/${name}`,
+    // Стек из Git, который ни разу не сверяли, - отдельное состояние: ноль
+    // коммитов отставания здесь означает, что origin никто не спрашивал
     source: index === 0 ? source : index === 3 ? { ...source,
         remote: "https://github.com/homelab/vaultwarden.git",
-        behind: 0 } : { kind: "local" },
+        dirty: false,
+        changedFiles: 0,
+        behind: 0,
+        checkedAt: null } : { kind: "local" },
     services: [ "web", "broker", "db" ].map((service, serviceIndex) => ({ name: service,
         state: index === 4 ? "stopped" : index === 2 ? "failed" : index === 1 && serviceIndex === 0 ? "attention" : "running" })),
 }]));
