@@ -2,10 +2,11 @@ import { promises as fs, constants } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID, createHash } from "node:crypto";
-import { spawn } from "./child-process";
-import { clearStackSourceCache, readStackSource } from "./stack-source";
+import { runGit } from "./git-command";
+import { clearStackSourceCache } from "./stack-source";
 import type { GitApplyInput, GitCloneInput, GitPreviewFile, GitUpdatePreview } from "../common/stack-git";
 import type { StackFileConfig } from "../common/types/stack";
+import { gitRepositoryProblem } from "../common/git-repository";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -44,23 +45,23 @@ function safePath(name: string): void {
     }
 }
 
-/** Enforce a transport allowlist; credentials must come from the host, never the URL. */
+/**
+ * Enforce the address rule, saying which half of it the address failed.
+ *
+ * The rule itself is shared with the creation page, so a button that is enabled
+ * means the server will accept what it sends.
+ * @param repository Address supplied by the user
+ * @param allowLocal Whether a local path counts as a remote; tests only
+ * @throws {StackGitError} When the address cannot be used
+ */
 export function validateGitRepository(repository: string, allowLocal = false): void {
-    if (typeof repository !== "string" || repository.length > 2048 || /[\x00-\x20\x7f]/.test(repository) || repository.startsWith("-")) {
+    const problem = gitRepositoryProblem(repository, allowLocal);
+
+    if (problem === "shape") {
         throw new StackGitError("Укажите корректный HTTP(S) или SSH адрес репозитория.");
     }
-    if (allowLocal && path.isAbsolute(repository)) {
-        return;
-    }
-    if (/^[a-zA-Z0-9_.-]+@[a-zA-Z0-9.-]+:[a-zA-Z0-9_./-]+$/.test(repository)) {
-        return;
-    }
-    try {
-        const url = new URL(repository);
-        if (![ "https:", "http:", "ssh:" ].includes(url.protocol) || url.password || (url.protocol !== "ssh:" && url.username) || url.search || url.hash || !url.hostname || !url.pathname || url.pathname === "/") {
-            throw new Error();
-        }
-    } catch {
+
+    if (problem) {
         throw new StackGitError("Допустимы HTTP(S) и SSH адреса без пароля, токена и параметров запроса.");
     }
 }
@@ -169,29 +170,11 @@ export class StackGitWorkflow {
 
     private async git(dir: string, args: string[], indexFile?: string): Promise<Buffer> {
         try {
-            const env: NodeJS.ProcessEnv = { ...process.env };
-            // Git-specific inherited variables can redirect its executable, config or index.
-            for (const key of Object.keys(env)) {
-                if (key.startsWith("GIT_")) {
-                    delete env[key];
-                }
-            }
-            Object.assign(env, {
-                GIT_TERMINAL_PROMPT: "0",
-                GIT_CONFIG_NOSYSTEM: "1",
-                GIT_CONFIG_GLOBAL: "/dev/null",
-                GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
-                GIT_ALLOW_PROTOCOL: this.options.allowLocalTransport ? "http:https:ssh:file" : "http:https:ssh",
-            });
-            if (indexFile) {
-                env.GIT_INDEX_FILE = indexFile;
-            }
-            const result = await spawn("git", [ "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.sshCommand=ssh -oBatchMode=yes", "-c", "credential.helper=", "-c", "submodule.recurse=false", "-c", "protocol.ext.allow=never", ...args ], { cwd: dir,
-                env,
-                encoding: "buffer",
+            return await runGit(args, { cwd: dir,
+                allowLocalTransport: this.options.allowLocalTransport,
+                indexFile,
                 maxBuffer: MAX_BYTES,
                 timeoutMs: 60_000 });
-            return Buffer.from(result.stdout ?? "");
         } catch {
             throw new StackGitError("Операция Git не выполнена. Проверьте адрес, ветку и доступ сервера к репозиторию.");
         }
@@ -350,8 +333,7 @@ export class StackGitWorkflow {
                 branch,
                 currentCommit,
                 targetCommit,
-                files,
-                source: await readStackSource(dir) };
+                files };
             for (const [ id, item ] of this.previews) {
                 if (Date.now() - item.createdAt > PREVIEW_MS || item.dir === dir) {
                     this.previews.delete(id);

@@ -43,7 +43,7 @@
             </div>
         </div>
 
-        <div v-if="source?.kind === 'git' && (source.dirty || source.behind > 0) && $root.canManageStacks" class="git-update-notice">
+        <div v-if="gitFilesPending && $root.canManageStacks" class="git-update-notice">
             <InterfaceIcon name="git" />
             <div><strong>{{ $t(source.behind > 0 ? "familiarGitNotice" : "pagesLocalChanges") }}</strong><p>{{ $t("familiarGitNoticeHint") }}</p></div>
             <router-link :to="gitUrl" class="btn btn-normal">{{ $t("familiarGitCompare") }}</router-link>
@@ -89,7 +89,10 @@
                     <p v-if="previewLoading" class="preview-line">{{ $t("updatePreviewCheck") }}…</p>
 
                     <template v-else-if="preview">
-                        <p class="preview-line">{{ previewSourceLine }}</p>
+                        <p class="preview-line">
+                            {{ previewSourceLine }}
+                            <router-link v-if="previewGitPending" :to="gitUrl">{{ $t("familiarGitCompare") }}</router-link>
+                        </p>
 
                         <dl class="preview-images">
                             <template v-for="item in preview.images" :key="item.image">
@@ -351,6 +354,7 @@ import Uptime from "../components/Uptime.vue";
 import { ATTENTION, RUNNING, envsubstYAML, parseDockerPort } from "../../../common/util-common";
 import { summariseRegistries } from "../../../common/image-source";
 import { formatDuration, formatPercent } from "../format";
+import { stackSourceDiffers, stackSourceState } from "../../../common/stack-source";
 import { VERB_KEYS } from "../progress-labels";
 import { isUpStatus, parseDockerDuration } from "../../../common/docker-time";
 
@@ -489,42 +493,18 @@ export default {
             return this.globalStack?.source ?? null;
         },
 
-        /** Источник каталога словами, из того же чтения, что и в списке */
-        sourceFact() {
-            if (!this.source) {
-                return "";
-            }
-
-            if (this.source.kind !== "git") {
-                return this.$t("sourceLocal");
-            }
-
-            const behind = this.source.behind;
-            const remote = this.source.remote || "Git";
-
-            if (typeof behind === "number" && behind > 0) {
-                return `${remote} · ${this.$t("sourceBehindShort", [ behind ])}`;
-            }
-
-            if (typeof behind === "number") {
-                return `${remote} · ${this.$t("sourceInSyncShort")}`;
-            }
-
-            return remote;
+        /** Расходятся ли файлы стека с Git: правки на сервере или неперенесенные коммиты */
+        gitFilesPending() {
+            return stackSourceDiffers(stackSourceState(this.source));
         },
 
-        sourceTitle() {
-            if (this.source?.kind !== "git") {
-                return "";
-            }
-
-            const parts = [ this.source.branch ].filter((part) => !!part);
-
-            if (this.source.dirty) {
-                parts.push(this.$t("sourceDirty"));
-            }
-
-            return parts.join(" · ");
+        /**
+         * Есть ли что переносить из Git, по тому же чтению, что и остальные строки
+         * предпросмотра. Обновление образов файлы не трогает, поэтому рядом со
+         * строкой нужен путь к сравнению, а не обещание, что Git подтянется сам.
+         */
+        previewGitPending() {
+            return stackSourceDiffers(stackSourceState(this.preview?.source));
         },
 
         /** Что предпросмотр говорит про каталог стека */

@@ -14,12 +14,10 @@
             </div>
 
             <div class="meta">
-                <Uptime v-if="source?.dirty || source?.behind > 0" :stack="stack" :compact="true" />
-                <span v-if="source?.dirty || source?.behind > 0" class="updates"><InterfaceIcon name="git" /> {{ $t("familiarHasChanges") }}</span>
-                <template v-else>
-                    <Uptime :stack="stack" :compact="true" />
-                    <span v-if="updatesPending" class="updates" :title="updatesTitle">{{ updatesLabel }}</span>
-                </template>
+                <Uptime :stack="stack" :compact="true" />
+                <span v-for="(fact, index) in sourceFacts" :key="fact" class="updates" :title="sourceFactsTitle">
+                    <InterfaceIcon v-if="index === 0" name="git" /> {{ fact }}
+                </span>
             </div>
         </div>
         <Uptime :stack="stack" :compact="true" :dot-only="true" aria-hidden="true" />
@@ -30,6 +28,8 @@
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { stackColor } from "../stack-color";
 import Uptime from "./Uptime.vue";
+import { formatDuration } from "../format";
+import { stackSourceState } from "../../../common/stack-source";
 
 /** Сколько сервисов показывается до сворачивания в "+N" */
 const SHOWN_SERVICES = 3;
@@ -112,71 +112,49 @@ export default {
             return this.stack.source ?? null;
         },
 
-        sourceKind() {
-            return this.source?.kind === "git" ? "git" : "local";
-        },
-
-        /** Источник словами: Git с отставанием, Git синхронно или локальный каталог */
-        sourceLabel() {
-            if (this.sourceKind !== "git") {
-                return this.$t("sourceLocal");
-            }
-
-            const behind = this.source?.behind;
-
-            if (behind === null || behind === undefined) {
-                return this.$t("sourceGit");
-            }
-
-            if (behind === 0) {
-                return this.$t("sourceGitInSync");
-            }
-
-            return this.$t("sourceGitBehind", [ behind ]);
-        },
-
-        /** Подробности источника в подсказке: адрес, ветвь и незакоммиченные правки */
-        sourceTitle() {
-            if (this.sourceKind !== "git") {
-                return "";
-            }
-
-            const parts = [ this.source?.remote, this.source?.branch ].filter((part) => !!part);
-
-            if (this.source?.dirty) {
-                parts.push(this.$t("sourceDirty"));
-            }
-
-            return parts.join(" · ");
+        /** Состояние источника словами общего слоя: рейка и панель говорят одинаково */
+        sourceState() {
+            return stackSourceState(this.source);
         },
 
         /**
-         * Обновления. Отставание в коммитах известно из локальных ссылок, а "новее в
-         * реестре" требует проверки digest, которой еще нет - поэтому вместо догадки
-         * стоит "неизвестно".
+         * Чем файлы стека отличаются от Git, по факту на пометку.
+         *
+         * Пометок может быть две, и они идут отдельными элементами, а не одной
+         * строкой через разделитель: в узкой рейке строка переносится, и точка
+         * повисает в конце первой половины. Стек, у которого расхождений нет,
+         * молчит - рейка отвечает, что требует внимания, а давность проверки
+         * и совпадение с Git объясняет панель источника на самой странице
+         * @returns {string[]} Пометки в порядке чтения, пустой список если сверять нечего
          */
-        updatesLabel() {
-            const behind = this.source?.behind;
+        sourceFacts() {
+            const behind = this.source?.behind ?? 0;
 
-            if (this.sourceKind === "git" && typeof behind === "number") {
-                return behind > 0 ? this.$t("updatesGit", behind) : this.$t("updatesNone");
+            switch (this.sourceState) {
+                case "edited":
+                    return [ this.$t("sourceEditedShort") ];
+                case "behind":
+                    return [ this.$t("sourceBehindShort", [ behind ]) ];
+                case "editedBehind":
+                    return [ this.$t("sourceEditedShort"), this.$t("sourceBehindShort", [ behind ]) ];
+                default:
+                    return [];
             }
-
-            // Проверки образов в реестре еще нет, поэтому вместо догадки стоит прочерк,
-            // а объяснение - в подсказке
-            return "—";
         },
 
-        /** Почему в колонке обновлений прочерк */
-        updatesTitle() {
-            if (this.sourceKind === "git" && typeof this.source?.behind === "number") {
+        /** Подсказка пометок: адрес, ветвь и когда последний раз спрашивали origin */
+        sourceFactsTitle() {
+            if (this.source?.kind !== "git") {
                 return "";
             }
-            return this.$t("updatesNotCheckedYet");
-        },
 
-        updatesPending() {
-            return this.sourceKind === "git" && (this.source?.behind ?? 0) > 0;
+            const parts = [ this.source.remote, this.source.branch ].filter((part) => !!part);
+
+            parts.push(this.source.checkedAt
+                ? this.$t("familiarGitCheckedAgo", [ formatDuration(Date.now() - this.source.checkedAt, this.$t) ])
+                : this.$t("familiarGitNeverChecked"));
+
+            return parts.join(" · ");
         },
 
         /**

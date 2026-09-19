@@ -6,8 +6,8 @@ import { callbackError, callbackResult, checkLogin, type DockgeSocket } from "..
 import { Stack } from "../stack";
 import { StackConfig, emptyStackFileConfig } from "../stack-config";
 import { StackGitError, StackGitWorkflow } from "../stack-git";
-import { readStackSource } from "../stack-source";
 import { spawn } from "../child-process";
+import { composeArgs } from "../compose-args";
 import type { AgentSocket } from "../../common/agent-socket";
 import type { GitApplyInput, GitCloneInput, GitSaveResult } from "../../common/stack-git";
 import type { StackFileConfig } from "../../common/types/stack";
@@ -18,23 +18,24 @@ const workflows = new WeakMap<DockgeServer, StackGitWorkflow>();
 async function validate(directory: string, config: StackFileConfig, stacksDir: string): Promise<void> {
     try {
         await StackConfig.validate(directory, config);
-        const args = [ "compose", "--project-name", "dockge-git-validation", "-f", config.composeFileName ];
+        let globalEnvFile = "";
         const globalEnv = path.join(stacksDir, "global.env");
         try {
             const stat = await fs.lstat(globalEnv);
             if (!stat.isFile() || stat.isSymbolicLink()) {
                 throw new StackGitError("Общий env-файл должен быть обычным файлом.");
             }
-            args.push("--env-file", globalEnv);
+            globalEnvFile = globalEnv;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                 throw error;
             }
         }
-        for (const env of config.envFileNames) {
-            args.push("--env-file", env);
-        }
-        args.push("config", "--quiet");
+        // Своё имя проекта: проверка обязана пройти мимо контейнеров пользователя
+        const args = composeArgs({ composeFileName: config.composeFileName,
+            envFileNames: config.envFileNames,
+            globalEnvFile,
+            projectName: "dockge-git-validation" }, "config", "--quiet");
         await spawn("docker", args, { cwd: directory,
             encoding: "utf-8",
             maxBuffer: 256 * 1024,
@@ -74,8 +75,7 @@ async function result(server: DockgeServer, socket: DockgeSocket, name: string, 
     return { stackName: name,
         saved: true,
         deployed,
-        ...(deploymentError ? { deploymentError } : {}),
-        source: await readStackSource(Stack.getSafePath(server, name)) };
+        ...(deploymentError ? { deploymentError } : {}) };
 }
 
 /** Git events use the same agent routing and role gates as other stack mutations. */

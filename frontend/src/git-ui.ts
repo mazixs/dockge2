@@ -1,21 +1,6 @@
-/** Validate a Git address without allowing credentials or local file sources.
- * @param repository User-provided address
- * @returns Whether it can be shown and sent without exposing embedded credentials
- */
-export function isSafeGitRepository(repository: string): boolean {
-    const address = repository.trim();
-    if (/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+:[^\s?#]+$/.test(address)) {
-        return true;
-    }
-    try {
-        const url = new URL(address);
-        return [ "https:", "http:", "ssh:" ].includes(url.protocol) && Boolean(url.hostname)
-            && url.pathname.length > 1 && !url.password && !url.search && !url.hash
-            && (url.protocol === "ssh:" || !url.username);
-    } catch {
-        return false;
-    }
-}
+// Правило адреса общее с сервером: кнопка включена ровно тогда, когда сервер
+// адрес примет. Реэкспорт, а не своя копия - копия уже расходилась с сервером
+export { isSafeGitRepository } from "../../common/git-repository";
 
 /** Require a reviewed choice for each file, including hidden files.
  * @param files Changed preview files
