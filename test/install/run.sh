@@ -183,6 +183,12 @@ scenario_no_terminal_without_yes() {
     expect_eq "$CODE" 1 "exit code"
     expect_grep "no terminal" "$OUT" "asks for --yes"
     expect_missing "$WORK/never" "nothing created"
+    # The shell reports a failed redirection through the stderr it has at that
+    # moment, so testing for a terminal the wrong way round printed
+    # "/dev/tty: No such device or address" before our own message
+    # Matched on the path, not on the wording: the shell translates the message
+    # and an English pattern passes silently under any other locale
+    expect_no_grep "/dev/tty" "$OUT" "no raw shell error before the message"
 }
 
 scenario_update_keeps_env_and_prunes_tags() {

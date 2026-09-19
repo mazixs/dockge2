@@ -120,7 +120,10 @@ done
 # A terminal is a terminal even when stdin is the script itself, which is what
 # `curl ... | bash` does. Guessing "yes" there would install Docker and rebuild a
 # running panel without anyone agreeing to it
-if [ "$ASSUME_YES" = "0" ] && : </dev/tty 2>/dev/null; then
+# 2>/dev/null comes first on purpose: a redirection that fails is reported by
+# the shell through the stderr it has at that moment, so the other order prints
+# "/dev/tty: No such device or address" before our own message
+if [ "$ASSUME_YES" = "0" ] && : 2>/dev/null </dev/tty; then
     INTERACTIVE=1
 fi
 if [ "$ASSUME_YES" = "0" ] && [ "$INTERACTIVE" = "0" ]; then
