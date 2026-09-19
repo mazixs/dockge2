@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
+import os from "node:os";
 import test from "node:test";
-import { Stack } from "../../backend/stack";
+import { looksLikeContainerId, Stack } from "../../backend/stack";
 import type { ComposePsEntry } from "../../common/compose-status";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 
@@ -140,4 +141,34 @@ test("a stack whose compose project was renamed is still matched by its director
     const nameOnly = Stack.resolveProjectStatus({ Name: "demo",
         Status: "running(1)" }, new Map([[ "renamed", entries ]]));
     assert.equal(nameOnly.status, UNKNOWN);
+});
+
+test("the panel recognises its own container by hostname, and nothing else", () => {
+    // Docker names a container after its short id when `hostname:` is not set
+    for (const own of [ "8be97d7c3c12", "0123456789ab", "ffffffffffff" ]) {
+        assert.equal(looksLikeContainerId(own), true, `${own} is a short container id`);
+    }
+
+    // A chosen hostname, the host's own name, or a full id: inspecting any of these
+    // would ask the daemon about whatever else answers to that name
+    for (const other of [ "fi-vmmini", "dockge2", "", "8be97d7c3c1", "8be97d7c3c123",
+        "8be97d7c3c12f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829", "8BE97D7C3C12", "my-panel-01" ]) {
+        assert.equal(looksLikeContainerId(other), false, `${other} is not a short container id`);
+    }
+});
+
+test("asking which project the panel runs as never throws, and is asked once", async () => {
+    // Deliberately not asserting a value: these tests run on a development machine, in
+    // CI, and inside the container ./local.sh builds, and the honest answer differs in
+    // each. What must hold everywhere is that the question is safe to ask and settles
+    const first = await Stack.getOwnProjectName();
+    const second = await Stack.getOwnProjectName();
+
+    assert.equal(typeof first, "string");
+    assert.equal(second, first, "the answer is cached, not asked again");
+
+    // Outside a container there is no own project, and nothing is hidden from the list
+    if (!looksLikeContainerId(os.hostname())) {
+        assert.equal(first, "");
+    }
 });
