@@ -7,6 +7,18 @@ export const E2E_ATTENTION_STACK = "e2e-attention";
 /** Stack with several compose files, several env files and a secret file */
 export const E2E_FILES_STACK = "e2e-files";
 
+/** Stack the Git cycle test clones from the fixture repository */
+export const E2E_GIT_STACK = "e2e-git";
+
+/** Branch of the fixture repository */
+export const E2E_GIT_BRANCH = "main";
+
+/** Port the fixture repository is served from, next to the frontend and the backend */
+export const E2E_GIT_ORIGIN_PORT = 5002;
+
+/** The fixture repository the way a user would type it into the panel */
+export const E2E_GIT_ORIGIN_URL = `http://127.0.0.1:${E2E_GIT_ORIGIN_PORT}/origin.git`;
+
 /**
  * Password of the seeded admin.
  * It only exists inside the temporary e2e data directory, which is deleted before every run,
