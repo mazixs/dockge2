@@ -47,59 +47,77 @@ been rewritten. Do not report issues of this fork upstream.
 
 ## Install
 
-On a fresh server, one script does the whole thing - it checks what is missing, asks for the port
-and the directories, shows them for review, downloads the image (or builds it when there is none to
-download), starts the panel and prints the address and the one-use setup code:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mazixs/dockge2/main/install.sh -o install.sh
 less install.sh          # it runs as root, so read it first
 bash install.sh
 ```
 
-Answer nothing and take every default with `bash install.sh --yes`, or say it all upfront:
+The script installs what is missing, asks for the port and the directories, downloads the image and
+starts the panel. It ends with the address and a one-use setup code: open the address, and the
+first visit asks for that code together with the owner account.
+
+Before anything is written, the answers are shown as a numbered list. Enter accepts them, a number
+asks that one again, `q` leaves the machine as it was.
+
+To skip the questions and take every default:
+
+```bash
+bash install.sh --yes
+```
+
+Or say it all upfront:
 
 ```bash
 bash install.sh --yes --port 8080 --stacks-dir /srv/stacks --dir /opt/dockge2
 ```
 
+On a public server the panel answers over plain HTTP until you put it behind
+[a reverse proxy](#behind-a-reverse-proxy) or reach it through an SSH tunnel. The installer does not
+open the firewall for you.
+
+<details>
+<summary><b>All options</b></summary>
+
 | Option | Default | What it is |
 |---|---|---|
-| `--port` | `5001` | The port the panel answers on. The installer refuses a port that is already taken and offers another. |
-| `--stacks-dir` | `/opt/stacks` | Where your stacks live. Absolute path only, see the note below. |
+| `--port` | `5001` | The port the panel answers on. A port already taken is refused, and another is offered. |
+| `--stacks-dir` | `/opt/stacks` | Where your stacks live. Absolute path only. |
 | `--dir` | `/opt/dockge2` | Where this repository is checked out. |
 | `--data-dir` | `<install dir>/data` | SQLite database, settings and secrets. |
-| `--branch` | `main` | Branch to install from. On an update it is the branch the checkout is already on. |
-| `--image` | `ghcr.io/mazixs/dockge2:latest` | The published image to run. The installer downloads it and only builds when the download fails; with `--image` given by hand it stops instead of quietly building something else. |
-| `--build` | - | Build from the sources and do not look for a published image. This is how you install the code of a branch rather than the last release - and the one case that needs the full gigabyte. |
-| `--update` | - | Rebuild the installation the script lives in, without asking for the directories again. |
-| `--yes` | - | Take the defaults and ask nothing. Required when there is no terminal at all, such as in cron. |
+| `--branch` | `main` | Branch to install from. On an update, the branch the checkout is already on. |
+| `--image` | `ghcr.io/mazixs/dockge2:latest` | The published image to run. Given by hand, the installer stops rather than quietly building something else. |
+| `--build` | - | Build from the sources instead of downloading. This is how you install a branch rather than the last release, and the one case that needs the full gigabyte of memory. |
+| `--update` | - | Update the installation the script lives in, without asking for the directories again. |
+| `--yes` | - | Take the defaults and ask nothing. Required where there is no terminal, such as in cron. |
 
-Before anything is written, the answers are shown as a numbered list: Enter accepts them, a number
-asks that one again, `q` leaves the machine as it was. Until that point nothing has changed.
+An option given on the command line wins over the existing `.env` and is written into it, so
+`--port 8080` on a second run really moves the panel.
 
-The script writes only inside those three directories, never stops or changes containers it did not
-create, and reads every answer it already has from the existing `.env` when it runs again. An option
-given on the command line wins over that `.env` and is written into it, so `--port 8080` on a second
-run really moves the panel instead of printing an address that answers nothing. Sudo is used only
-where it is actually needed - not at all when you are in the `docker` group and the directories are
-yours.
+</details>
 
-Nothing is decided silently. Without a terminal - in cron, or in a pipeline - the installer stops
-and asks for `--yes` rather than agreeing to install Docker or to rebuild a running panel on your
-behalf. An interrupted first install removes the half-written directory instead of leaving one the
-next run would refuse. A failed build or a panel that never became healthy prints the container
-state, the last log lines, and the two commands that put back the image and the commit that were
-running before - the previous image is tagged `dockge2:rollback-<date>` before the rebuild starts,
-and only the newest such tag is kept, so updates do not pile images up on a small disk. Local
-changes in the checkout are never reset, stashed or overwritten: the update only fast-forwards, and
-says so when it cannot. After a rollback the checkout stands on a commit rather than a branch, and
-the next `--update` says so and stops until you are back on the branch (`git checkout main`).
+<details>
+<summary><b>What it will and will not do</b></summary>
 
-When it finishes, open the printed address and the first visit asks for the setup code together
-with the owner account - see [Sign in](#sign-in). On a public server, put it behind a reverse proxy
-with HTTPS or reach it over an SSH tunnel first; the installer warns when `ufw` is on and the port
-is closed, and it does not open it for you.
+It writes only inside the install, stacks and data directories, and never stops or changes a
+container it did not create. Sudo is used only where it is actually needed - not at all when you
+are in the `docker` group and the directories are yours.
+
+Nothing is decided silently. Without a terminal the installer stops and asks for `--yes` rather
+than agreeing to install Docker or to rebuild a running panel on your behalf. An interrupted first
+install removes the half-written directory instead of leaving one the next run would refuse.
+
+When a build fails, or the panel never becomes healthy, it prints the container state, the last log
+lines, and the two commands that put back the image and the commit that were running before. The
+previous image is tagged `dockge2:rollback-<date>` before a rebuild, and only the newest such tag
+is kept, so updates do not pile images up on a small disk.
+
+Local changes in the checkout are never reset, stashed or overwritten: an update only
+fast-forwards, and says so when it cannot. After a rollback the checkout stands on a commit rather
+than a branch, and the next `--update` says so and stops until you are back on the branch
+(`git checkout main`).
+
+</details>
 
 ### By hand
 
@@ -250,8 +268,11 @@ cd /opt/dockge2
 `--update` works on the checkout the script itself lives in, so an installation made with `--dir`
 updates from its own directory without naming it again.
 
-The same sequence is also available as a bundled command, which prints what it will do first. It is
-fixed and non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then either
+<details>
+<summary><b>The same thing as a bundled command</b></summary>
+
+`npm run update-docker` runs the same sequence and prints what it will do first. It is fixed and
+non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then either
 `docker compose pull` and `docker compose up -d --wait --wait-timeout 180`, or
 `docker compose up -d --build --wait --wait-timeout 180`. The health check starts after 60 seconds
 and repeats every 60, so a minute is not enough:
@@ -269,6 +290,8 @@ the memory a small server has; building needs about 1 GB, see [requirements](#re
 
 It fast-forwards `origin/main` by default; a deployment that tracks another branch names it with
 `npm run update-docker -- --branch=release/2.0`.
+
+</details>
 
 ### Rollback
 
