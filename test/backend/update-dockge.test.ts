@@ -9,12 +9,12 @@ test("update commands are built as fixed argument arrays", () => {
         { command: "docker",
             args: [ "compose", "config", "--quiet" ] },
         { command: "docker",
-            args: [ "compose", "up", "-d", "--build", "--wait", "--wait-timeout", "60" ] },
+            args: [ "compose", "up", "-d", "--build", "--wait", "--wait-timeout", "180" ] },
     ]);
 
     assert.deepEqual(buildUpdateCommands(true).at(-1), {
         command: "docker",
-        args: [ "compose", "up", "-d", "--build", "--force-recreate", "--wait", "--wait-timeout", "60" ],
+        args: [ "compose", "up", "-d", "--build", "--force-recreate", "--wait", "--wait-timeout", "180" ],
     });
 });
 

@@ -142,12 +142,19 @@ confirm() {
 }
 
 # A partially cloned directory is worse than no directory: the next run would
-# refuse it as "not empty" and there would be no way forward except rm -rf
+# refuse it as "not empty" and there would be no way forward except rm -rf. A
+# directory the user made themselves is theirs, so only its contents go
+CLEANUP_KEEP_DIR=0
 cleanup() {
     local code=$?
     if [ -n "$CLEANUP_DIR" ]; then
-        warn "Removing the half-written $CLEANUP_DIR."
-        $FSUDO rm -rf "$CLEANUP_DIR"
+        if [ "$CLEANUP_KEEP_DIR" = "1" ]; then
+            warn "Emptying the half-written $CLEANUP_DIR (the directory itself was there before)."
+            $FSUDO find "$CLEANUP_DIR" -mindepth 1 -delete 2>/dev/null || true
+        else
+            warn "Removing the half-written $CLEANUP_DIR."
+            $FSUDO rm -rf "$CLEANUP_DIR"
+        fi
     fi
     exit "$code"
 }
@@ -338,17 +345,28 @@ choose_port() {
 
 # An existing installation has already answered all of this, and its .env is the
 # answer. Re-asking would invent a second truth next to the running container,
-# and silently ignoring an option given on the command line would invent a third
+# and silently ignoring an option given on the command line would invent a third.
+# A root-owned .env from an earlier run as root is still the answer: it is read
+# through sudo rather than replaced by the defaults, which would send the
+# installer looking for stacks in a directory nobody chose
+env_contents() {
+    if [ -r "$INSTALL_DIR/.env" ]; then
+        cat "$INSTALL_DIR/.env"
+    elif [ -f "$INSTALL_DIR/.env" ] && [ -n "$SUDO" ]; then
+        $SUDO cat "$INSTALL_DIR/.env" 2>/dev/null || true
+    fi
+}
+
 read_env() {
-    [ -r "$INSTALL_DIR/.env" ] || return 0
-    sed -n "s/^$1=//p" "$INSTALL_DIR/.env" 2>/dev/null | tail -1 | tr -d '\r'
+    [ -f "$INSTALL_DIR/.env" ] || return 0
+    env_contents | sed -n "s/^$1=//p" | tail -1 | tr -d '\r' || true
 }
 
 HAS_ENV=0
 if [ -f "$INSTALL_DIR/.env" ]; then
     HAS_ENV=1
     if [ ! -r "$INSTALL_DIR/.env" ]; then
-        warn "$INSTALL_DIR/.env exists but cannot be read by $(id -un); its values will be taken over below."
+        warn "$INSTALL_DIR/.env belongs to another user; it is read through sudo, and its owner is fixed before docker compose needs it."
     fi
 fi
 
@@ -425,7 +443,12 @@ review() {
                    STACKS_DIR="$(ask_path 'Directory for your stacks' "$STACKS_DIR")"
                    STACKS_SET=1
                fi ;;
-            3) DATA_DIR="$(ask_path 'Data directory' "$DATA_DIR")"; DATA_SET=1 ;;
+            3) if [ "$EXISTING" = "1" ]; then
+                   warn "Moving the data directory here would start the panel with an empty database. Copy the old directory first, then change DOCKGE_DATA_DIR in $INSTALL_DIR/.env deliberately."
+               else
+                   DATA_DIR="$(ask_path 'Data directory' "$DATA_DIR")"
+                   DATA_SET=1
+               fi ;;
             4) PORT="$(choose_port "$(ask 'Web port for the panel' "$PORT")")"; PORT_SET=1 ;;
             *) warn "Not one of the numbers above." ;;
         esac
@@ -456,9 +479,15 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     $FSUDO git -C "$INSTALL_DIR" rev-parse --git-dir >/dev/null 2>&1 \
         || die "git will not read $INSTALL_DIR (it is probably owned by another user). Allow it with: ${FSUDO:+$FSUDO }git config --global --add safe.directory $INSTALL_DIR"
 
+    # A checkout standing on a commit rather than a branch is what the rollback
+    # hint leaves behind. Fast-forwarding it would move HEAD and print a branch
+    # name that is not true, so the user is asked to step back onto the branch first
+    CURRENT_REF="$($FSUDO git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [ "$CURRENT_REF" = "HEAD" ] || [ -z "$CURRENT_REF" ]; then
+        die "$INSTALL_DIR is checked out at a commit, not a branch (after a rollback, probably). Return to the branch with: ${FSUDO:+$FSUDO }git -C $INSTALL_DIR checkout ${BRANCH:-$DEFAULT_BRANCH} - then run this again. Nothing was changed."
+    fi
     if [ "$BRANCH_SET" = "0" ]; then
-        BRANCH="$($FSUDO git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-        [ -n "$BRANCH" ] && [ "$BRANCH" != "HEAD" ] || BRANCH="$DEFAULT_BRANCH"
+        BRANCH="$CURRENT_REF"
     fi
 
     # An unfinished local edit is somebody's work, and a rebuild is not a reason
@@ -489,6 +518,7 @@ else
     if [ -e "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
         die "$INSTALL_DIR exists and is not empty, and it is not a checkout. Install somewhere else with --dir, or empty it first."
     fi
+    [ -d "$INSTALL_DIR" ] && CLEANUP_KEEP_DIR=1
     $FSUDO mkdir -p "$INSTALL_DIR"
     CLEANUP_DIR="$INSTALL_DIR"
     $FSUDO git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" \
@@ -502,9 +532,22 @@ $FSUDO mkdir -p "$STACKS_DIR" "$DATA_DIR"
 
 ENV_FILE="$INSTALL_DIR/.env"
 
+# docker compose reads .env as whoever runs it. A root-owned 0600 file would be
+# skipped without a word and every value would fall back to the defaults in
+# docker-compose.yml - a different port, a different stacks directory, no warning.
+# The same file is edited below, so the owner is fixed first, not last
+own_env() {
+    chmod 600 "$ENV_FILE" 2>/dev/null || $SUDO chmod 600 "$ENV_FILE" 2>/dev/null || true
+    if [ ! -r "$ENV_FILE" ] || [ ! -w "$ENV_FILE" ]; then
+        $SUDO chown "$(id -u):$(id -g)" "$ENV_FILE" 2>/dev/null || true
+    fi
+    [ -r "$ENV_FILE" ] && [ -w "$ENV_FILE" ] \
+        || die "$ENV_FILE cannot be read by $(id -un), and docker compose would silently ignore it. Fix its owner, or run the installer as root."
+}
+
 set_env_var() {
     # set_env_var <key> <value>: replace the line or append it, with no regard
-    # for what the value contains
+    # for what the value contains. own_env has run, so the file is ours
     local key="$1" value="$2" tmp
     tmp="$(mktemp)"
     KEY="$key" VALUE="$value" awk '
@@ -513,11 +556,12 @@ set_env_var() {
         { print }
         END { if (!written) print k "=" v }
     ' "$ENV_FILE" > "$tmp"
-    $FSUDO cp "$tmp" "$ENV_FILE"
+    cat "$tmp" > "$ENV_FILE"
     rm -f "$tmp"
 }
 
 if [ -f "$ENV_FILE" ]; then
+    own_env
     info ".env is already there and keeps every setting the installer was not told to change."
     # An option given on the command line is an instruction, not a suggestion:
     # printing an address the panel does not answer on would be worse than editing
@@ -545,17 +589,9 @@ DOCKGE_ENABLE_CONSOLE=false
 PUID=$(id -u)
 PGID=$(id -g)
 ENVEOF
+    own_env
     info "Wrote $ENV_FILE"
 fi
-
-# docker compose reads .env as whoever runs it. A root-owned 0600 file would be
-# skipped without a word and every value would fall back to the defaults in
-# docker-compose.yml - a different port, a different stacks directory, no warning
-$FSUDO chmod 600 "$ENV_FILE"
-if [ ! -r "$ENV_FILE" ]; then
-    $FSUDO chown "$(id -u):$(id -g)" "$ENV_FILE" 2>/dev/null || true
-fi
-[ -r "$ENV_FILE" ] || die "$ENV_FILE cannot be read by $(id -un), and docker compose would silently ignore it. Fix its owner, or run the installer as root."
 
 cd "$INSTALL_DIR"
 $DOCKER compose -f docker-compose.yml config --quiet \
@@ -612,6 +648,19 @@ if ! $DOCKER compose -f docker-compose.yml up -d "${WAIT_ARGS[@]}"; then
     die "Dockge2 did not come up. Nothing was removed, so fixing the cause and running this again continues from here."
 fi
 
+# One previous image is a way back; a row of them from every update is a full
+# disk on a small server. Only tags this installer made are touched, and only
+# the newest one stays. Removing a tag never removes an image a container uses
+if [ -n "$ROLLBACK_IMAGE" ]; then
+    $DOCKER image ls --format '{{.Repository}}:{{.Tag}}' dockge2 2>/dev/null \
+        | grep '^dockge2:rollback-' | grep -vx "$ROLLBACK_IMAGE" \
+        | while IFS= read -r old_tag; do
+            if $DOCKER image rm "$old_tag" >/dev/null 2>&1; then
+                info "Older rollback tag removed: $old_tag."
+            fi
+        done || true
+fi
+
 ########################################
 # 5. Where it is
 ########################################
@@ -636,12 +685,12 @@ info "On the network:  http://$LOCAL_IP:$PORT"
 if [ -z "$SUDO" ] || $SUDO -n true 2>/dev/null; then
     if command -v ufw >/dev/null 2>&1 \
         && $SUDO ufw status 2>/dev/null | grep -q '^Status: active' \
-        && ! $SUDO ufw status 2>/dev/null | grep -q "$PORT"; then
+        && ! $SUDO ufw status 2>/dev/null | grep -qw "$PORT"; then
         warn "ufw is active and port $PORT is not allowed: ${SUDO:+$SUDO }ufw allow $PORT/tcp"
     fi
     if command -v firewall-cmd >/dev/null 2>&1 \
         && $SUDO firewall-cmd --state 2>/dev/null | grep -q running \
-        && ! $SUDO firewall-cmd --list-ports 2>/dev/null | grep -q "$PORT/tcp"; then
+        && ! $SUDO firewall-cmd --list-ports 2>/dev/null | grep -qw "$PORT/tcp"; then
         warn "firewalld is running and port $PORT is not open: ${SUDO:+$SUDO }firewall-cmd --add-port=$PORT/tcp --permanent && ${SUDO:+$SUDO }firewall-cmd --reload"
     fi
 fi
@@ -667,5 +716,5 @@ cat >&2 <<NEXT
   Stop:           docker compose -f $INSTALL_DIR/docker-compose.yml down
 NEXT
 if [ -n "$ROLLBACK_IMAGE" ]; then
-    printf '  Previous image: %s (docker image rm it once this one has proven itself)\n\n' "$ROLLBACK_IMAGE" >&2
+    printf '  Previous image: %s (kept until the next update makes a newer one)\n\n' "$ROLLBACK_IMAGE" >&2
 fi

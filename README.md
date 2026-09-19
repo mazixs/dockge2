@@ -79,9 +79,11 @@ and asks for `--yes` rather than agreeing to install Docker or to rebuild a runn
 behalf. An interrupted first install removes the half-written directory instead of leaving one the
 next run would refuse. A failed build or a panel that never became healthy prints the container
 state, the last log lines, and the two commands that put back the image and the commit that were
-running before - the previous image is tagged `dockge2:rollback-<date>` before the rebuild starts.
-Local changes in the checkout are never reset, stashed or overwritten: the update only
-fast-forwards, and says so when it cannot.
+running before - the previous image is tagged `dockge2:rollback-<date>` before the rebuild starts,
+and only the newest such tag is kept, so updates do not pile images up on a small disk. Local
+changes in the checkout are never reset, stashed or overwritten: the update only fast-forwards, and
+says so when it cannot. After a rollback the checkout stands on a commit rather than a branch, and
+the next `--update` says so and stops until you are back on the branch (`git checkout main`).
 
 When it finishes, open the printed address and the first visit asks for the setup code together
 with the owner account - see [Sign in](#sign-in). On a public server, put it behind a reverse proxy
@@ -232,7 +234,8 @@ updates from its own directory without naming it again.
 
 The same sequence is also available as a bundled command, which prints what it will do first. It is
 fixed and non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then
-`docker compose up -d --build --wait --wait-timeout 60`:
+`docker compose up -d --build --wait --wait-timeout 180` - the health check starts after 60
+seconds and repeats every 60, so a minute is not enough:
 
 ```bash
 cd /opt/dockge2
@@ -286,7 +289,7 @@ command, not a browser action.
 - `--force-recreate` (`npm run update-docker -- --force-recreate`) forces recreation without deleting
   attached data.
 - `docker compose config --quiet` validates the configuration before anything is restarted, and
-  `--wait --wait-timeout 60` fails instead of leaving the update in an undefined state.
+  `--wait --wait-timeout 180` fails instead of leaving the update in an undefined state.
 - The command refuses to run with a dirty working copy, and it never runs `docker compose down -v`,
   `docker volume prune`, `git reset --hard` or `git clean -fdx`.
 - Keep `./data` outside the Git checkout in production, for example `/var/lib/dockge2/data`, so that even
