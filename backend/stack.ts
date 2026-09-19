@@ -3,6 +3,7 @@ import fs, { promises as fsAsync } from "fs";
 import { log } from "./log";
 import yaml, { type Document, isMap, isSeq, parseDocument } from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
+import os from "os";
 import path from "path";
 import { emptyStackFileConfig, resolveStackFilePath, resolveStackFilePathSync, StackConfig } from "./stack-config";
 import { classifyStackFile, isSafeNameSegment } from "../common/stack-files";
@@ -71,6 +72,20 @@ async function writeFileNoFollow(filePath : string, content : string, mode : num
     }
 }
 
+/**
+ * Tell a hostname Docker generated from one someone chose.
+ *
+ * A container whose `hostname:` was not set is named after its own short id, which is
+ * exactly twelve hexadecimal characters. Anything else - a name from the compose file,
+ * or the host's own name outside a container - must not be inspected: the daemon would
+ * happily answer about whatever else goes by that name.
+ * @param hostname Hostname of this process
+ * @returns True when the name is a short container id
+ */
+export function looksLikeContainerId(hostname : string) : boolean {
+    return /^[0-9a-f]{12}$/.test(hostname);
+}
+
 export class Stack {
 
     name: string;
@@ -93,6 +108,12 @@ export class Stack {
     protected combinedTerminal? : Terminal;
 
     protected static managedStackList: Map<string, Stack> = new Map();
+
+    /**
+     * Compose project this panel itself runs as, or "" when it is not in a container.
+     * Read once: the answer cannot change while the process lives.
+     */
+    protected static ownProjectName : string | null = null;
 
     constructor(server : DockgeServer, name : string, composeYAML? : string, composeENV? : string, skipFSOperations = false) {
         this.name = name;
@@ -630,13 +651,21 @@ export class Stack {
         // Container states of every compose project, read in one Docker call
         const instanceMap = await this.getInstanceMap();
 
+        // The panel's own project, so it does not list itself as a stack it cannot touch.
+        // "dockge" is kept beside it for an installation carried over from upstream, where
+        // that was the project name
+        const ownProject = await this.getOwnProjectName();
+
         for (let composeStack of composeList) {
             let stack = stackList.get(composeStack.Name);
 
             // This stack probably is not managed by Dockge, but we still want to show it
             if (!stack) {
-                // Skip the dockge stack if it is not managed by Dockge
-                if (composeStack.Name === "dockge") {
+                // Hide the panel itself: stopping or redeploying it from inside would take
+                // away the very thing showing the buttons. A copy the user has deliberately
+                // put in the stacks directory is a different matter - that one is managed,
+                // so it was found above and never reaches this branch
+                if (composeStack.Name === ownProject || composeStack.Name === "dockge") {
                     continue;
                 }
                 stack = new Stack(server, composeStack.Name);
@@ -811,6 +840,52 @@ export class Stack {
      * One call keeps the 10 second status cron cheap even with many stacks.
      * @returns Entries grouped by compose project, or null when Docker output cannot be trusted
      */
+    /**
+     * Find the compose project of the panel's own container.
+     *
+     * Docker names a container's host after its short id, so the panel can ask the
+     * daemon about itself and read the label Compose put there. This is asked rather
+     * than assumed, because the project name is the user's to change - through
+     * `name:` in the compose file, `COMPOSE_PROJECT_NAME` or `-p`.
+     * @returns The project name, or "" when the panel does not run in a compose project
+     */
+    static async getOwnProjectName() : Promise<string> {
+        if (this.ownProjectName !== null) {
+            return this.ownProjectName;
+        }
+
+        this.ownProjectName = "";
+
+        try {
+            const hostname = os.hostname();
+
+            if (!looksLikeContainerId(hostname)) {
+                return this.ownProjectName;
+            }
+
+            const res = await spawn("docker", [
+                "inspect",
+                "--format",
+                `{{index .Config.Labels "${COMPOSE_PROJECT_LABEL}"}}`,
+                hostname,
+            ], {
+                encoding: "utf-8",
+                maxBuffer: 64 * 1024,
+                timeoutMs: 15_000,
+            });
+
+            this.ownProjectName = (res.stdout?.toString() ?? "").trim();
+        } catch (e) {
+            // Not fatal: without an answer the panel simply lists its own project, which
+            // is what it did before this was asked at all
+            if (e instanceof Error) {
+                log.debug("getOwnProjectName", `Cannot tell which project this panel runs as: ${e.message}`);
+            }
+        }
+
+        return this.ownProjectName;
+    }
+
     static async getInstanceMap() : Promise<Map<string, ComposePsEntry[]> | null> {
         try {
             const res = await spawn("docker", [
