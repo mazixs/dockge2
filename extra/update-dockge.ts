@@ -43,7 +43,7 @@ export function buildUpdateCommands(forceRecreate : boolean, branch : string = D
             args: [
                 "compose", "up", "-d", "--build",
                 ...(forceRecreate ? [ "--force-recreate" ] : []),
-                "--wait", "--wait-timeout", "60",
+                "--wait", "--wait-timeout", "180",
             ],
         },
     ];

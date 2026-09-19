@@ -33,6 +33,7 @@ npm run lint           # ESLint over **/*.{ts,vue}; npm run fmt fixes what it ca
 npm run check-ts       # tsc --noEmit (strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes)
 npm run test           # c8 + node:test, coverage floor 70%
 npm run test:unit      # the same tests without coverage
+npm run test:install   # install.sh against a docker stub, no container is touched
 npm run test:docker-integration   # needs a live Docker Compose
 npm run test:e2e       # Playwright, a real Chromium and real containers
 npm run test:visual    # reference screenshots; :approve re-approves them deliberately

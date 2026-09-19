@@ -55,6 +55,9 @@ jobs:
       - name: Check update command (dry run)
         run: npm run update-docker -- --dry-run
 
+      - name: Installer against a docker stub
+        run: npm run test:install
+
   docker-integration:
     name: Docker Compose integration
     timeout-minutes: 20
