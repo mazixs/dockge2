@@ -68,7 +68,7 @@ case "$*" in
     "compose -f docker-compose.yml ps --format {{.Ports}}") echo "0.0.0.0:${STUB_PUBLISHED}->${STUB_PUBLISHED}/tcp, [::]:${STUB_PUBLISHED}->${STUB_PUBLISHED}/tcp" ;;
     "compose -f docker-compose.yml ps --format {{.Name}} {{.State}} {{.Status}}") echo "dockge2-dockge-1 running Up 2 minutes (unhealthy)" ;;
     "compose -f docker-compose.yml logs --tail 40") echo "stub log line" ;;
-    "compose -f docker-compose.yml exec -T dockge cat /app/data/bootstrap-token") echo "stub-setup-code" ;;
+    "compose -f docker-compose.yml exec -T dockge cat /app/data/bootstrap-token") [ "${STUB_NO_TOKEN:-0}" = "0" ] || exit 1; echo "stub-setup-code" ;;
     "system df --format {{.Type}}"*) printf 'Images\t867MB\nBuild Cache\t%s\n' "${STUB_CACHE:-3.055GB}" ;;
 esac
 exit 0
@@ -225,6 +225,19 @@ scenario_update_keeps_env_and_prunes_tags() {
     expect_grep "Older rollback tag removed: dockge2:rollback-20200101-000000" "$OUT" "old tag removed"
     expect_eq "$(grep -c '^dockge2:rollback-' "$WORK/tags")" 1 "exactly one rollback tag left"
     expect_grep "Previous image: dockge2:rollback-" "$OUT" "the kept tag is named"
+}
+
+scenario_update_without_a_setup_code_still_finishes() {
+    # Once an owner exists the token file is gone, so reading it fails. That is
+    # the normal state of every update, and it used to end the run under
+    # `pipefail` one step before the closing lines - leaving the caller with a
+    # non-zero exit code and no rollback image named, for a panel that had in
+    # fact just started
+    fresh "$WORK/s2b"
+    STUB_NO_TOKEN=1 run "$WORK/s2b/install.sh" --update --yes
+    expect_eq "$CODE" 0 "exit code"
+    expect_grep "already has an owner" "$OUT" "says why there is no code"
+    expect_grep "Update later:" "$OUT" "reached the closing lines"
 }
 
 scenario_update_port_option_rewrites_env() {

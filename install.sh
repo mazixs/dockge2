@@ -746,7 +746,9 @@ if [ -n "$PUBLISHED" ] && [ "$PUBLISHED" != "$PORT" ]; then
     PORT="$PUBLISHED"
 fi
 
-LOCAL_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}' | head -1)"
+# A host with no default route, or without `ip` at all, is answered by the
+# fallback below - not by ending the run one line before the address is printed
+LOCAL_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}' | head -1 || true)"
 [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
 say "Dockge2 is running"
@@ -772,7 +774,10 @@ info "On a cloud server the provider's own firewall is separate from the one abo
 # The token file is 0600 and owned by root, so it is read from inside the
 # container rather than from the host, where the installer may be an ordinary user
 say "Setup code for the first sign-in"
-TOKEN="$($DOCKER compose -f docker-compose.yml exec -T dockge cat /app/data/bootstrap-token 2>/dev/null | tr -d '\r\n')"
+# An update has no bootstrap token: the file is removed once an owner exists.
+# `cat` then fails, and under `pipefail` that would end the run here - before
+# the lines that say how to update and what the rollback image is called.
+TOKEN="$($DOCKER compose -f docker-compose.yml exec -T dockge cat /app/data/bootstrap-token 2>/dev/null | tr -d '\r\n' || true)"
 if [ -n "$TOKEN" ]; then
     info "$TOKEN"
     info "It works once. The first visit asks for it together with the owner account."
