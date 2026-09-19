@@ -44,9 +44,33 @@ export function checkLogin(socket : DockgeSocket) {
 }
 
 export class ValidationError extends Error {
-    constructor(message : string) {
-        super(message);
+    /** Values the catalogue entry interpolates, when it takes any. */
+    readonly values? : Record<string, string>;
+
+    /**
+     * @param key Catalogue key describing what is wrong with the request
+     * @param values Values the entry interpolates
+     */
+    constructor(key : string, values? : Record<string, string>) {
+        super(key);
+        if (values) {
+            this.values = values;
+        }
     }
+}
+
+/**
+ * The message an error sends to the browser: a catalogue key, with values when it has them.
+ * @param error Error being reported
+ * @returns Key alone, or key and values for the catalogue entry to interpolate
+ */
+function errorMessage(error : Error) : string | { key : string, values : Record<string, string> } {
+    const values = (error as { values? : unknown }).values;
+    if (values && typeof values === "object") {
+        return { key: error.message,
+            values: values as Record<string, string> };
+    }
+    return error.message;
 }
 
 export function callbackError(error : unknown, callback : unknown) {
@@ -59,13 +83,13 @@ export function callbackError(error : unknown, callback : unknown) {
         callback({
             ok: false,
             type: ERROR_TYPE_VALIDATION,
-            msg: error.message,
+            msg: errorMessage(error),
             msgi18n: true,
         });
     } else if (error instanceof Error) {
         callback({
             ok: false,
-            msg: error.message,
+            msg: errorMessage(error),
             msgi18n: true,
         });
     } else {

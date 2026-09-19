@@ -1,6 +1,6 @@
 // Правило адреса общее с сервером: кнопка включена ровно тогда, когда сервер
 // адрес примет. Реэкспорт, а не своя копия - копия уже расходилась с сервером
-export { isSafeGitRepository } from "../../common/git-repository";
+export { isSafeGitRepository, stackNameFromRepository } from "../../common/git-repository";
 
 /** Require a reviewed choice for each file, including hidden files.
  * @param files Changed preview files

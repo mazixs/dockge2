@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { gitRepositoryProblem, isSafeGitRepository } from "../../common/git-repository";
+import { gitRepositoryProblem, isSafeGitRepository, stackNameFromRepository } from "../../common/git-repository";
+import { MAX_STACK_NAME_LENGTH } from "../../common/util-common";
 
 test("обычные адреса принимаются", () => {
     for (const repository of [
@@ -53,4 +54,28 @@ test("локальный путь разрешается только тому, 
 
     // Относительный путь не становится адресом и с разрешением
     assert.equal(gitRepositoryProblem("../app.git", true), "transport");
+});
+
+test("a suggested stack name comes from the address and is one a stack can be called", () => {
+    const cases : Array<[ string, string ]> = [
+        [ "https://github.com/owner/Nuvio", "nuvio" ],
+        [ "https://github.com/owner/nuvio.git", "nuvio" ],
+        [ "git@github.com:owner/My_Repo.git", "my_repo" ],
+        [ "https://example.org/team/stack/", "stack" ],
+        [ "https://example.org/team/Some.Stack.Name", "some-stack-name" ],
+        // Nothing usable is left, so the user names the stack themselves
+        [ "https://example.org/-", "" ],
+        [ "", "" ],
+    ];
+    for (const [ address, expected ] of cases) {
+        assert.equal(stackNameFromRepository(address), expected, address);
+    }
+
+    // Whatever comes out is a name the panel would accept, and within the limit
+    const long = stackNameFromRepository("https://example.org/team/" + "a-".repeat(80));
+    assert.equal(long.length <= MAX_STACK_NAME_LENGTH, true);
+    for (const address of [ ...cases.map(([ a ]) => a), "https://example.org/team/" + "a-".repeat(80), "https://example.org/_leading", "https://example.org/9nine" ]) {
+        const name = stackNameFromRepository(address);
+        assert.equal(name === "" || /^[a-z0-9][a-z0-9_-]*$/.test(name), true, `${address} -> ${name}`);
+    }
 });

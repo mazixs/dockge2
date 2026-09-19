@@ -37,6 +37,7 @@ import {
     EXITED, getCombinedTerminalName,
     getComposeTerminalName, getContainerExecTerminalName,
     type ContainerShell, isContainerShell,
+    MAX_STACK_NAME_LENGTH,
     RUNNING, TERMINAL_ROWS,
     UNKNOWN
 } from "../common/util-common";
@@ -219,6 +220,27 @@ export class Stack {
     static validateName(name : string) : void {
         if (!name.match(/^[a-z0-9_-]+$/)) {
             throw new ValidationError("Stack name can only contain [a-z][0-9] _ - only");
+        }
+    }
+
+    /**
+     * Check a name that is about to become a new stack directory.
+     *
+     * The length is checked here and not in validateName, which every read of an existing
+     * stack goes through: a stack that was created before this limit has to stay reachable,
+     * or the panel would hide a running stack it cannot rename.
+     *
+     * The limit is the name people will read back. It is the directory name, and Compose
+     * puts it in front of every container, network and volume it creates, so a name longer
+     * than this is unreadable everywhere it appears. The filesystem itself only gives up at
+     * 255 bytes, which is far past the point where the name stops being usable.
+     * @param name Stack name requested for a new stack
+     * @throws {ValidationError} If the name is not allowed or is too long
+     */
+    static validateNewName(name : string) : void {
+        Stack.validateName(name);
+        if (name.length > MAX_STACK_NAME_LENGTH) {
+            throw new ValidationError("stackNameTooLong", { max: String(MAX_STACK_NAME_LENGTH) });
         }
     }
 

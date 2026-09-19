@@ -99,7 +99,7 @@
                     <div class="where">
                         <label class="field">
                             <span>{{ $t("stackName") }}</span>
-                            <input v-model="name" :disabled="saving" type="text" :placeholder="$t('stackNamePlaceholder')" @input="nameTouched = true">
+                            <input v-model="name" :disabled="saving" type="text" :maxlength="maxNameLength" :placeholder="$t('stackNamePlaceholder')" @input="nameTouched = true">
                         </label>
                         <label class="field">
                             <span>{{ $t("dockgeAgent", 1) }}</span>
@@ -153,6 +153,7 @@
 <script>
 import { parse } from "yaml";
 import { analyseConversion } from "../../../common/docker-run-flags";
+import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
 
 /** Пауза после ввода, после которой имеет смысл распознавать формат */
 const RECOGNISE_DELAY_MS = 400;
@@ -210,9 +211,16 @@ export default {
     computed: {
         /** Можно ли уже что-то разворачивать */
         canDeploy() {
+            const name = this.name.trim();
             return !this.saving && !this.deploying && this.$root.canManageStacks
                 && this.$root.agentStatusList[this.endpoint] === "online"
-                && this.source.trim().length > 0 && this.name.trim().length > 0;
+                && this.source.trim().length > 0 && name.length > 0
+                && name.length <= this.maxNameLength;
+        },
+
+        /** Предел длины имени: тот же, что проверяет сервер при создании каталога */
+        maxNameLength() {
+            return MAX_STACK_NAME_LENGTH;
         },
 
         /** Первый флаг, из-за которого сервис может не заработать */

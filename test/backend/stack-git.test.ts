@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import { StackGitWorkflow, validateGitRepository } from "../../backend/stack-git";
+import { StackGitError, StackGitWorkflow, validateGitRepository } from "../../backend/stack-git";
 import type { GitCloneInput, GitUpdatePreview } from "../../common/stack-git";
 import type { StackFileConfig } from "../../common/types/stack";
 
@@ -96,6 +96,28 @@ test("invalid clone never publishes a destination directory", async (t) => {
     await assert.rejects(fs.access(destination));
 });
 
+test("a validator that only wants the environment filled in still gets its files", async (t) => {
+    // Repositories keep .env out of Git next to a .env.example, so a compose file with a
+    // required variable cannot pass a check right after cloning. Refusing to publish would
+    // leave the variables nowhere to be written: they belong in the files being published
+    const f = await fixture(t);
+    class NeedsEnvironment extends StackGitError {
+        readonly deferrable = true;
+    }
+    const pendingError = new NeedsEnvironment("needs variables");
+    const workflow = new StackGitWorkflow({ allowLocalTransport: true,
+        validate: async () => {
+            throw pendingError;
+        } });
+    const destination = path.join(f.root, "deferred");
+    const result = await workflow.clone(destination, f.input, config);
+    assert.equal(result.pending, pendingError);
+    assert.equal(await fs.readFile(path.join(destination, "compose.yaml"), "utf8"), compose);
+    assert.equal(git(destination, "status", "--porcelain"), "");
+    // The hash is of the same bytes a successful clone would have reported
+    assert.equal(result.filesHash, (await f.workflow.clone(path.join(f.root, "ok"), f.input, config)).filesHash);
+});
+
 test("network preview leaves files and HEAD untouched and hides env and credential content", async (t) => {
     const f = await fixture(t);
     await f.update();
@@ -141,12 +163,12 @@ test("stale files and incomplete decisions reject before writing", async (t) => 
     await assert.rejects(f.workflow.apply(f.stack, { stackName: "stack",
         previewId: preview.id,
         choices: {},
-        deploy: false }, config), /каждого/);
+        deploy: false }, config), /gitChooseResultForEveryFile/);
     await fs.writeFile(path.join(f.stack, "untracked.txt"), "a concurrent user change");
     await assert.rejects(f.workflow.apply(f.stack, { stackName: "stack",
         previewId: preview.id,
         choices: choices(preview),
-        deploy: false }, config), /изменились/);
+        deploy: false }, config), /gitFileConfigChanged|gitChangedSinceComparison/);
     assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), compose);
     assert.equal(git(f.stack, "rev-parse", "HEAD"), preview.currentCommit);
 });
@@ -178,14 +200,14 @@ test("reject symbolic links and diverged local commits without overwriting", asy
     const f = await fixture(t);
     await f.update();
     await fs.symlink(f.upstream, path.join(f.stack, "linked"));
-    await assert.rejects(f.workflow.preview(f.stack, config), /ссылки/);
+    await assert.rejects(f.workflow.preview(f.stack, config), /gitSubmodulesNotSupported|gitSymlinksNotSupported/);
     await fs.unlink(path.join(f.stack, "linked"));
     git(f.stack, "config", "user.name", "Fixture");
     git(f.stack, "config", "user.email", "fixture@example.invalid");
     await fs.writeFile(path.join(f.stack, "readme.txt"), "local commit\n");
     git(f.stack, "add", ".");
     git(f.stack, "commit", "-m", "diverged");
-    await assert.rejects(f.workflow.preview(f.stack, config), /разошлись/);
+    await assert.rejects(f.workflow.preview(f.stack, config), /gitBranchesDiverged/);
     assert.equal(await fs.readFile(path.join(f.stack, "readme.txt"), "utf8"), "local commit\n");
 });
 
@@ -204,7 +226,7 @@ test("staged user changes are refused instead of discarding the Git index", asyn
     await fs.writeFile(path.join(f.stack, "readme.txt"), "staged local change\n");
     git(f.stack, "add", "readme.txt");
     const index = await fs.readFile(path.join(f.stack, ".git/index"));
-    await assert.rejects(f.workflow.preview(f.stack, config), /подготовленные/);
+    await assert.rejects(f.workflow.preview(f.stack, config), /gitStagedChangesPresent/);
     assert.ok((await fs.readFile(path.join(f.stack, ".git/index"))).equals(index));
     assert.match(git(f.stack, "diff", "--cached"), /staged local change/);
 });
@@ -215,7 +237,7 @@ test("metadata symlinks are rejected before Git can write through them", async (
     const external = path.join(f.root, "external-index");
     await fs.rename(originalIndex, external);
     await fs.symlink(external, originalIndex);
-    await assert.rejects(f.workflow.preview(f.stack, config), /Метаданные Git/);
+    await assert.rejects(f.workflow.preview(f.stack, config), /gitMetadataHasSymlink/);
 });
 
 test("remote deletions and executable bytes apply without rewriting unrelated local files", async (t) => {
@@ -268,7 +290,7 @@ test("apply holds the Git index lock and checks a file again immediately before 
     await assert.rejects(workflow.apply(f.stack, { stackName: "stack",
         previewId: preview.id,
         choices: choices(preview),
-        deploy: false }, config), /изменился во время/);
+        deploy: false }, config), /gitFileChangedWhileApplying/);
     assert.equal(lockChecked, true);
     assert.equal(await fs.readFile(path.join(f.stack, ".env"), "utf8"), "PASSWORD=not-for-the-browser\n");
     assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), "services: {}\n# concurrent editor\n");
@@ -328,7 +350,7 @@ test("edited results reject hidden files, oversized input, invalid Compose and s
     await assert.rejects(f.workflow.apply(f.stack, { ...input,
         choices: { ...input.choices,
             "compose.yaml": "edited" },
-        editedContents: { "compose.yaml": updatedCompose } }, config), /после сравнения/);
+        editedContents: { "compose.yaml": updatedCompose } }, config), /SinceComparison/);
     assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), compose);
 });
 
@@ -416,7 +438,7 @@ test("concurrent changes to retained inputs during writes reject and roll back e
         choices: { ...choices(preview, "server"),
             "compose.yaml": "edited" },
         editedContents: { "compose.yaml": updatedCompose },
-        deploy: false }, config), /во время применения/);
+        deploy: false }, config), /gitChangedWhileApplying|gitFileChangedWhileApplying/);
     assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), compose);
     assert.equal(await fs.readFile(path.join(f.stack, "readme.txt"), "utf8"), "concurrent\n");
     assert.equal(git(f.stack, "rev-parse", "HEAD"), preview.currentCommit);
@@ -434,7 +456,7 @@ test("aggregate edited bytes and combined result file count are bounded before v
         previewId: preview.id,
         choices: Object.fromEntries(preview.files.map(file => [ file.path, "edited" ])),
         editedContents: Object.fromEntries(preview.files.map(file => [ file.path, "x".repeat(1024 * 1024) ])),
-        deploy: false }, config), /20 МБ/);
+        deploy: false }, config), /gitEditedResultsTooLarge/);
     assert.equal(f.validations(), 1);
     for (let i = 0; i < 997; i++) {
         await fs.writeFile(path.join(f.stack, `local-${i}.txt`), "local");
@@ -443,7 +465,7 @@ test("aggregate edited bytes and combined result file count are bounded before v
     await assert.rejects(f.workflow.apply(f.stack, { stackName: "stack",
         previewId: crowded.id,
         choices: choices(crowded),
-        deploy: false }, config), /1000 файлов/);
+        deploy: false }, config), /gitResultTooLarge/);
     assert.equal(f.validations(), 1);
 });
 

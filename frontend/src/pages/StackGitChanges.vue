@@ -16,7 +16,7 @@
         <div v-if="loading" class="notice" role="status">{{ $t("gitUiFetching") }}</div>
         <section v-if="result" class="result-card" role="status">
             <h2>{{ $t(result.deployed ? "gitUiUpdateDeployed" : "gitUiUpdateSaved") }}</h2>
-            <p v-if="result.deploymentError" class="notice failure">{{ $t("gitUiDeploymentFailedSaved") }} {{ result.deploymentError }}</p>
+            <p v-if="result.deploymentError" class="notice failure">{{ $root.serverText(result.deploymentError, "gitUiDeploymentFailedSaved") }}</p>
             <p v-else>{{ $t(result.deployed ? "gitUiDeployComplete" : "gitUiUpdateSavedDescription") }}</p>
             <p v-if="hasLocalChoice">{{ $t("gitUiLocalRemains") }}</p>
             <router-link class="btn btn-primary" :to="stackPath">{{ $t("gitUiOpenStack") }}</router-link>
@@ -265,7 +265,7 @@ export default {
                 clearTimeout(this.previewTimeout);
                 this.loading = false;
                 if (!res?.ok) {
-                    this.failure = res?.msg || this.$t("gitUiRequestFailed");
+                    this.failure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
                 this.preview = res.preview;
@@ -287,7 +287,7 @@ export default {
             }, (res) => {
                 this.applying = false;
                 if (!res?.ok) {
-                    this.failure = res?.msg || this.$t("gitUiRequestFailed");
+                    this.failure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
                 this.failure = "";

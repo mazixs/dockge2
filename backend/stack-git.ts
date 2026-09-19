@@ -35,13 +35,44 @@ export interface GitWorkflowOptions {
     beforeWrite?: (fileName: string) => Promise<void>;
 }
 
-/** A safe message that never incorporates subprocess output or repository file contents. */
-export class StackGitError extends Error {}
+/**
+ * A safe message that never incorporates subprocess output or repository file contents.
+ *
+ * The message is a catalogue key, not a sentence: the panel and the agent may be running
+ * in different languages, and only the browser knows which one the reader chose.
+ */
+export class StackGitError extends Error {
+    /** Values the catalogue entry interpolates, when it takes any. */
+    readonly values? : Record<string, string>;
+
+    /**
+     * @param key Catalogue key describing what went wrong
+     * @param values Values the entry interpolates
+     */
+    constructor(key : string, values? : Record<string, string>) {
+        super(key);
+        if (values) {
+            this.values = values;
+        }
+    }
+}
+
+/**
+ * Whether a validation failure still allows the files to be saved.
+ *
+ * The workflow knows nothing about Compose; the validator is the one that can tell an
+ * unfinished environment from a file that cannot be read, and says so on the error.
+ * @param error Error thrown by the configured validator
+ * @returns True when the files may be published despite the failure
+ */
+function isDeferrable(error: unknown): error is StackGitError {
+    return error instanceof StackGitError && (error as { deferrable?: unknown }).deferrable === true;
+}
 
 /** Check relative paths from Git before they become filesystem paths. */
 function safePath(name: string): void {
     if (!name || name.length > 1024 || /[\\\x00-\x1f\x7f:]/.test(name) || name.split("/").some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git") || path.isAbsolute(name)) {
-        throw new StackGitError("Git содержит небезопасный путь файла.");
+        throw new StackGitError("gitUnsafeFilePath");
     }
 }
 
@@ -58,11 +89,11 @@ export function validateGitRepository(repository: string, allowLocal = false): v
     const problem = gitRepositoryProblem(repository, allowLocal);
 
     if (problem === "shape") {
-        throw new StackGitError("Укажите корректный HTTP(S) или SSH адрес репозитория.");
+        throw new StackGitError("gitInvalidRepositoryAddress");
     }
 
     if (problem) {
-        throw new StackGitError("Допустимы HTTP(S) и SSH адреса без пароля, токена и параметров запроса.");
+        throw new StackGitError("gitAddressMustNotCarryCredentials");
     }
 }
 
@@ -70,7 +101,7 @@ export function validateGitRepository(repository: string, allowLocal = false): v
 async function snapshot(dir: string): Promise<FileTree> {
     const root = await fs.lstat(dir);
     if (!root.isDirectory() || root.isSymbolicLink()) {
-        throw new StackGitError("Каталог стека должен быть обычным каталогом.");
+        throw new StackGitError("gitStackPathMustBeDirectory");
     }
     const result: FileTree = new Map();
     let size = 0;
@@ -82,7 +113,7 @@ async function snapshot(dir: string): Promise<FileTree> {
             const name = prefix ? `${prefix}/${entry.name}` : entry.name;
             safePath(name);
             if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
-                throw new StackGitError("Git-сценарий не поддерживает символические ссылки и специальные файлы.");
+                throw new StackGitError("gitSymlinksNotSupported");
             }
             if (entry.isDirectory()) {
                 await walk(name);
@@ -90,18 +121,18 @@ async function snapshot(dir: string): Promise<FileTree> {
             }
             const stat = await fs.lstat(path.join(dir, name));
             if (stat.size > MAX_FILE_BYTES || (size += stat.size) > MAX_BYTES || result.size >= MAX_FILES) {
-                throw new StackGitError("Репозиторий превышает лимит: 1000 файлов, 1 МБ на файл, 20 МБ всего.");
+                throw new StackGitError("gitRepositoryTooLarge");
             }
             const handle = await fs.open(path.join(dir, name), constants.O_RDONLY | constants.O_NOFOLLOW);
             try {
                 const current = await handle.stat();
                 if (current.ino !== stat.ino || !current.isFile()) {
-                    throw new StackGitError("Файлы изменились во время проверки. Повторите сравнение.");
+                    throw new StackGitError("gitFilesChangedDuringCheck");
                 }
                 const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
                 const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
                 if (bytesRead > MAX_FILE_BYTES || current.size !== bytesRead) {
-                    throw new StackGitError("Размер файла изменился во время проверки или превышает лимит.");
+                    throw new StackGitError("gitFileSizeChangedDuringCheck");
                 }
                 result.set(name, { bytes: Buffer.from(buffer.subarray(0, bytesRead)),
                     mode: stat.mode & 0o777 });
@@ -176,23 +207,23 @@ export class StackGitWorkflow {
                 maxBuffer: MAX_BYTES,
                 timeoutMs: 60_000 });
         } catch {
-            throw new StackGitError("Операция Git не выполнена. Проверьте адрес, ветку и доступ сервера к репозиторию.");
+            throw new StackGitError("gitRemoteOperationFailed");
         }
     }
 
     private async assertRepository(dir: string): Promise<void> {
         const stat = await fs.lstat(dir);
         if (!stat.isDirectory() || stat.isSymbolicLink()) {
-            throw new StackGitError("Каталог стека должен быть обычным каталогом.");
+            throw new StackGitError("gitStackPathMustBeDirectory");
         }
         const metadata = await fs.lstat(path.join(dir, ".git"));
         if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-            throw new StackGitError("Нужен отдельный Git-каталог стека; связанные рабочие копии не поддерживаются.");
+            throw new StackGitError("gitLinkedWorktreeNotSupported");
         }
         async function checkMetadata(directory: string): Promise<void> {
             for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
                 if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
-                    throw new StackGitError("Метаданные Git содержат символическую ссылку или специальный файл.");
+                    throw new StackGitError("gitMetadataHasSymlink");
                 }
                 if (entry.isDirectory()) {
                     await checkMetadata(path.join(directory, entry.name));
@@ -217,13 +248,13 @@ export class StackGitWorkflow {
         for (const entry of output.toString().split("\0").filter(Boolean)) {
             const match = /^(\d+) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
             if (!match || ![ "100644", "100755" ].includes(match[1]!)) {
-                throw new StackGitError("Git-сценарий не поддерживает подмодули и символические ссылки.");
+                throw new StackGitError("gitSubmodulesNotSupported");
             }
             const name = match[3]!;
             safePath(name);
             const content = await this.git(dir, [ "cat-file", "blob", match[2]! ]);
             if (content.length > MAX_FILE_BYTES || (bytes += content.length) > MAX_BYTES || result.size >= MAX_FILES) {
-                throw new StackGitError("Репозиторий превышает лимит: 1000 файлов, 1 МБ на файл, 20 МБ всего.");
+                throw new StackGitError("gitRepositoryTooLarge");
             }
             result.set(name, { bytes: content,
                 mode: match[1] === "100755" ? 0o755 : 0o644 });
@@ -233,7 +264,7 @@ export class StackGitWorkflow {
 
     private async exclusive<T>(dir: string, operation: () => Promise<T>): Promise<T> {
         if (this.busy.has(dir)) {
-            throw new StackGitError("Для этого стека уже выполняется операция Git.");
+            throw new StackGitError("gitOperationAlreadyRunning");
         }
         this.busy.add(dir);
         try {
@@ -265,12 +296,20 @@ export class StackGitWorkflow {
         return names.slice(0, MAX_BRANCHES);
     }
 
-    /** Clone into a private staging directory, validate, then publish without overwriting. */
-    async clone(dir: string, input: GitCloneInput, config: StackFileConfig): Promise<{ filesHash: string }> {
+    /**
+     * Clone into a private staging directory, validate, then publish without overwriting.
+     *
+     * A validation failure normally leaves nothing behind - a stack that cannot be read is
+     * not worth creating. The exception is an error the validator marks as deferrable: a
+     * checkout whose compose file is sound but whose environment is not filled in yet. Those
+     * files are published and the reason is returned, because the variables are set in them
+     * and there is nowhere else to set them.
+     */
+    async clone(dir: string, input: GitCloneInput, config: StackFileConfig): Promise<{ filesHash: string, pending?: StackGitError }> {
         return this.exclusive(dir, async () => {
             validateGitRepository(input.repository, this.options.allowLocalTransport);
             if (typeof input.branch !== "string" || !input.branch || input.branch.length > 200 || input.branch.startsWith("-") || /[\x00-\x20\x7f]/.test(input.branch)) {
-                throw new StackGitError("Укажите корректное имя ветки.");
+                throw new StackGitError("gitInvalidBranchName");
             }
             await this.git(path.dirname(dir), [ "check-ref-format", `refs/heads/${input.branch}` ]);
             const stage = await fs.mkdtemp(path.join(path.dirname(dir), ".dockge-git-"));
@@ -280,7 +319,15 @@ export class StackGitWorkflow {
                 const intended = await this.tree(repo, await this.commit(repo));
                 await writeTree(repo, intended);
                 await this.git(repo, [ "read-tree", "HEAD" ]);
-                await this.options.validate(repo, config);
+                let pending: StackGitError | undefined;
+                try {
+                    await this.options.validate(repo, config);
+                } catch (error) {
+                    if (!isDeferrable(error)) {
+                        throw error;
+                    }
+                    pending = error;
+                }
                 // mkdir is the exclusive reservation. rename can otherwise replace an empty directory.
                 await fs.mkdir(dir);
                 try {
@@ -290,7 +337,8 @@ export class StackGitWorkflow {
                     throw error;
                 }
                 clearStackSourceCache(dir);
-                return { filesHash: treeHash(intended) };
+                return { filesHash: treeHash(intended),
+                    ...(pending ? { pending } : {}) };
             } finally {
                 await fs.rm(stage, { recursive: true,
                     force: true });
@@ -310,14 +358,14 @@ export class StackGitWorkflow {
             try {
                 await this.git(dir, [ "diff-index", "--cached", "--quiet", "HEAD", "--" ]);
             } catch {
-                throw new StackGitError("В Git есть подготовленные к коммиту изменения. Сохраните их отдельным коммитом или уберите из индекса вне панели.");
+                throw new StackGitError("gitStagedChangesPresent");
             }
             await this.git(dir, [ "fetch", "--no-tags", "--no-recurse-submodules", "--", remote, `refs/heads/${branch}:refs/remotes/origin/${branch}` ]);
             const targetCommit = (await this.git(dir, [ "rev-parse", `refs/remotes/origin/${branch}` ])).toString().trim();
             try {
                 await this.git(dir, [ "merge-base", "--is-ancestor", currentCommit, targetCommit ]);
             } catch {
-                throw new StackGitError("Ветки разошлись. Объедините коммиты вне панели и повторите проверку.");
+                throw new StackGitError("gitBranchesDiverged");
             }
             const before = await snapshot(dir);
             const target = await this.tree(dir, targetCommit);
@@ -358,29 +406,29 @@ export class StackGitWorkflow {
         return this.exclusive(dir, async () => {
             const preview = this.previews.get(input.previewId);
             if (!preview || preview.dir !== dir || Date.now() - preview.createdAt > PREVIEW_MS) {
-                throw new StackGitError("Сравнение устарело. Проверьте изменения заново.");
+                throw new StackGitError("gitComparisonExpired");
             }
             if (!input.choices || typeof input.choices !== "object" || Array.isArray(input.choices) || Object.keys(input.choices).length !== preview.public.files.length || preview.public.files.some((file) => !Object.hasOwn(input.choices, file.path) || ![ "server", "git", "edited" ].includes(input.choices[file.path]!))) {
-                throw new StackGitError("Выберите результат для каждого файла.");
+                throw new StackGitError("gitChooseResultForEveryFile");
             }
             const edited = input.editedContents ?? {};
             if (typeof edited !== "object" || Array.isArray(edited) || Object.keys(edited).some(name => !preview.public.files.some(file => file.path === name && input.choices[name] === "edited"))) {
-                throw new StackGitError("Некорректный список измененных результатов.");
+                throw new StackGitError("gitInvalidEditedResults");
             }
             let editedBytes = 0;
             for (const file of preview.public.files) {
                 if (input.choices[file.path] === "edited" && (file.redacted || file.binary || !Object.hasOwn(edited, file.path) || typeof edited[file.path] !== "string" || Buffer.byteLength(edited[file.path]!, "utf8") > MAX_FILE_BYTES || edited[file.path]!.includes("\0") || Buffer.from(edited[file.path]!).toString("utf8") !== edited[file.path])) {
-                    throw new StackGitError("Изменение результата доступно только для открытого текстового файла размером до 1 МБ.");
+                    throw new StackGitError("gitEditOnlyForTextFiles");
                 }
             }
             for (const content of Object.values(edited)) {
                 editedBytes += Buffer.byteLength(content, "utf8");
                 if (editedBytes > MAX_BYTES) {
-                    throw new StackGitError("Измененные результаты превышают лимит 20 МБ.");
+                    throw new StackGitError("gitEditedResultsTooLarge");
                 }
             }
             if (JSON.stringify(config) !== JSON.stringify(preview.config)) {
-                throw new StackGitError("Настройки файлов изменились. Повторите сравнение.");
+                throw new StackGitError("gitFileConfigChanged");
             }
             const result: FileTree = new Map(preview.before);
             const changed: string[] = [];
@@ -404,7 +452,7 @@ export class StackGitWorkflow {
                 }
             }
             if (result.size > MAX_FILES || [ ...result.values() ].reduce((total, file) => total + file.bytes.length, 0) > MAX_BYTES) {
-                throw new StackGitError("Итоговые файлы превышают лимит 1000 файлов или 20 МБ.");
+                throw new StackGitError("gitResultTooLarge");
             }
             const stage = await fs.mkdtemp(path.join(os.tmpdir(), "dockge-git-validate-"));
             try {
@@ -420,7 +468,7 @@ export class StackGitWorkflow {
             try {
                 indexLock = await fs.open(indexLockPath, "wx", 0o600);
             } catch {
-                throw new StackGitError("Git занят другим процессом. Дождитесь его завершения и повторите сравнение.");
+                throw new StackGitError("gitBusyElsewhere");
             }
             const temporaryIndex = path.join(dir, `.git/dockge-index-${randomUUID()}`);
             const recovery = path.join(dir, `.git/dockge-recovery-${randomUUID()}`);
@@ -429,7 +477,7 @@ export class StackGitWorkflow {
             let indexUpdated = false;
             try {
                 if (await this.commit(dir) !== preview.public.currentCommit || await this.branch(dir) !== preview.public.branch || !sameTree(await snapshot(dir), preview.before) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
-                    throw new StackGitError("Файлы или Git изменились после сравнения. Проверьте изменения заново.");
+                    throw new StackGitError("gitChangedSinceComparison");
                 }
                 // Build Git metadata separately; the real index stays locked and unchanged until all files succeed.
                 await this.git(dir, [ "read-tree", preview.public.targetCommit ], temporaryIndex);
@@ -444,14 +492,14 @@ export class StackGitWorkflow {
                 for (const name of changed) {
                     await this.options.beforeWrite?.(name);
                     if (!equalFile(await this.currentFile(dir, name), preview.before.get(name))) {
-                        throw new StackGitError("Файл изменился во время применения. Повторите сравнение.");
+                        throw new StackGitError("gitFileChangedWhileApplying");
                     }
                     await this.replaceFile(dir, name, result.get(name));
                     written.push(name);
                 }
                 // Validation covers unchanged inputs too: detect edits made during our writes.
                 if (!sameTree(await snapshot(dir), result) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
-                    throw new StackGitError("Файлы или Git изменились во время применения. Повторите сравнение.");
+                    throw new StackGitError("gitChangedWhileApplying");
                 }
                 await fs.rename(temporaryIndex, path.join(dir, ".git/index"));
                 indexUpdated = true;
@@ -473,7 +521,7 @@ export class StackGitWorkflow {
                     }
                 } catch {
                     preserveRecovery = true;
-                    throw new StackGitError(`Не удалось полностью восстановить файлы. Резервная копия сохранена в .git/${path.basename(recovery)}. Не запускайте стек до проверки файлов.`);
+                    throw new StackGitError("gitRollbackIncomplete", { backup: path.basename(recovery) });
                 }
                 throw error;
             } finally {
@@ -499,7 +547,7 @@ export class StackGitWorkflow {
             try {
                 const stat = await fs.lstat(parent);
                 if (stat.isSymbolicLink() || !stat.isDirectory()) {
-                    throw new StackGitError("Путь файла изменился после сравнения.");
+                    throw new StackGitError("gitFilePathChangedSinceComparison");
                 }
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -513,12 +561,12 @@ export class StackGitWorkflow {
             try {
                 const stat = await handle.stat();
                 if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
-                    throw new StackGitError("Файл изменился после сравнения.");
+                    throw new StackGitError("gitFileChangedSinceComparison");
                 }
                 const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
                 const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
                 if (bytesRead !== stat.size) {
-                    throw new StackGitError("Файл изменился после сравнения.");
+                    throw new StackGitError("gitFileChangedSinceComparison");
                 }
                 return { bytes: Buffer.from(buffer.subarray(0, bytesRead)),
                     mode: stat.mode & 0o777 };
@@ -541,13 +589,13 @@ export class StackGitWorkflow {
             await fs.mkdir(parent, { recursive: true });
             const stat = await fs.lstat(parent);
             if (!stat.isDirectory() || stat.isSymbolicLink()) {
-                throw new StackGitError("Путь файла изменился после сравнения.");
+                throw new StackGitError("gitFilePathChangedSinceComparison");
             }
         }
         try {
             const stat = await fs.lstat(target);
             if (!stat.isFile() || stat.isSymbolicLink()) {
-                throw new StackGitError("Путь файла изменился после сравнения.");
+                throw new StackGitError("gitFilePathChangedSinceComparison");
             }
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {

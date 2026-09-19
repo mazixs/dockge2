@@ -36,9 +36,22 @@ export interface GitUpdatePreview {
     files: GitPreviewFile[];
 }
 
+/**
+ * A reason the receiver translates itself: a catalogue key and the values it takes.
+ *
+ * The server does not know the reader's language, so it names the entry instead of
+ * writing the sentence. An older agent still sends a finished string, and the reader
+ * has to accept both.
+ */
+export interface GitMessage {
+    key: string;
+    values?: Record<string, string>;
+}
+
 export interface GitSaveResult {
     stackName: string;
     saved: true;
     deployed: boolean;
-    deploymentError?: string;
+    /** Why the stack is not running. Absent when it started. */
+    deploymentError?: GitMessage | string;
 }

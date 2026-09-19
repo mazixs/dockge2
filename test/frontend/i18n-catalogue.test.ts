@@ -185,4 +185,45 @@ test("the server sends keys, not sentences, to the toast", () => {
     // has no key and cannot get one, and the reader sees English. Handlers name a key
     // and pass the parts as values
     assert.deepEqual(strays, [], "msg: is a sentence rather than a key of en.json");
+
+    // A thrown error ends up in the same `msg`, so the rule covers what the Git flow
+    // throws as well. These went unchecked and reached the user as whole sentences in
+    // one language - under "Unexpected error:", because no catalogue had them
+    const thrown : string[] = [];
+    let reasons = 0;
+
+    for (const file of sourceFiles(path.join(process.cwd(), "backend"), [ ".ts" ])) {
+        const source = readFileSync(file, "utf-8");
+
+        for (const match of source.matchAll(/new StackGitError\(\s*"([^"]+)"/g)) {
+            reasons++;
+
+            if (!english.has(match[1]!)) {
+                thrown.push(`${path.relative(process.cwd(), file)}: ${match[1]}`);
+            }
+        }
+    }
+
+    assert.ok(reasons > 20, `expected the Git flow to name many reasons, found ${reasons}`);
+    assert.deepEqual(thrown, [], "StackGitError carries a sentence rather than a key of en.json");
+
+    // An entry with a placeholder needs the value that fills it. Thrown without one, the
+    // key is translated all the same and the reader is shown "{max}" where a number belongs
+    const catalogueEn = catalogue("en");
+    const placeholders = new Set(Object.entries(catalogueEn)
+        .filter(([ , value ]) => typeof value === "string" && /\{[^}]+\}/.test(value))
+        .map(([ key ]) => key));
+    const unfilled : string[] = [];
+
+    for (const file of sourceFiles(path.join(process.cwd(), "backend"), [ ".ts" ])) {
+        const source = readFileSync(file, "utf-8");
+
+        for (const match of source.matchAll(/new (?:ValidationError|StackGitError)\(\s*"([^"]+)"\s*(\)|,)/g)) {
+            if (placeholders.has(match[1]!) && match[2] === ")") {
+                unfilled.push(`${path.relative(process.cwd(), file)}: ${match[1]}`);
+            }
+        }
+    }
+
+    assert.deepEqual(unfilled, [], "thrown without the values its catalogue entry interpolates");
 });

@@ -77,7 +77,8 @@
 
                     <div class="field">
                         <label for="git-stack-name" class="form-label">{{ $t("stackName") }}</label>
-                        <input id="git-stack-name" v-model="name" :disabled="busy" type="text" class="form-control" placeholder="my-app" pattern="[a-z0-9][a-z0-9_-]*" autocomplete="off" spellcheck="false" required>
+                        <input id="git-stack-name" v-model="name" :disabled="busy" type="text" class="form-control" placeholder="my-app" pattern="[a-z0-9][a-z0-9_\-]*" :maxlength="maxNameLength" autocomplete="off" spellcheck="false" required>
+                        <p class="form-text">{{ $t("stackNameTooLongHint", { max: maxNameLength }) }}</p>
                     </div>
 
                     <div class="field">
@@ -106,7 +107,7 @@
 
         <section v-else class="result-card" role="status">
             <h2>{{ $t(result.deployed ? "gitUiCreatedDeployed" : "gitUiCreatedSaved", [ result.stackName ]) }}</h2>
-            <p v-if="result.deploymentError" class="notice failure">{{ $t("gitUiDeploymentFailedSaved") }} {{ result.deploymentError }}</p>
+            <p v-if="result.deploymentError" class="notice failure">{{ $root.serverText(result.deploymentError, "gitUiDeploymentFailedSaved") }}</p>
             <p v-else>{{ $t(result.deployed ? "gitUiDeployComplete" : "gitUiSavedDescription") }}</p>
             <router-link class="btn btn-primary" :to="stackPath(result.stackName)">{{ $t("gitUiOpenStack") }}</router-link>
         </section>
@@ -116,7 +117,8 @@
 <script>
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
-import { isSafeGitRepository } from "../git-ui";
+import { isSafeGitRepository, stackNameFromRepository } from "../git-ui";
+import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
 
 export default {
     components: { InterfaceIcon,
@@ -132,6 +134,9 @@ export default {
             branch: "main",
             endpoint: this.$root.selectedEndpoint || "",
             name: "",
+            // Whether the name is the user's own. A suggested name follows the address;
+            // one that was typed is kept, because only its author knows what it is for
+            nameChosen: false,
             composeFile: "compose.yaml",
             busy: false,
             uncertain: false,
@@ -149,8 +154,13 @@ export default {
                 && this.$root.agentStatusList[this.endpoint] === "online";
         },
         canCreate() {
+            const name = this.name.trim();
             return this.$root.canManageStacks && !this.busy && !this.uncertain && this.sourceReady
-                && /^[a-z0-9][a-z0-9_-]*$/.test(this.name.trim()) && Boolean(this.composeFile.trim());
+                && /^[a-z0-9][a-z0-9_-]*$/.test(name) && name.length <= this.maxNameLength
+                && Boolean(this.composeFile.trim());
+        },
+        maxNameLength() {
+            return MAX_STACK_NAME_LENGTH;
         },
         // Список веток запрашивается у чужого сервера, поэтому кнопка доступна
         // только когда адрес уже разобран и выбранный агент на связи
@@ -175,13 +185,30 @@ export default {
     watch: {
         // Ветки принадлежат конкретному адресу: сменился адрес или сервер -
         // прежний список больше ничего не описывает
-        repository() {
+        repository(value) {
             this.branches = [];
             this.branchesFailure = "";
+            this.forgetOutcome();
+            if (!this.nameChosen) {
+                this.name = stackNameFromRepository(value);
+            }
+        },
+        // An emptied field is offered a name again: the user cleared it to get another one
+        name(value) {
+            this.nameChosen = Boolean(value) && value !== stackNameFromRepository(this.repository);
         },
         endpoint() {
             this.branches = [];
             this.branchesFailure = "";
+            this.forgetOutcome();
+        },
+        // То же и для ветки: отказ был получен для той ветки, которая стояла тогда
+        branch() {
+            this.forgetOutcome();
+        },
+        // Возврат к выбору источника - начало новой попытки, а не продолжение прежней
+        step() {
+            this.forgetOutcome();
         },
         "$root.socketIO.connected"(connected) {
             if (!connected && this.busy) {
@@ -198,6 +225,19 @@ export default {
         this.consumeSeed();
     },
     methods: {
+        /**
+         * Drop the outcome of the previous attempt.
+         *
+         * A failure belongs to the repository, branch and server it happened with. Left on
+         * screen after any of them changes, it describes a source that is no longer selected,
+         * and the summary above it already shows the new one - so the card states two
+         * different things at once. `uncertain` goes with it: it blocks the button because
+         * the previous result is unknown, which says nothing about a different source.
+         */
+        forgetOutcome() {
+            this.failure = "";
+            this.uncertain = false;
+        },
         /** Open the requested accessible tab and place keyboard focus on its label. */
         selectTab(tab) {
             this.sourceTab = tab;
@@ -213,7 +253,7 @@ export default {
             this.$root.emitAgent(this.endpoint, "gitListBranches", this.repository.trim(), (res) => {
                 this.branchesBusy = false;
                 if (!res?.ok) {
-                    this.branchesFailure = res?.msg || this.$t("gitUiRequestFailed");
+                    this.branchesFailure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
                 this.branches = res.branches || [];
@@ -257,7 +297,7 @@ export default {
                 this.busy = false;
                 this.uncertain = false;
                 if (!res?.ok) {
-                    this.failure = res?.msg || this.$t("gitUiRequestFailed");
+                    this.failure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
                 this.result = res;

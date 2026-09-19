@@ -7,6 +7,7 @@ import { Stack } from "../../backend/stack";
 import {
     CREATED_STACK,
     EXITED,
+    MAX_STACK_NAME_LENGTH,
     RUNNING,
     UNKNOWN,
 } from "../../common/util-common";
@@ -53,6 +54,18 @@ test("server utilities validate login and serialize callback results and errors"
 
     assert.doesNotThrow(() => callbackError(new Error("ignored"), undefined));
     assert.doesNotThrow(() => callbackResult({ ok: true }, undefined));
+
+    // An error whose message is a catalogue entry taking values sends them along, or the
+    // browser would show the entry with the placeholder still in it
+    const withValues = Object.assign(new Error("gitRollbackIncomplete"), { values: { backup: "dockge-recovery-1" } });
+    const carried: unknown[] = [];
+    callbackError(withValues, (value: unknown) => carried.push(value));
+    assert.deepEqual(carried, [
+        { ok: false,
+            msg: { key: "gitRollbackIncomplete",
+                values: { backup: "dockge-recovery-1" } },
+            msgi18n: true },
+    ]);
 });
 
 test("fileExists checks real files", async () => {
@@ -173,6 +186,18 @@ test("Stack persists environment files on save", async () => {
         await rm(stacksDir, { recursive: true,
             force: true });
     }
+});
+
+test("a new stack name has a length limit that an existing stack does not", () => {
+    const longest = "a".repeat(MAX_STACK_NAME_LENGTH);
+    assert.doesNotThrow(() => Stack.validateNewName(longest));
+    assert.throws(() => Stack.validateNewName(longest + "a"), ValidationError);
+    // Unsafe characters are still refused, whatever the length
+    assert.throws(() => Stack.validateNewName("UPPER"), ValidationError);
+
+    // A stack whose directory already carries a longer name stays reachable: the limit
+    // guards what is being created, not what is already on disk
+    assert.doesNotThrow(() => Stack.validateName(longest + "a"));
 });
 
 test("Stack rejects unsafe names before touching the filesystem", async () => {

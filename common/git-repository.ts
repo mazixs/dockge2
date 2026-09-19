@@ -13,6 +13,8 @@
  * outside the panel.
  */
 
+import { MAX_STACK_NAME_LENGTH } from "./util-common";
+
 /** Why an address cannot be used */
 export type GitRepositoryProblem =
     /** Not an address at all: too long, control characters, or starts like an option */
@@ -36,8 +38,9 @@ export function gitRepositoryProblem(repository : unknown, allowLocalPath = fals
         return "shape";
     }
 
-    // Абсолютный путь проверяется по строке, а не через path: правило общее для
-    // сервера и браузера, и в браузере node-модулей нет. Сервер - Linux
+    // An absolute path is matched as a string rather than through `path`: the rule is
+    // shared by the server and the browser, and the browser has no node modules. The
+    // server is Linux
     if (allowLocalPath && repository.startsWith("/")) {
         return null;
     }
@@ -66,4 +69,22 @@ export function gitRepositoryProblem(repository : unknown, allowLocalPath = fals
  */
 export function isSafeGitRepository(repository : string) : boolean {
     return gitRepositoryProblem(repository) === null;
+}
+
+/**
+ * Suggest a stack name from a repository address.
+ *
+ * Without a suggestion the field keeps whatever was typed for the repository before it,
+ * so a second attempt at a different repository is offered the first one's name. The
+ * name is the last path segment in the form a stack directory accepts; an address that
+ * yields nothing usable gets no suggestion, and the user names the stack.
+ * @param repository Address as the user typed it
+ * @returns A name that passes the stack name rule, or an empty string
+ */
+export function stackNameFromRepository(repository : string) : string {
+    const segment = repository.trim().replace(/\/+$/, "").replace(/\.git$/i, "").split(/[/:]/).pop() ?? "";
+    const name = segment.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z0-9]+/, "");
+    // Trailing separators are trimmed after the cut as well, or a long address would
+    // suggest a name ending in the dash the cut happened to land on
+    return name.slice(0, MAX_STACK_NAME_LENGTH).replace(/[-_]+$/, "");
 }

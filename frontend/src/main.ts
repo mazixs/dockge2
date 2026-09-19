@@ -88,6 +88,27 @@ function rootApp() {
             },
 
             /**
+             * Text for a reason the server sent, shown in place rather than in a toast.
+             *
+             * This build names a catalogue entry and may pass values with it; an agent from
+             * an older build sends a finished sentence in whatever language it was written
+             * in. Both have to end up readable, and a missing reason has to fall back to
+             * something that still tells the reader what happened.
+             * @param {object|string|undefined} message Reason from the server
+             * @param {string} fallback Catalogue key used when there is no reason at all
+             * @returns {string} Text to show
+             */
+            serverText(message: { key: string, values?: Record<string, unknown> } | string | undefined, fallback: string) : string {
+                if (!message) {
+                    return this.$t(fallback);
+                }
+                if (typeof message === "object") {
+                    return this.translateServerMessage(message.key, message.values);
+                }
+                return this.translateServerMessage(message);
+            },
+
+            /**
              * Show success or error toast dependant on response status code
              * @param {object} res Response object
              * @returns {void}

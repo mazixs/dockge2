@@ -9,10 +9,55 @@ import { StackGitError, StackGitWorkflow } from "../stack-git";
 import { spawn } from "../child-process";
 import { composeArgs } from "../compose-args";
 import type { AgentSocket } from "../../common/agent-socket";
-import type { GitApplyInput, GitCloneInput, GitSaveResult } from "../../common/stack-git";
+import type { GitApplyInput, GitCloneInput, GitMessage, GitSaveResult } from "../../common/stack-git";
 import type { StackFileConfig } from "../../common/types/stack";
 
 const workflows = new WeakMap<DockgeServer, StackGitWorkflow>();
+
+/**
+ * Names Compose reports as missing, read out of its own error text.
+ *
+ * Only the names are taken, never the surrounding sentence: a value can be a secret, a
+ * name is what the user has to go and set. The pattern accepts a shell identifier and
+ * nothing else, so no part of the message can travel out inside a name.
+ */
+const MISSING_VARIABLE = /required variable ([A-Za-z_][A-Za-z0-9_]{0,62}) is missing a value/g;
+
+/** At most this many names are named; the rest is a list nobody reads anyway. */
+const MAX_REPORTED_VARIABLES = 12;
+
+/**
+ * Compose is complete but the environment it reads is not filled in yet.
+ *
+ * A repository almost never carries its own `.env` - it is in `.gitignore`, next to an
+ * `.env.example`. A compose file that reads `${VAR:?}` therefore cannot pass a check
+ * immediately after cloning, and that is an unfinished environment rather than a broken
+ * file. The files are worth keeping: the variables are set in them.
+ */
+export class ComposeEnvironmentError extends StackGitError {
+    /** Saving may go ahead. Only starting the stack has to wait for the variables. */
+    readonly deferrable = true;
+
+    constructor(readonly variables: string[]) {
+        super("gitComposeNeedsVariables");
+    }
+}
+
+/** Read the missing variable names out of a failed `docker compose config`. */
+export function missingVariables(error: unknown): string[] {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr !== "string") {
+        return [];
+    }
+    const names = new Set<string>();
+    for (const [ , name ] of stderr.matchAll(MISSING_VARIABLE)) {
+        names.add(name as string);
+        if (names.size >= MAX_REPORTED_VARIABLES) {
+            break;
+        }
+    }
+    return [ ...names ];
+}
 
 /** Validate in isolation; Docker output can contain credentials, so never return it. */
 async function validate(directory: string, config: StackFileConfig, stacksDir: string): Promise<void> {
@@ -23,7 +68,7 @@ async function validate(directory: string, config: StackFileConfig, stacksDir: s
         try {
             const stat = await fs.lstat(globalEnv);
             if (!stat.isFile() || stat.isSymbolicLink()) {
-                throw new StackGitError("Общий env-файл должен быть обычным файлом.");
+                throw new StackGitError("gitGlobalEnvMustBeRegularFile");
             }
             globalEnvFile = globalEnv;
         } catch (error) {
@@ -31,7 +76,7 @@ async function validate(directory: string, config: StackFileConfig, stacksDir: s
                 throw error;
             }
         }
-        // Своё имя проекта: проверка обязана пройти мимо контейнеров пользователя
+        // A project name of its own: the check must not touch the user's containers
         const args = composeArgs({ composeFileName: config.composeFileName,
             envFileNames: config.envFileNames,
             globalEnvFile,
@@ -40,8 +85,12 @@ async function validate(directory: string, config: StackFileConfig, stacksDir: s
             encoding: "utf-8",
             maxBuffer: 256 * 1024,
             timeoutMs: 60_000 });
-    } catch {
-        throw new StackGitError("Выбранный результат не прошел проверку Compose. Проверьте Compose и выбранные env-файлы.");
+    } catch (error) {
+        const missing = missingVariables(error);
+        if (missing.length) {
+            throw new ComposeEnvironmentError(missing);
+        }
+        throw new StackGitError("gitComposeInvalid");
     }
 }
 
@@ -55,20 +104,20 @@ export function getStackGitWorkflow(server: DockgeServer): StackGitWorkflow {
 }
 
 function safeError(error: unknown): Error {
-    return error instanceof StackGitError ? error : new StackGitError("Операция не выполнена. Проверьте состояние файлов и повторите попытку.");
+    return error instanceof StackGitError ? error : new StackGitError("gitOperationFailed");
 }
 
 /** Report saving and deploying separately: a deployment failure does not undo saved files. */
-async function result(server: DockgeServer, socket: DockgeSocket, name: string, deploy: boolean): Promise<GitSaveResult> {
+async function result(server: DockgeServer, socket: DockgeSocket, name: string, deploy: boolean, notStarted?: GitMessage): Promise<GitSaveResult> {
     let deployed = false;
-    let deploymentError: string | undefined;
-    if (deploy) {
+    let deploymentError: GitMessage | undefined = notStarted;
+    if (deploy && !notStarted) {
         try {
             const stack = await Stack.getStack(server, name);
             await stack.deploy(socket);
             deployed = true;
         } catch {
-            deploymentError = "Файлы сохранены, но развертывание не завершено. Проверьте состояние стека.";
+            deploymentError = { key: "gitDeployFailedAfterSave" };
         }
     }
     server.sendStackList();
@@ -86,37 +135,42 @@ export class GitSocketHandler extends AgentSocketHandler {
                 const input = payload as GitCloneInput;
                 checkLogin(socket);
                 if (!input || typeof input.name !== "string" || typeof input.deploy !== "boolean" || typeof input.composeFile !== "string" || (input.envFiles !== undefined && (!Array.isArray(input.envFiles) || !input.envFiles.every((name) => typeof name === "string")))) {
-                    throw new StackGitError("Некорректные параметры создания стека.");
+                    throw new StackGitError("gitCloneInvalidParameters");
                 }
+                Stack.validateNewName(input.name);
                 const dir = Stack.getSafePath(server, input.name);
                 const config = emptyStackFileConfig();
                 config.composeFileName = input.composeFile;
                 config.envFileNames = input.envFiles ?? [];
                 config.activeEnvFileName = config.envFileNames[0] ?? "";
-                await getStackGitWorkflow(server).clone(dir, input, config);
+                const { pending } = await getStackGitWorkflow(server).clone(dir, input, config);
                 try {
                     await StackConfig.set(input.name, config);
                 } catch {
-                    const saved = await result(server, socket, input.name, false);
+                    const saved = await result(server, socket, input.name, false, { key: "gitSelectionNotStored" });
                     callbackResult({ ok: true,
-                        ...saved,
-                        deploymentError: "Репозиторий сохранен, но выбор файлов не записан. Выберите Compose и env-файлы в настройках стека перед запуском." }, callback);
+                        ...saved }, callback);
                     return;
                 }
+                // The checkout is on the server either way. Starting it is what waits for
+                // the variables, and they are set in the files that were just saved.
+                const notStarted = pending instanceof ComposeEnvironmentError
+                    ? { key: "gitSavedNeedsVariables",
+                        values: { variables: pending.variables.join(", ") } }
+                    : undefined;
                 callbackResult({ ok: true,
-                    ...await result(server, socket, input.name, input.deploy) }, callback);
+                    ...await result(server, socket, input.name, input.deploy, notStarted) }, callback);
             } catch (error) {
                 callbackError(safeError(error), callback);
             }
         });
-        // Список веток - отдельное действие по кнопке, а не побочный эффект набора
-        // адреса: это сетевой запрос к чужому серверу, и делать его на каждое
-        // нажатие клавиши нельзя
+        // Listing branches is a button, not a side effect of typing the address: it is a
+        // network request to someone else's server, and one per keystroke is not acceptable
         agentSocket.on("gitListBranches", async (repository: unknown, callback) => {
             try {
                 checkLogin(socket);
                 if (typeof repository !== "string" || !repository.trim()) {
-                    throw new StackGitError("Укажите адрес репозитория.");
+                    throw new StackGitError("gitRepositoryRequired");
                 }
                 const branches = await getStackGitWorkflow(server).listBranches(repository.trim());
                 callbackResult({ ok: true,
@@ -129,7 +183,7 @@ export class GitSocketHandler extends AgentSocketHandler {
             try {
                 checkLogin(socket);
                 if (typeof stackName !== "string") {
-                    throw new StackGitError("Укажите имя стека.");
+                    throw new StackGitError("gitStackNameRequired");
                 }
                 const dir = Stack.getSafePath(server, stackName);
                 const { config } = await StackConfig.inventory(dir, stackName);
@@ -145,7 +199,7 @@ export class GitSocketHandler extends AgentSocketHandler {
                 const input = payload as GitApplyInput;
                 checkLogin(socket);
                 if (!input || typeof input.stackName !== "string" || typeof input.previewId !== "string" || typeof input.deploy !== "boolean") {
-                    throw new StackGitError("Некорректные параметры обновления стека.");
+                    throw new StackGitError("gitApplyInvalidParameters");
                 }
                 const dir = Stack.getSafePath(server, input.stackName);
                 const { config } = await StackConfig.inventory(dir, input.stackName);

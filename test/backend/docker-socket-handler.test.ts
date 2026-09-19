@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { AgentSocket } from "../../common/agent-socket";
@@ -180,5 +180,29 @@ test("stack file events reject wrong types with a type error, not by accident", 
 
         // None of the refused calls touched the env file
         assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "BASE=1\n");
+    });
+});
+
+test("a new stack cannot be created under a name the filesystem or Docker would choke on", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const server = { stacksDir,
+            sendStackList: () => undefined } as unknown as DockgeServer;
+        const handler = new DockerSocketHandler();
+        const tooLong = "a".repeat(65);
+
+        // The limit travels with the message, or the reader is shown the placeholder itself
+        await assert.rejects(handler.saveStack(server, tooLong, composeYAML, "", true), (error: unknown) => {
+            assert.equal((error as Error).message, "stackNameTooLong");
+            assert.deepEqual((error as { values?: unknown }).values, { max: "64" });
+            return true;
+        });
+        // Nothing was written before the name was refused
+        await assert.rejects(access(path.join(stacksDir, tooLong)));
+
+        // The longest accepted name goes through, and saving it again is not a new stack
+        const accepted = "a".repeat(64);
+        await handler.saveStack(server, accepted, composeYAML, "", true);
+        assert.equal(await readFile(path.join(stacksDir, accepted, "compose.yaml"), "utf8"), composeYAML);
+        await handler.saveStack(server, accepted, composeYAML, "", false);
     });
 });

@@ -25,6 +25,16 @@ export interface BaseRes {
     msg?: string;
 }
 
+/**
+ * How long a new stack name may be.
+ *
+ * The name becomes a directory and Compose repeats it in front of every container,
+ * network and volume of the stack, so it is read far more often than it is typed. The
+ * form and the server both use this one number: a form that accepts what the server
+ * refuses is a rejection the user only meets after waiting for a clone.
+ */
+export const MAX_STACK_NAME_LENGTH = 64;
+
 let randomBytes : (numBytes: number) => Uint8Array;
 initRandomBytes();
 

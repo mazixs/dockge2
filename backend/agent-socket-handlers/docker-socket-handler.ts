@@ -701,6 +701,11 @@ export class DockerSocketHandler extends AgentSocketHandler {
         if (typeof(isAdd) !== "boolean") {
             throw new ValidationError("isAdd must be a boolean");
         }
+        // Only a new directory is held to the length: an existing stack keeps whatever
+        // name it was created with, or the panel would refuse to save a stack it shows
+        if (isAdd) {
+            Stack.validateNewName(name);
+        }
 
         const stack = new Stack(server, name, composeYAML, composeENV, false);
         await stack.save(isAdd);
