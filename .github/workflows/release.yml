@@ -1,0 +1,135 @@
+name: Release
+
+# Publishes the image the panel installs from. Without it `install.sh` has to
+# build on the server, and building the frontend asks for about a gigabyte of
+# memory: on a small VPS that is the difference between an install and an
+# out-of-memory kill.
+#
+# Runs on a tag like v2.0.0 or v2.0.0-rc.2, or by hand for a tag already pushed.
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to publish, for example v2.0.0"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  image:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      packages: write
+    env:
+      # `github.ref_name` is the tag on a push and the branch on a manual run,
+      # so the tag is settled once here and everything below reads it.
+      TAG: ${{ inputs.tag || github.ref_name }}
+      # ghcr sits next to the repository: publishing needs no separate account
+      # and no secret in the settings, only the token the run already has.
+      GHCR_IMAGE: ghcr.io/${{ github.repository }}
+      # `secrets` is not available in a step `if`, but it is in the job `env`.
+      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      # The base stage installs packages for each architecture, so emulation is
+      # needed. The frontend and the healthcheck do not depend on it:
+      # docker/Dockerfile builds both on the build machine and copies the result.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Docker Hub is a shop window, not a dependency. With no credentials the
+      # step is skipped and the release goes out to ghcr alone.
+      - name: Login to Docker Hub
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Work out where to push
+        id: where
+        run: |
+          {
+              echo "images<<EOF"
+              echo "$GHCR_IMAGE"
+              [ "$HAS_DOCKERHUB" = "true" ] && echo "mazixs/dockge2"
+              echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          # A dash in the tag means a pre-release: v2.0.0-rc.1 must not become
+          # `latest`, or every machine that installs by default gets a candidate.
+          case "$TAG" in
+              *-*) echo "stable=false" >> "$GITHUB_OUTPUT" ;;
+              *)   echo "stable=true"  >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # `value` is spelled out because a manual run happens on a branch, where
+      # the semver patterns would otherwise find no tag to read.
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.where.outputs.images }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.TAG }}
+            type=semver,pattern={{major}},value=${{ env.TAG }},enable=${{ steps.where.outputs.stable == 'true' }}
+            type=raw,value=latest,enable=${{ steps.where.outputs.stable == 'true' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: release
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG already exists, leaving it alone."
+              exit 0
+          fi
+          if [ "${{ steps.where.outputs.stable }}" = "true" ]; then
+              gh release create "$TAG" --title "$TAG" --generate-notes
+          else
+              gh release create "$TAG" --title "$TAG" --generate-notes --prerelease
+          fi
+
+      # A ghcr package is created private even when the repository is public,
+      # and then a server gets 401 instead of an image. This is switched once
+      # per repository, by hand, in the package settings.
+      - name: Say what is left to do by hand
+        run: |
+          echo "Published:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo
+          echo "If this is the first publish, make the package public:"
+          echo "  https://github.com/users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/settings"

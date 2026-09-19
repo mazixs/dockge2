@@ -3,14 +3,19 @@ name: Node.js CI - Dockge2
 on:
   push:
     branches: [main]
-    # '*.md' покрывал только корень, и правка одной страницы в docs/ гоняла
-    # Docker и браузер целиком. '**.md' - то, что и имелось в виду
+    # '*.md' covered the root only, so editing one page under docs/ ran Docker
+    # and the browser suite in full. The plans and audits under docs/ are pages,
+    # not code: '**.md' plus '**.html' is what was meant.
     paths-ignore:
       - '**.md'
+      - '**.html'
+      - 'docs/**'
   pull_request:
     branches: [main]
     paths-ignore:
       - '**.md'
+      - '**.html'
+      - 'docs/**'
 
 permissions:
   contents: read
