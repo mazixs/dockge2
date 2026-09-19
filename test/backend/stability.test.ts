@@ -105,3 +105,32 @@ test("no snapshot is distinguished from an observed empty Docker host", async ()
         assert.deepEqual(empty.stacks, []);
     });
 });
+
+test("the panel's own containers are not recorded", async () => {
+    await withDatabase(async () => {
+        const panel : ContainerRuntime = { id: "b".repeat(64),
+            name: "dockge2-dockge-1",
+            project: "dockge2",
+            service: "dockge",
+            workingDir: "/opt/dockge2",
+            state: "running",
+            health: "healthy",
+            startedAt: NOW - 60_000,
+            restartCount: 0 };
+
+        const collector = new StabilityCollector(async () => [ container, panel ]);
+        await collector.observe(stacks, NOW, "dockge2");
+        const result = await collector.read(24, NOW);
+
+        const names = result.stacks.flatMap((stack) => stack.containers.map((c) => c.name));
+        assert.deepEqual(names, [ "demo-web-1" ], "only the real stack is recorded");
+        assert.equal(JSON.stringify(result).includes("dockge2"), false);
+
+        // Without the project name nothing is filtered: the panel may run outside
+        // Compose, and then there is no project of its own to leave out
+        const everything = new StabilityCollector(async () => [ container, panel ]);
+        await everything.observe(stacks, NOW);
+        const all = await everything.read(24, NOW);
+        assert.equal(all.stacks.flatMap((s) => s.containers).length, 2);
+    });
+});
