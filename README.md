@@ -360,7 +360,7 @@ repository and nothing else.
 
 Accounts and access levels, two-factor authentication, stack secrets, availability measured from
 recorded status changes, MCP access for AI clients, and an interface rewritten screen by screen.
-Version numbering starts at 2.0.0 and does not follow upstream.
+Version numbering is this fork's own and does not follow upstream: it starts at 0.0.1.
 
 ## Origin and license
 
