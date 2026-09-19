@@ -35,12 +35,18 @@ been rewritten. Do not report issues of this fork upstream.
 - [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
   `podman-docker`. The installer offers to install Docker when it is missing.
 - `git` and `curl`. Nothing else: the image builds its own frontend, so the server needs no Node.
+- About 200 MB of memory for the running panel - measured at 167 MB under a hard 800 MB limit, with
+  the stacks themselves on top. Building the image is the expensive part, about 1 GB: the bundler
+  holds the whole module graph, and no flag brings that under roughly 900 MB. The installer
+  downloads a published image when there is one, so a 1 GB server only has to run the panel, not
+  build it; below about 1.2 GB of memory and swap the installer says so before it starts a build
+  that the out-of-memory killer would end halfway.
 
 ## Install
 
 On a fresh server, one script does the whole thing - it checks what is missing, asks for the port
-and the directories, shows them for review, builds the image, starts the panel and prints the
-address and the one-use setup code:
+and the directories, shows them for review, downloads the image (or builds it when there is none to
+download), starts the panel and prints the address and the one-use setup code:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mazixs/dockge2/main/install.sh -o install.sh
@@ -61,6 +67,8 @@ bash install.sh --yes --port 8080 --stacks-dir /srv/stacks --dir /opt/dockge2
 | `--dir` | `/opt/dockge2` | Where this repository is checked out. |
 | `--data-dir` | `<install dir>/data` | SQLite database, settings and secrets. |
 | `--branch` | `main` | Branch to install from. On an update it is the branch the checkout is already on. |
+| `--image` | `ghcr.io/mazixs/dockge2:latest` | The published image to run. The installer downloads it and only builds when the download fails; with `--image` given by hand it stops instead of quietly building something else. |
+| `--build` | - | Build from the sources and do not look for a published image. This is how you install the code of a branch rather than the last release - and the one case that needs the full gigabyte. |
 | `--update` | - | Rebuild the installation the script lives in, without asking for the directories again. |
 | `--yes` | - | Take the defaults and ask nothing. Required when there is no terminal at all, such as in cron. |
 
@@ -99,8 +107,14 @@ sudo mkdir -p /opt/stacks
 git clone https://github.com/mazixs/dockge2.git /opt/dockge2
 cd /opt/dockge2
 cp .env.example .env     # ports, paths, proxy settings - read the comments
-docker compose -f docker-compose.yml up -d --build --wait
+docker compose -f docker-compose.yml up -d --pull always --wait
 ```
+
+That runs the published image, which `.env.example` already names. To build from the sources
+instead - a branch, or a change of your own - set `DOCKGE_IMAGE=dockge2:latest` in the `.env` so the
+result keeps a local name, and swap the last line for
+`docker compose -f docker-compose.yml up -d --build --wait`. Building needs about 1 GB of memory;
+see [requirements](#requirements).
 
 `docker-compose.yml` is the production configuration and it is documented line by line inside the
 file. Three settings deserve attention before the first start:
@@ -221,8 +235,9 @@ rather than configuring it, so it is the last resort, not the first.
 
 ## How to Update
 
-The deployment is a Git checkout and the image is built from it, so updating means rebuilding.
-The installer does exactly that and needs nothing else on the host:
+The deployment is a Git checkout, so updating fast-forwards it and then puts the new image in
+place - downloaded when there is one published, built when there is not. The installer does exactly
+that and needs nothing else on the host:
 
 ```bash
 cd /opt/dockge2
@@ -233,15 +248,21 @@ cd /opt/dockge2
 updates from its own directory without naming it again.
 
 The same sequence is also available as a bundled command, which prints what it will do first. It is
-fixed and non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then
-`docker compose up -d --build --wait --wait-timeout 180` - the health check starts after 60
-seconds and repeats every 60, so a minute is not enough:
+fixed and non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then either
+`docker compose pull` and `docker compose up -d --wait --wait-timeout 180`, or
+`docker compose up -d --build --wait --wait-timeout 180`. The health check starts after 60 seconds
+and repeats every 60, so a minute is not enough:
 
 ```bash
 cd /opt/dockge2
 npm run update-docker -- --dry-run   # prints the commands and changes nothing
 npm run update-docker
 ```
+
+Which of the two it is comes from `DOCKGE_IMAGE` in your `.env`: a name with a registry in it
+(`ghcr.io/mazixs/dockge2:latest`) is downloaded, a plain one (`dockge2:latest`) was built here and
+is built again. `--pull` and `--build` say it outright. Downloading is what keeps an update inside
+the memory a small server has; building needs about 1 GB, see [requirements](#requirements).
 
 It fast-forwards `origin/main` by default; a deployment that tracks another branch names it with
 `npm run update-docker -- --branch=release/2.0`.

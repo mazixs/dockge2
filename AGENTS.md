@@ -181,6 +181,16 @@ require recovery from `.git/dockge-recovery-*`.
   explicitly.
 - Stack paths inside and outside the container have to be identical. Do not change a user's
   directories or env files to demonstrate a design.
+- `docker/Dockerfile` is self-contained: it builds the frontend and the healthcheck itself and
+  pulls only official `node` and `golang`. Nothing has to be built or pushed beforehand, so a bare
+  server needs Docker and nothing else. Do not reintroduce a base image that lives only in a
+  registry - it makes a fresh install depend on someone having pushed it.
+- The image is published by `.github/workflows/release.yml` on a `v*` tag, to
+  `ghcr.io/mazixs/dockge2` with the built-in token. Docker Hub is optional and skipped without
+  credentials. `latest` is only moved by a tag without a dash in it.
+- Memory is the reason the image is published at all: the frontend bundler peaks near 1 GB and no
+  flag brings it under about 900 MB, while running the panel takes about 170 MB. Installs and
+  updates download the image and build only when there is none, so a 1 GB server stays usable.
 - `build:docker` and the release scripts push to a registry. They are not a routine check: read the
   command before running it.
 
