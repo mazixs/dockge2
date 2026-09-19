@@ -69,6 +69,7 @@ case "$*" in
     "compose -f docker-compose.yml ps --format {{.Name}} {{.State}} {{.Status}}") echo "dockge2-dockge-1 running Up 2 minutes (unhealthy)" ;;
     "compose -f docker-compose.yml logs --tail 40") echo "stub log line" ;;
     "compose -f docker-compose.yml exec -T dockge cat /app/data/bootstrap-token") echo "stub-setup-code" ;;
+    "system df --format {{.Type}}"*) printf 'Images\t867MB\nBuild Cache\t%s\n' "${STUB_CACHE:-3.055GB}" ;;
 esac
 exit 0
 EOF
@@ -176,6 +177,27 @@ scenario_fresh_install() {
     expect_grep "compose -f docker-compose.yml up -d --wait --wait-timeout 180" "$STUB_LOG" "up with a deadline"
     expect_no_grep "docker tag" "$STUB_LOG" "no rollback tag when there was no image"
     expect_exists "$WORK/stacks" "stacks dir created"
+}
+
+scenario_build_says_what_the_cache_costs() {
+    # A build leaves gigabytes of cache behind, which is a surprise on the small
+    # disk the published image exists to spare. Saying it is all the installer
+    # does - pruning is the user's call
+    fresh "$WORK/cache"
+    expect_grep "Build cache:" "$OUT" "the cache is named after a build"
+    expect_grep "3.055GB" "$OUT" "with its size"
+    expect_grep "docker builder prune" "$OUT" "and how to free it"
+    expect_no_grep "builder prune -f$" "$STUB_LOG" "but nothing is pruned"
+}
+
+scenario_a_downloaded_image_leaves_no_cache_to_mention() {
+    # A prefix assignment in front of a function call outlives the call in bash,
+    # so the variable is passed to run the way every other scenario does it
+    rm -f "$WORK/tags"
+    STUB_HAS_IMAGE=0 STUB_PULL_OK=1 run "$INSTALLER" --yes --port "$PORT" --dir "$WORK/cache2" --stacks-dir "$WORK/stacks"
+    expect_eq "$CODE" 0 "exit code"
+    expect_grep "Downloaded" "$OUT" "the image came from the registry"
+    expect_no_grep "Build cache:" "$OUT" "nothing was built, so no cache is mentioned"
 }
 
 scenario_no_terminal_without_yes() {

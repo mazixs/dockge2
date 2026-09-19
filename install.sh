@@ -789,5 +789,18 @@ cat >&2 <<NEXT
   Stop:           docker compose -f $INSTALL_DIR/docker-compose.yml down
 NEXT
 if [ -n "$ROLLBACK_IMAGE" ]; then
-    printf '  Previous image: %s (kept until the next update makes a newer one)\n\n' "$ROLLBACK_IMAGE" >&2
+    printf '  Previous image: %s (kept until the next update makes a newer one)\n' "$ROLLBACK_IMAGE" >&2
 fi
+
+# A build leaves its cache behind, and on a small disk that is a surprise worth
+# naming: measured at about 3 GB after one build on a clean Debian server.
+# Only said, never done - the cache is what makes the next update quick, and
+# pruning it is the user's call
+if [ "$FROM_REGISTRY" = "0" ]; then
+    CACHE_SIZE="$($DOCKER system df --format '{{.Type}}\t{{.Size}}' 2>/dev/null | awk -F'\t' '/Build Cache/ { print $2 }')"
+    if [ -n "$CACHE_SIZE" ]; then
+        printf '  Build cache:    %s left behind. It makes the next update quick; free it with\n' "$CACHE_SIZE" >&2
+        printf '                  docker builder prune -f\n' >&2
+    fi
+fi
+printf '\n' >&2
