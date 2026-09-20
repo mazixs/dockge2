@@ -28,7 +28,7 @@ async function dockerInStack(stack : Stack, args : readonly string[]) : Promise<
 }
 
 test("a bound secret reaches the container through /run/secrets", { skip }, async () => {
-    await withDatabase(async () => {
+    await withDatabase(async ({ dataDir }) => {
         const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-it-secret-"));
         // The directory name is the compose project name, so it has to be unique on the machine
         const stackName = `dockge-it-secret-${process.pid}`;
@@ -43,7 +43,8 @@ test("a bound secret reaches the container through /run/secrets", { skip }, asyn
     command: ["sh", "-c", "sha256sum /run/secrets/db_password | cut -d' ' -f1"]
 `);
 
-        const stack = await Stack.getStack({ stacksDir } as never, stackName);
+        const stack = await Stack.getStack({ stacksDir,
+            config: { dataDir } } as never, stackName);
         const secretValue = "s3cr3t-value";
         const expectedHash = createHash("sha256").update(secretValue).digest("hex");
 
@@ -76,7 +77,7 @@ test("a bound secret reaches the container through /run/secrets", { skip }, asyn
 });
 
 test("the env file order decides which value compose interpolates", { skip }, async () => {
-    await withDatabase(async () => {
+    await withDatabase(async ({ dataDir }) => {
         const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-it-env-"));
         const stackName = `dockge-it-env-${process.pid}`;
         const stackDir = path.join(stacksDir, stackName);
@@ -90,7 +91,8 @@ test("the env file order decides which value compose interpolates", { skip }, as
         await writeFile(path.join(stackDir, ".env"), "STAGE=base\n");
         await writeFile(path.join(stackDir, ".env.override"), "STAGE=override\n");
 
-        const stack = await Stack.getStack({ stacksDir } as never, stackName);
+        const stack = await Stack.getStack({ stacksDir,
+            config: { dataDir } } as never, stackName);
 
         try {
             await stack.setFileConfig({
@@ -127,7 +129,7 @@ test("the env file order decides which value compose interpolates", { skip }, as
 });
 
 test("a compose file that Docker refuses is never deployed", { skip }, async () => {
-    await withDatabase(async () => {
+    await withDatabase(async ({ dataDir }) => {
         const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-it-invalid-"));
         const stackName = `dockge-it-invalid-${process.pid}`;
         const stackDir = path.join(stacksDir, stackName);
@@ -139,7 +141,8 @@ test("a compose file that Docker refuses is never deployed", { skip }, async () 
     restart: always
 `);
 
-        const stack = await Stack.getStack({ stacksDir } as never, stackName);
+        const stack = await Stack.getStack({ stacksDir,
+            config: { dataDir } } as never, stackName);
 
         try {
             await assert.rejects(stack.validateComposeConfig(), (error : unknown) => {

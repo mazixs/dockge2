@@ -1,6 +1,7 @@
 # This is a .gitignore style file for 'GrantBirki/json-yaml-validate' Action workflow
 
-# tsconfig.json is JSONC: TypeScript reads comments there, a strict JSON parser does not.
-# The comments explain why the settings are what they are, and they are worth more than
-# a check that only ever said this one file is not the format it was never in.
-tsconfig.json
+# Every tsconfig here is JSONC: TypeScript reads comments there, a strict JSON parser does
+# not. The comments explain why the settings are what they are, and they are worth more
+# than a check that only ever said these files are not the format they were never in.
+# The pattern covers `tsconfig.vue.json` and anything added beside it later.
+tsconfig*.json

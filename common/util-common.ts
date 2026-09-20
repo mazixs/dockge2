@@ -4,11 +4,13 @@
 import yaml, { Pair, isCollection, isNode, isPair, isScalar, type Node } from "yaml";
 import type { DotenvParseOutput } from "dotenv";
 
-// Init dayjs
+// Init dayjs. The plugins are named with their extension because dayjs publishes no
+// "exports" map: a bundler finds them either way, but Node resolving this package as
+// the ES module it declares itself to be only finds the file that is actually there
 import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
-import relativeTime from "dayjs/plugin/relativeTime";
+import timezone from "dayjs/plugin/timezone.js";
+import utc from "dayjs/plugin/utc.js";
+import relativeTime from "dayjs/plugin/relativeTime.js";
 import { replaceVariablesSync } from "@inventage/envsubst";
 
 dayjs.extend(utc);
