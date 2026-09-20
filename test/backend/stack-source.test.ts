@@ -201,8 +201,8 @@ test("время проверки берется из FETCH_HEAD, а не из �
 });
 
 test("учетные данные из адреса удаляются, потому что адрес виден в интерфейсе", () => {
-    assert.equal(cleanRemote("https://user:token@github.com/mazix/stack.git"), "github.com/mazix/stack");
-    assert.equal(cleanRemote("git@github.com:mazix/stack.git"), "github.com/mazix/stack");
-    assert.equal(cleanRemote("https://github.com/mazix/stack/"), "github.com/mazix/stack");
+    assert.equal(cleanRemote("https://user:token@github.com/example/stack.git"), "github.com/example/stack");
+    assert.equal(cleanRemote("git@github.com:example/stack.git"), "github.com/example/stack");
+    assert.equal(cleanRemote("https://github.com/example/stack/"), "github.com/example/stack");
     assert.equal(cleanRemote(""), "");
 });
