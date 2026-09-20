@@ -107,6 +107,95 @@ function publicToolSchema(value : unknown) : { type: "object" } {
 }
 
 /** Install separate cookie administration and Bearer MCP boundaries before the SPA fallback. */
+/** What the audit says a call was about, as far as it can be trusted */
+interface AuditTarget {
+    server_id? : string;
+    stack_id? : string;
+    request_id? : string;
+    action? : string;
+}
+
+/**
+ * Read back what a call was about, for the audit log.
+ *
+ * Only values this server recognises are recorded: an identifier the caller invented is
+ * not written down as if the panel had confirmed it. An operation identifier is the
+ * exception, because the stored operation itself says what it was about.
+ * @param identity Who called
+ * @param args Arguments of the call
+ * @param value What the tool answered
+ * @returns Fields the audit log may keep
+ */
+async function auditTarget(identity : MachineIdentity, args : Record<string, unknown>, value : unknown) : Promise<AuditTarget> {
+    const metadata = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const parameters = args.parameters && typeof args.parameters === "object" ? args.parameters as Record<string, unknown> : args;
+    const serverId = metadata.server_id ?? parameters.server_id;
+    const stackId = metadata.stack_id ?? parameters.stack_id;
+
+    if (typeof args.operation_id === "string") {
+        const operation = await Database.getKnex()("mcp_operation").where({ id: args.operation_id,
+            key_id: identity.keyId }).first();
+
+        if (operation) {
+            return { server_id: operation.server_id,
+                stack_id: operation.stack_id,
+                request_id: operation.request_id,
+                action: operation.action };
+        }
+    }
+    return {
+        ...(typeof serverId === "string" && identity.servers.includes(serverId) ? { server_id: serverId } : {}),
+        ...(typeof stackId === "string" && /^[a-f0-9-]{36}$/.test(stackId) ? { stack_id: stackId } : {}),
+        ...(typeof args.request_id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(args.request_id) ? { request_id: args.request_id } : {}),
+        ...(typeof metadata.action === "string" && /^[a-z_]{1,64}$/.test(metadata.action) ? { action: metadata.action } : {}),
+    };
+}
+
+/**
+ * What a refused call is told.
+ *
+ * Two refusals name the way forward, because they are conditions the caller can fix.
+ * Everything else is one sentence: a machine key learns nothing from the difference
+ * between a missing stack and a stack it may not see.
+ * @param error Why the call did not succeed
+ * @returns The sentence to send back
+ */
+function deniedMessage(error : unknown) : string {
+    if (error instanceof Error && error.message === "mcpApprovalHiddenFile") {
+        return "Approval requires a visible file comparison. Hidden env/secret file changes cannot be approved through this key.";
+    }
+    if (error instanceof Error && error.message === "mcpCloneReviewRequired") {
+        return "Clone with deploy=false first, then prepare stack_deploy and review the actual Compose before approval.";
+    }
+    return "Access denied or observation unavailable";
+}
+
+/**
+ * Write down that a call happened, and keep the log from growing without end.
+ *
+ * The name of an unknown tool is not recorded as given: the log is read by people, and
+ * an invented name has nothing to say to them.
+ * @param entry What happened
+ * @returns {void}
+ */
+async function recordCall(entry : { at : number; key_id : string; tool : string; target : AuditTarget; outcome : string; durationMs : number }) : Promise<void> {
+    const known = [ ...MCP_READ_TOOLS, "operation_prepare", "operation_apply", "operation_status", "stack_files_read", "git_preview_result", "container_logs" ];
+    const knex = Database.getKnex();
+
+    await knex("mcp_audit").insert({ at: entry.at,
+        key_id: entry.key_id,
+        tool: known.includes(entry.tool) ? entry.tool : "unknown",
+        ...entry.target,
+        outcome: entry.outcome,
+        duration_ms: entry.durationMs });
+    await knex("mcp_audit").where("at", "<", Date.now() - 30 * 86_400_000).delete();
+    const cutoff = await knex("mcp_audit").orderBy("id", "desc").offset(9999).first();
+
+    if (cutoff) {
+        await knex("mcp_audit").where("id", "<", cutoff.id).delete();
+    }
+}
+
 export function mountMcp(server : DockgeServer) {
     let operations : McpOperations | undefined;
     let filesGit : ReturnType<typeof registerMcpFilesGit> | undefined;
@@ -414,32 +503,14 @@ export function mountMcp(server : DockgeServer) {
         });
         sdk.setRequestHandler(CallToolRequestSchema, async (call) => {
             const started = Date.now();
+            const args = call.params.arguments ?? {};
             let outcome = "denied";
-            let target : { server_id?: string; stack_id?: string; request_id?: string; action?: string } = {};
+            let target : AuditTarget = {};
             try {
                 const identity = await keys.authenticate(response.locals.secret);
-                const value = await dispatch(identity, call.params.name, call.params.arguments ?? {});
-                const args = call.params.arguments ?? {};
-                const metadata = value && typeof value === "object" ? value as Record<string, unknown> : {};
-                const parameters = args.parameters && typeof args.parameters === "object" ? args.parameters as Record<string, unknown> : args;
-                const serverId = metadata.server_id ?? parameters.server_id;
-                const stackId = metadata.stack_id ?? parameters.stack_id;
-                target = {
-                    ...(typeof serverId === "string" && identity.servers.includes(serverId) ? { server_id: serverId } : {}),
-                    ...(typeof stackId === "string" && /^[a-f0-9-]{36}$/.test(stackId) ? { stack_id: stackId } : {}),
-                    ...(typeof args.request_id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(args.request_id) ? { request_id: args.request_id } : {}),
-                    ...(typeof metadata.action === "string" && /^[a-z_]{1,64}$/.test(metadata.action) ? { action: metadata.action } : {}),
-                };
-                if (typeof args.operation_id === "string") {
-                    const operation = await Database.getKnex()("mcp_operation").where({ id: args.operation_id,
-                        key_id: identity.keyId }).first();
-                    if (operation) {
-                        target = { server_id: operation.server_id,
-                            stack_id: operation.stack_id,
-                            request_id: operation.request_id,
-                            action: operation.action };
-                    }
-                }
+                const value = await dispatch(identity, call.params.name, args);
+
+                target = await auditTarget(identity, args, value);
                 // Revocation during a slow read also suppresses delivery of its result.
                 const fresh = await revalidateMcpIdentity(identity.keyId);
                 if (fresh.policyVersion !== identity.policyVersion || fresh.role !== identity.role || fresh.userId !== identity.userId || JSON.stringify(fresh.resources) !== JSON.stringify(identity.resources) || JSON.stringify(fresh.actions) !== JSON.stringify(identity.actions) || fresh.mode !== identity.mode) {
@@ -455,20 +526,14 @@ export function mountMcp(server : DockgeServer) {
             } catch (error) {
                 return { isError: true,
                     content: [{ type: "text" as const,
-                        text: error instanceof Error && error.message === "mcpApprovalHiddenFile" ? "Approval requires a visible file comparison. Hidden env/secret file changes cannot be approved through this key." : error instanceof Error && error.message === "mcpCloneReviewRequired" ? "Clone with deploy=false first, then prepare stack_deploy and review the actual Compose before approval." : "Access denied or observation unavailable" }] };
+                        text: deniedMessage(error) }] };
             } finally {
-                const knex = Database.getKnex();
-                await knex("mcp_audit").insert({ at: Date.now(),
+                await recordCall({ at: Date.now(),
                     key_id: (response.locals.machine as MachineIdentity).keyId,
-                    tool: [ ...MCP_READ_TOOLS, "operation_prepare", "operation_apply", "operation_status", "stack_files_read", "git_preview_result", "container_logs" ].includes(call.params.name) ? call.params.name : "unknown",
-                    ...target,
+                    tool: call.params.name,
+                    target,
                     outcome,
-                    duration_ms: Date.now() - started });
-                await knex("mcp_audit").where("at", "<", Date.now() - 30 * 86_400_000).delete();
-                const cutoff = await knex("mcp_audit").orderBy("id", "desc").offset(9999).first();
-                if (cutoff) {
-                    await knex("mcp_audit").where("id", "<", cutoff.id).delete();
-                }
+                    durationMs: Date.now() - started });
             }
         });
         response.once("close", () => {

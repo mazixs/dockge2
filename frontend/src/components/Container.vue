@@ -171,8 +171,10 @@ export default defineComponent({
             type: Boolean,
             default: false,
         },
+        /** Containers of this service, as docker reports them; null while nothing is known */
         serviceStatus: {
-            type: Object,
+            /** @type {import("vue").PropType<import("../../../common/compose-status").ContainerInstanceStatus[] | null>} */
+            type: Array,
             default: null,
         },
         dockerStats: {

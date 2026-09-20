@@ -6,6 +6,19 @@
  * before the first slash that looks like a host is the registry.
  */
 
+/** What is known about one image of a stack */
+export interface ImageUpdate {
+    image : string;
+    /** Digest the local image was pulled by, empty when it is not pulled */
+    local : string;
+    /** Digest the registry serves, empty when it could not be read */
+    remote : string;
+    /** True when the registry has another image, null when it cannot be told */
+    newer : boolean | null;
+    /** Why the answer is unknown: notPulled, registryUnreachable or empty */
+    reason : string;
+}
+
 /** Registry of one image with a human readable name */
 export interface RegistryCount {
     /** Display name: "Docker Hub", "ghcr.io", "registry.gitlab.com" */

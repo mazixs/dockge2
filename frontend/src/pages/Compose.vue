@@ -83,7 +83,7 @@
                                 <button v-if="!isAdd" class="btn btn-sm btn-normal" :disabled="processing" @click="discardStack">{{ $t("discardStack") }}</button>
                             </template>
 
-                            <button v-else class="btn btn-sm btn-primary" :disabled="processing" @click="enableEditMode">
+                            <button v-else class="btn btn-sm btn-primary" :disabled="processing || !filesAreReadable" @click="enableEditMode">
                                 <font-awesome-icon icon="pen" />{{ $t("editStack") }}
                             </button>
                         </div>
@@ -99,13 +99,19 @@
                                 dark
                                 tab
                                 :disabled="!isEditMode"
-                                :hasFocus="editorFocus"
                                 @change="yamlCodeChange"
                             />
                         </div>
 
                         <p class="panel-foot kept"><ShieldCheck />{{ $t("fileSourceNote") }}</p>
                     </section>
+
+                    <!-- Файл, который не удалось прочитать, не показывается пустым: править
+                         его нельзя, пока сервер не сможет его прочитать -->
+                    <div v-if="!filesAreReadable" class="alert alert-danger" role="alert">
+                        <font-awesome-icon icon="triangle-exclamation" />
+                        {{ $t("stackFilesUnreadable", { files: unreadableFiles }) }}
+                    </div>
 
                     <!-- Ошибка разбора называет строку и причину прямо под файлом -->
                     <p v-if="isEditMode && yamlError" class="yaml-error" role="alert">
@@ -164,7 +170,6 @@
                                 dark
                                 tab
                                 :disabled="!isEditMode"
-                                :hasFocus="editorFocus"
                                 @change="yamlCodeChange"
                             />
                         </div>
@@ -186,8 +191,8 @@
                                 :key="name"
                                 :name="name"
                                 :is-edit-mode="isEditMode && structuredEditsEnabled"
-                                :first="name === Object.keys(jsonConfig.services)[0]"
-                                :serviceStatus="serviceStatusList[name]"
+                                :first="name === Object.keys(jsonConfig.services ?? {})[0]"
+                                :serviceStatus="serviceStatusList[name] ?? null"
                                 :dockerStats="dockerStats"
                                 :processing="processing"
                                 @start-service="startService"
@@ -260,11 +265,25 @@
             <div v-if="!stack.isManagedByDockge && !processing">
                 {{ $t("stackNotManagedByDockgeMsg") }}
             </div>
+
+            <!-- Файл изменился вне редактора: выбирают между версией на сервере и своей -->
+            <Confirm
+                ref="conflictConfirm"
+                btn-style="btn-primary"
+                :title="$t('stackSaveConflictTitle')"
+                :yes-text="$t('stackSaveReload')"
+                :no-text="$t('stackSaveOverwrite')"
+                @yes="reloadAfterConflict"
+                @no="overwriteAfterConflict"
+            >
+                {{ $t("stackSaveConflictText", { file: conflictFile }) }}
+            </Confirm>
         </div>
     </transition>
 </template>
 
 <script>
+// @ts-check
 import CodeMirror from "vue-codemirror6";
 import { yaml } from "@codemirror/lang-yaml";
 import { python } from "@codemirror/lang-python";
@@ -284,8 +303,36 @@ import StackFilesEditor from "../components/StackFilesEditor.vue";
 import SecretEditor from "../components/SecretEditor.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import ShieldCheck from "../components/ShieldCheck.vue";
+import Confirm from "../components/Confirm.vue";
 import dotenv from "dotenv";
-import { ref } from "vue";
+import { markRaw, ref } from "vue";
+import { RequestTracker } from "../request-tracker";
+import { errorText } from "../util-frontend";
+
+/**
+ * The stack this editor is on.
+ *
+ * The texts and the names are always there, empty until something fills them: an editor
+ * exists before the server answers, and a field that appears only with the answer turns
+ * every use of it into a guess.
+ * @typedef {Partial<import("../../../common/types/stack").StackDTO> & {
+ *     name : string,
+ *     composeYAML : string,
+ *     composeENV : string,
+ *     endpoint : string,
+ * }} EditorStack
+ */
+
+/**
+ * A stack nobody has loaded yet
+ * @returns {EditorStack} Empty stack
+ */
+function emptyStack() {
+    return { name: "",
+        composeYAML: "",
+        composeENV: "",
+        endpoint: "" };
+}
 
 const template = `
 services:
@@ -297,10 +344,17 @@ services:
 `;
 const envDefault = "# VARIABLE=value #comment";
 
-let yamlErrorTimeout = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let yamlErrorTimeout;
 
-let serviceStatusTimeout = null;
-let dockerStatsTimeout = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let serviceStatusTimeout;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let dockerStatsTimeout;
+
+// Развертывание идет столько, сколько идет docker compose: подтверждение ждут долго,
+// но не бесконечно - иначе потерянный ответ оставил бы кнопки заблокированными
+const SAVE_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
 export default {
     components: {
@@ -311,6 +365,7 @@ export default {
         SecretEditor,
         InterfaceIcon,
         ShieldCheck,
+        Confirm,
     },
     beforeRouteUpdate(to, from, next) {
         this.exitConfirm(next);
@@ -336,12 +391,34 @@ export default {
             type: String,
             default: "",
         },
+
+        /**
+         * Состояние сервисов, когда его уже читает страница стека.
+         * Вкладка файлов не заводит собственный опрос того же самого: два опроса
+         * одного стека удваивали и запросы к серверу, и вызовы docker stats
+         */
+        statusList: {
+            type: Object,
+            default: null,
+        },
+
+        /** Расход контейнеров, оттуда же */
+        statsList: {
+            type: Object,
+            default: null,
+        },
     },
     // Страница стека слушает ход команды: ее панель показывает вывод редактора
     emits: [ "run-start", "run-end" ],
     setup() {
         const editorFocus = ref(false);
 
+        /**
+         * Remember whether the text editor has the keyboard
+         * @param {import("@codemirror/state").EditorState} state Editor state the change belongs to
+         * @param {boolean} focusing Whether the editor took the focus
+         * @returns {null} No effect is added to the transaction
+         */
         const focusEffectHandler = (state, focusing) => {
             editorFocus.value = focusing;
             return null;
@@ -365,20 +442,23 @@ export default {
             extensionsEnv,
             editorFocus };
     },
-    yamlDoc: null,  // For keeping the yaml comments
     data() {
         return {
+            /** @type {import("../../../common/compose-editor").ComposeModel} */
             jsonConfig: {},
+            /** @type {import("../../../common/compose-editor").ComposeModel} */
             envsubstJSONConfig: {},
             yamlError: "",
             processing: true,
             showProgressTerminal: false,
             progressTerminalRows: PROGRESS_TERMINAL_ROWS,
-            stack: {
-
-            },
+            /** @type {EditorStack} */
+            stack: emptyStack(),
+            /** @type {import("../../../common/agent-events").ServiceStatusList} */
             serviceStatusList: {},
+            /** @type {import("../../../common/types/stack").StackFileInventory | null} */
             fileInventory: null,
+            /** @type {import("../../../common/compose-editor").ComposeAnalysis | null} */
             composeAnalysis: null,
             /** Text the current model and analysis were built from */
             analysedSource: "",
@@ -388,6 +468,7 @@ export default {
             applyingExternal: false,
             /** Set when the user removed the last network by hand */
             explicitNetworkRemoval: false,
+            /** @type {import("../../../common/util-common").LooseObject} */
             dockerStats: {},
             isEditMode: false,
             // Значения .env показываются только по просьбе: см. панель env в шаблоне
@@ -396,6 +477,28 @@ export default {
             newContainerName: "",
             stopServiceStatusTimeout: false,
             stopDockerStatsTimeout: false,
+            /**
+             * Чьи ответы относятся к открытому стеку: редактор переживает смену стека
+             * во вкладке, и один запрос каждого вида идет за раз
+             */
+            requests: markRaw(new RequestTracker()),
+            /**
+             * Hashes of the files this editor loaded, sent back so a stale save is refused
+             * @type {import("../../../common/types/stack").StackFileBaseline | null}
+             */
+            fileBaseline: null,
+            /**
+             * Files the server could not read, so this editor must not save over them
+             * @type {import("../../../common/types/stack").StackFileReadIssue[]}
+             */
+            readIssues: [],
+            /** File a refused save named, shown while the conflict dialog is open */
+            conflictFile: "",
+            /**
+             * What the conflict dialog repeats once the user chooses to overwrite
+             * @type {"saveStack" | "deployStack" | null}
+             */
+            pendingSave: null,
         };
     },
     computed: {
@@ -403,13 +506,20 @@ export default {
             return this.$root.endpointDisplayFunction(this.endpoint);
         },
 
+        /**
+         * Links of the stack, as the x-dockge extension of the compose file lists them
+         * @returns {{ display : string, url : string }[]} Links to show
+         */
         urls() {
-            if (!this.envsubstJSONConfig["x-dockge"] || !this.envsubstJSONConfig["x-dockge"].urls || !Array.isArray(this.envsubstJSONConfig["x-dockge"].urls)) {
+            const configured = this.envsubstJSONConfig["x-dockge"]?.urls;
+
+            if (!Array.isArray(configured)) {
                 return [];
             }
 
-            let urls = [];
-            for (const url of this.envsubstJSONConfig["x-dockge"].urls) {
+            /** @type {{ display : string, url : string }[]} */
+            const urls = [];
+            for (const url of configured) {
                 let display;
                 try {
                     let obj = new URL(url);
@@ -524,8 +634,28 @@ export default {
             return this.jsonConfig.networks;
         },
 
+        /**
+         * Agent the stack lives on, empty for this panel
+         * @returns {string} Name of the agent
+         */
         endpoint() {
-            return this.stack.endpoint || this.endpointName || this.$route.params.endpoint || "";
+            return this.stack.endpoint || this.endpointName || String(this.$route.params.endpoint ?? "");
+        },
+
+        /**
+         * Whether every file of this stack could be read
+         * @returns {boolean} True when nothing failed to read
+         */
+        filesAreReadable() {
+            return (this.readIssues ?? []).length === 0;
+        },
+
+        /**
+         * Files the server could not read, as one readable list
+         * @returns {string} File names separated by commas
+         */
+        unreadableFiles() {
+            return (this.readIssues ?? []).map((issue) => `${issue.fileName} (${issue.code})`).join(", ");
         },
 
         /** Куда возвращаться после сохранения: инспектор стека, а не редактор */
@@ -592,7 +722,25 @@ export default {
 
         $route(to, from) {
 
-        }
+        },
+
+        statusList: {
+            immediate: true,
+            handler(value) {
+                if (this.embedded && value) {
+                    this.serviceStatusList = value;
+                }
+            },
+        },
+
+        statsList: {
+            immediate: true,
+            handler(value) {
+                if (this.embedded && value) {
+                    this.dockerStats = value;
+                }
+            },
+        },
     },
     mounted() {
         if (!this.$root.canManageStacks) {
@@ -631,15 +779,25 @@ export default {
             this.yamlCodeChange();
 
         } else {
-            this.stack.name = this.embedded ? this.stackName : this.$route.params.stackName;
+            this.stack.name = this.embedded ? this.stackName : String(this.$route.params.stackName ?? "");
             this.loadStack();
         }
 
-        this.requestServiceStatus();
-        this.requestDockerStats();
+        // Встроенный редактор получает состояние от страницы стека, которая и так
+        // его опрашивает: собственный опрос был бы вторым таким же
+        if (!this.embedded) {
+            this.requestServiceStatus();
+            this.requestDockerStats();
+        }
     },
     unmounted() {
-
+        // Уход со страницы не всегда проходит через exitAction: таймер, оставшийся
+        // от размонтированного редактора, опрашивал бы сервер до перезагрузки вкладки
+        this.requests.invalidate();
+        this.stopServiceStatusTimeout = true;
+        this.stopDockerStatsTimeout = true;
+        clearTimeout(serviceStatusTimeout);
+        clearTimeout(dockerStatsTimeout);
     },
     methods: {
         startServiceStatusTimeout() {
@@ -665,7 +823,7 @@ export default {
                 return;
             }
 
-            this.$root.emitAgent(this.endpoint, "getStackFiles", this.stack.name, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "getStackFiles", [ this.stack.name ]).then((res) => {
                 if (res.ok) {
                     this.fileInventory = res.inventory;
                 }
@@ -674,13 +832,13 @@ export default {
 
         /**
          * Store a new file selection and reload the stack, because the shown texts may change
-         * @param {object} config Selection from the editor
+         * @param {import("../../../common/types/stack").StackFileConfig} config Selection from the editor
          * @returns {void}
          */
         saveFileSelection(config) {
             this.processing = true;
 
-            this.$root.emitAgent(this.endpoint, "setStackFiles", this.stack.name, config, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "setStackFiles", [ this.stack.name, config ]).then((res) => {
                 this.processing = false;
                 this.$root.toastRes(res);
 
@@ -712,7 +870,7 @@ export default {
         createEnvFile(fileName) {
             this.processing = true;
 
-            this.$root.emitAgent(this.endpoint, "saveEnvFile", this.stack.name, fileName, "", (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "saveEnvFile", [ this.stack.name, fileName, "" ]).then((res) => {
                 this.processing = false;
                 this.$root.toastRes(res);
 
@@ -724,7 +882,7 @@ export default {
 
         /**
          * Refresh the secret list after an authorised secret action
-         * @param {Array<object>} secretFiles New metadata
+         * @param {import("../../../common/types/stack").SecretFileMeta[]} secretFiles New metadata
          * @returns {void}
          */
         onSecretsUpdated(secretFiles) {
@@ -736,11 +894,18 @@ export default {
 
         requestServiceStatus() {
             // Do not request if it is add mode
-            if (this.isAdd) {
+            if (this.isAdd || this.embedded) {
                 return;
             }
 
-            this.$root.emitAgent(this.endpoint, "serviceStatusList", this.stack.name, (res) => {
+            const generation = this.requests.generation;
+
+            this.requests.run("status", generation, () => this.$root.emitAgentRequest(this.endpoint, "serviceStatusList", [ this.stack.name ])).then((res) => {
+                // null: запрос не отправлялся или ответ относится к прежнему стеку
+                if (!res) {
+                    return;
+                }
+
                 if (res.ok) {
                     this.serviceStatusList = res.serviceStatusList;
                 }
@@ -751,7 +916,17 @@ export default {
         },
 
         requestDockerStats() {
-            this.$root.emitAgent(this.endpoint, "dockerStats", (res) => {
+            if (this.embedded) {
+                return;
+            }
+
+            const generation = this.requests.generation;
+
+            this.requests.run("stats", generation, () => this.$root.emitAgentRequest(this.endpoint, "dockerStats", [])).then((res) => {
+                if (!res) {
+                    return;
+                }
+
                 if (res.ok) {
                     this.dockerStats = res.dockerStats;
                 }
@@ -761,6 +936,11 @@ export default {
             });
         },
 
+        /**
+         * Ask before leaving with unsaved edits
+         * @param {import("vue-router").NavigationGuardNext} next How the router is answered
+         * @returns {void}
+         */
         exitConfirm(next) {
             if (this.isEditMode) {
                 if (confirm(this.$t("confirmLeaveStack"))) {
@@ -792,10 +972,10 @@ export default {
          */
         async copyEnv() {
             try {
-                await navigator.clipboard.writeText(this.stack.composeENV ?? "");
+                await navigator.clipboard.writeText(this.stack.composeENV);
                 this.$root.toastSuccess(this.$t("copiedToClipboard"));
             } catch (e) {
-                this.$root.toastError(e.message);
+                this.$root.toastError(errorText(e));
             }
         },
 
@@ -806,22 +986,30 @@ export default {
          */
         async copyCompose() {
             try {
-                await navigator.clipboard.writeText(this.stack.composeYAML ?? "");
+                await navigator.clipboard.writeText(this.stack.composeYAML);
                 this.$root.toastSuccess(this.$t("copiedToClipboard"));
             } catch (e) {
-                this.$root.toastError(e.message);
+                this.$root.toastError(errorText(e));
             }
         },
 
+        /**
+         * Point the progress terminal at the output of this stack
+         * @returns {void}
+         */
         bindTerminal() {
-            this.$refs.progressTerminal?.bind(this.endpoint, this.terminalName);
+            const terminal = /** @type {InstanceType<typeof import("../components/Terminal.vue").default> | undefined} */ (this.$refs.progressTerminal);
+            terminal?.bind(this.endpoint, this.terminalName);
         },
 
         loadStack() {
             this.processing = true;
-            this.$root.emitAgent(this.endpoint, "getStack", this.stack.name, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "getStack", [ this.stack.name ]).then((res) => {
                 if (res.ok) {
                     this.stack = res.stack;
+                    // What was read is the version every later save is compared against
+                    this.fileBaseline = res.stack.fileHashes ?? null;
+                    this.readIssues = res.stack.readIssues ?? [];
                     this.yamlCodeChange();
 
                     // What the file on disk had is the reference for the networks rule
@@ -851,49 +1039,130 @@ export default {
                 return;
             }
 
-            let serviceNameList = Object.keys(this.jsonConfig.services);
+            const [ serviceName ] = Object.keys(this.jsonConfig.services);
 
             // Set the stack name if empty, use the first container name
-            if (!this.stack.name && serviceNameList.length > 0) {
-                let serviceName = serviceNameList[0];
-                let service = this.jsonConfig.services[serviceName];
+            if (!this.stack.name && serviceName !== undefined) {
+                const service = this.jsonConfig.services[serviceName];
 
-                if (service && service.container_name) {
-                    this.stack.name = service.container_name;
-                } else {
-                    this.stack.name = serviceName;
-                }
+                this.stack.name = service?.container_name || serviceName;
             }
 
-            this.bindTerminal();
-            // Вывод развертывания идет в терминал прогресса. Во вкладке файлов его
-            // показывает страница стека, поэтому она должна узнать о начале
-            this.$emit("run-start", "deployStack");
+            this.sendStack("deployStack", this.saveBaseline());
+        },
 
-            this.$root.emitAgent(this.stack.endpoint, "deployStack", this.stack.name, this.stack.composeYAML, this.stack.composeENV, this.isAdd, (res) => {
+        /**
+         * Write the files without starting anything
+         * @returns {void}
+         */
+        saveStack() {
+            this.sendStack("saveStack", this.saveBaseline());
+        },
+
+        /**
+         * What this editor read, as the server expects it.
+         * A new stack states that neither file exists yet, so a directory that appeared
+         * in the meantime is a conflict rather than something to write into.
+         * @returns {import("../../../common/types/stack").StackFileBaseline | undefined} Hashes of the loaded files
+         */
+        saveBaseline() {
+            if (this.isAdd) {
+                return { compose: null,
+                    env: null };
+            }
+
+            return this.fileBaseline ?? undefined;
+        },
+
+        /**
+         * Send the files to the server and deal with what comes back.
+         * @param {"saveStack" | "deployStack"} event What the files are sent for
+         * @param {import("../../../common/types/stack").StackFileBaseline | undefined} baseline Version the editor started from, undefined to overwrite
+         * @returns {void}
+         */
+        sendStack(event, baseline) {
+            this.processing = true;
+
+            if (event === "deployStack") {
+                this.bindTerminal();
+                // Вывод развертывания идет в терминал прогресса. Во вкладке файлов его
+                // показывает страница стека, поэтому она должна узнать о начале
+                this.$emit("run-start", "deployStack");
+            }
+
+            this.$root.emitAgentRequest(this.stack.endpoint, event, [
+                this.stack.name,
+                this.stack.composeYAML,
+                this.stack.composeENV,
+                this.isAdd,
+                baseline,
+            ], { timeoutMs: SAVE_REQUEST_TIMEOUT_MS }).then((res) => {
                 this.processing = false;
-                this.$emit("run-end", res?.ok ? "ok" : "failed");
+
+                if (event === "deployStack") {
+                    // Потерянный ответ не значит отказ: файлы могли быть записаны и
+                    // развертывание могло пройти, поэтому итог называется неизвестным
+                    this.$emit("run-end", res.ok ? "ok" : (res.unknown ? "unknown" : "failed"));
+                }
+
+                // Ответ не пришел: правки остаются на экране, а состояние файлов на
+                // сервере перечитывается, потому что оно могло измениться
+                if (!res.ok && res.unknown) {
+                    this.$root.toastRes(res);
+                    this.requestStackFiles();
+                    return;
+                }
+
+                if (!res?.ok && typeof res?.msg === "object" && res.msg.key === "stackSelectionChangedElsewhere") {
+                    // Другой файл, а не другая версия: перезаписывать нечего, потому что
+                    // редактор смотрел на файл, с которым стек больше не работает. Текст
+                    // остается на экране - это правки пользователя, а не сервера
+                    this.$root.toastRes(res);
+                    this.requestStackFiles();
+                    return;
+                }
+
+                if (!res?.ok && typeof res?.msg === "object" && res.msg.key === "stackFileChangedElsewhere") {
+                    // Someone else wrote the file. The choice belongs to the user, so
+                    // neither version is applied until they pick one.
+                    this.conflictFile = String(res.msg.values?.file ?? "");
+                    this.pendingSave = event;
+                    const dialog = /** @type {InstanceType<typeof Confirm>} */ (this.$refs.conflictConfirm);
+                    dialog.show();
+                    return;
+                }
+
                 this.$root.toastRes(res);
 
                 if (res.ok) {
+                    if (res.fileHashes) {
+                        this.fileBaseline = res.fileHashes;
+                    }
                     this.isEditMode = false;
                     this.$router.push(this.url);
                 }
             });
         },
 
-        saveStack() {
-            this.processing = true;
+        /**
+         * Take the version on the server and lose the edits of this editor
+         * @returns {void}
+         */
+        reloadAfterConflict() {
+            this.pendingSave = null;
+            this.conflictFile = "";
+            this.loadStack();
+        },
 
-            this.$root.emitAgent(this.stack.endpoint, "saveStack", this.stack.name, this.stack.composeYAML, this.stack.composeENV, this.isAdd, (res) => {
-                this.processing = false;
-                this.$root.toastRes(res);
-
-                if (res.ok) {
-                    this.isEditMode = false;
-                    this.$router.push(this.url);
-                }
-            });
+        /**
+         * Write this editor's text over the version on the server, as the user asked
+         * @returns {void}
+         */
+        overwriteAfterConflict() {
+            const event = this.pendingSave ?? "saveStack";
+            this.pendingSave = null;
+            this.conflictFile = "";
+            this.sendStack(event, undefined);
         },
 
         discardStack() {
@@ -901,6 +1170,12 @@ export default {
             this.isEditMode = false;
         },
 
+        /**
+         * Read a compose text as an object, keeping the document it came from
+         * @param {string} yaml Text of the file
+         * @returns {{ config : import("../../../common/compose-editor").ComposeModel, doc : import("yaml").Document.Parsed }} The object and the parsed document
+         * @throws {Error} If the text is not a compose file this editor can read
+         */
         yamlToJSON(yaml) {
             let doc = parseDocument(yaml);
             if (doc.errors.length > 0) {
@@ -927,9 +1202,8 @@ export default {
 
         yamlCodeChange() {
             try {
-                let { config, doc } = this.yamlToJSON(this.stack.composeYAML);
+                const { config } = this.yamlToJSON(this.stack.composeYAML);
 
-                this.yamlDoc = doc;
                 this.composeAnalysis = analyseComposeSource(this.stack.composeYAML);
                 this.analysedSource = this.stack.composeYAML;
 
@@ -950,11 +1224,11 @@ export default {
                 clearTimeout(yamlErrorTimeout);
 
                 if (this.yamlError) {
-                    this.yamlError = e.message;
+                    this.yamlError = errorText(e);
 
                 } else {
                     yamlErrorTimeout = setTimeout(() => {
-                        this.yamlError = e.message;
+                        this.yamlError = errorText(e);
                     }, 3000);
                 }
             }
@@ -980,7 +1254,7 @@ export default {
                     explicitNetworkRemoval,
                 });
             } catch (e) {
-                this.yamlError = e.message;
+                this.yamlError = errorText(e);
                 return;
             }
 
@@ -992,7 +1266,6 @@ export default {
             this.stack.composeYAML = next;
             this.composeAnalysis = analyseComposeSource(next);
             this.analysedSource = next;
-            this.yamlDoc = this.composeAnalysis.doc;
             this.$nextTick(() => {
                 this.applyingExternal = false;
             });
@@ -1001,11 +1274,12 @@ export default {
         /**
          * Apply a network edit coming from the network editor.
          * An empty result never introduces `networks: {}` on its own.
-         * @param {object} networks Networks the user configured
-         * @param {object} options Extra flags, `explicitRemoval` when the user deleted the last network
+         * @param {Record<string, import("../../../common/util-common").LooseObject>} networks Networks the user configured
+         * @param {{ explicitRemoval? : boolean }} options Extra flags, `explicitRemoval` when the user deleted the last network
          * @returns {void}
          */
         applyNetworksEdit(networks, options = {}) {
+            /** @type {Record<string, import("../../../common/util-common").LooseObject>} */
             const cleaned = {};
 
             for (const [ name, value ] of Object.entries(networks)) {
@@ -1034,7 +1308,9 @@ export default {
         addContainer() {
             this.checkYAML();
 
-            if (this.jsonConfig.services[this.newContainerName]) {
+            const services = this.jsonConfig.services ?? {};
+
+            if (services[this.newContainerName]) {
                 this.$root.toastError("Container name already exists");
                 return;
             }
@@ -1044,28 +1320,38 @@ export default {
                 return;
             }
 
-            this.jsonConfig.services[this.newContainerName] = {
+            services[this.newContainerName] = {
                 restart: "unless-stopped",
             };
+            this.jsonConfig.services = services;
             this.newContainerName = "";
-            let element = this.$refs.containerList.lastElementChild;
-            element.scrollIntoView({
+            const list = /** @type {HTMLElement | undefined} */ (this.$refs.containerList);
+            list?.lastElementChild?.scrollIntoView({
                 block: "start",
                 behavior: "smooth"
             });
         },
 
+        /**
+         * Stack directories are lower case, so the name is too
+         * @returns {void}
+         */
         stackNameToLowercase() {
-            this.stack.name = this.stack?.name?.toLowerCase();
+            this.stack.name = this.stack.name.toLowerCase();
         },
 
+        /**
+         * Start one service of the stack
+         * @param {string} serviceName Service the button belongs to
+         * @returns {void}
+         */
         startService(serviceName) {
             this.processing = true;
             this.$emit("run-start", "startService");
 
-            this.$root.emitAgent(this.endpoint, "startService", this.stack.name, serviceName, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "startService", [ this.stack.name, serviceName ], { timeoutMs: SAVE_REQUEST_TIMEOUT_MS }).then((res) => {
                 this.processing = false;
-                this.$emit("run-end", res?.ok ? "ok" : "failed");
+                this.$emit("run-end", res?.ok ? "ok" : (res?.unknown ? "unknown" : "failed"));
                 this.$root.toastRes(res);
 
                 if (res.ok) {
@@ -1074,13 +1360,18 @@ export default {
             });
         },
 
+        /**
+         * Stop one service of the stack
+         * @param {string} serviceName Service the button belongs to
+         * @returns {void}
+         */
         stopService(serviceName) {
             this.processing = true;
             this.$emit("run-start", "stopService");
 
-            this.$root.emitAgent(this.endpoint, "stopService", this.stack.name, serviceName, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "stopService", [ this.stack.name, serviceName ], { timeoutMs: SAVE_REQUEST_TIMEOUT_MS }).then((res) => {
                 this.processing = false;
-                this.$emit("run-end", res?.ok ? "ok" : "failed");
+                this.$emit("run-end", res?.ok ? "ok" : (res?.unknown ? "unknown" : "failed"));
                 this.$root.toastRes(res);
 
                 if (res.ok) {
@@ -1089,13 +1380,18 @@ export default {
             });
         },
 
+        /**
+         * Restart one service of the stack
+         * @param {string} serviceName Service the button belongs to
+         * @returns {void}
+         */
         restartService(serviceName) {
             this.processing = true;
             this.$emit("run-start", "restartService");
 
-            this.$root.emitAgent(this.endpoint, "restartService", this.stack.name, serviceName, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "restartService", [ this.stack.name, serviceName ], { timeoutMs: SAVE_REQUEST_TIMEOUT_MS }).then((res) => {
                 this.processing = false;
-                this.$emit("run-end", res?.ok ? "ok" : "failed");
+                this.$emit("run-end", res?.ok ? "ok" : (res?.unknown ? "unknown" : "failed"));
                 this.$root.toastRes(res);
 
                 if (res.ok) {

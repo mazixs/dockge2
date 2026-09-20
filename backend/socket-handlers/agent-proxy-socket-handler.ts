@@ -3,12 +3,13 @@ import { DockgeServer } from "../dockge-server";
 import { log } from "../log";
 import { callbackError, checkLogin, DockgeSocket } from "../util-server";
 import { AgentSocket } from "../../common/agent-socket";
+import type { AgentRequestContract } from "../../common/agent-events";
 import { authorizeSocketEvent } from "../auth-access";
 import { ALL_ENDPOINTS } from "../../common/util-common";
 
 export class AgentProxySocketHandler extends SocketHandler {
 
-    create2(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
+    create2(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
         // Agent - proxying requests if needed
         socket.on("agent", async (endpoint : unknown, eventName : unknown, ...args : unknown[]) => {
             // The last argument is the ack callback when the client passed one

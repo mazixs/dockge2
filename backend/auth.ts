@@ -3,7 +3,8 @@ import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { fromNodeHeaders } from "better-auth/node";
 import { twoFactor, username } from "better-auth/plugins";
-import { accessPlugin, initializeAccess, normalizeRole } from "./auth-access";
+import { accessPlugin, initializeAccess } from "./auth-access";
+import { normalizeRole, setAuthRuntime, type SocketIdentity } from "./auth-runtime";
 import type { IncomingHttpHeaders } from "http";
 import { Database as DockgeDatabase } from "./database";
 import { log } from "./log";
@@ -205,6 +206,11 @@ export async function initAuth(server : DockgeServer) : Promise<Auth> {
     await runMigrations();
 
     instance = auth;
+    // The access rules reach the library through this port and never import it back
+    setAuthRuntime({
+        hashPassword: async (password) => (await auth.$context).password.hash(password),
+        identify: resolveSocketIdentity,
+    });
     await initializeAccess(server.config.dataDir, hadRoles);
 
     // The auth connection opens its own write ahead log, which holds the same pages
@@ -337,6 +343,7 @@ export function getAuth() : Auth {
  */
 export function resetAuth() {
     instance = undefined;
+    setAuthRuntime(undefined);
 }
 
 /**
@@ -356,18 +363,6 @@ export async function getSessionFromHeaders(headers : IncomingHttpHeaders) {
         }
         return null;
     }
-}
-
-/** Who a socket belongs to, decided from its handshake headers */
-export interface SocketIdentity {
-    /** Identifier of the account, absent when the client has to sign in */
-    userID? : string;
-
-    /** True when the client is signed in only because authentication is disabled */
-    autoLogin? : boolean;
-
-    /** Effective permissions read from the database */
-    role? : import("./auth-access").UserRole;
 }
 
 /**

@@ -1,0 +1,27 @@
+{
+    // Single file components are checked separately, because `tsc` cannot read them and
+    // `vue-tsc` needs the templates of the project to resolve a component against the
+    // props it declares. Everything the components import is included as well, so a
+    // component is checked against the real types and not against an empty shell.
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "allowJs": true
+    },
+    "include": [
+        "frontend/src/**/*.vue",
+        "frontend/**/*.d.ts",
+        "frontend/src/**/*.ts",
+        "common/**/*.ts",
+        "frontend/vite.config.ts"
+    ],
+    // A component is only really checked when what a template passes it has to match
+    // what it declares: without this an unknown prop is silently ignored
+    "vueCompilerOptions": {
+        "strictTemplates": true
+    },
+    "exclude": [
+        "frontend-dist",
+        "coverage",
+        "node_modules"
+    ]
+}

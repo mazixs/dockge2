@@ -29,6 +29,71 @@ export function isHealthyStatus(status : number) : boolean {
     return status === RUNNING;
 }
 
+/** Time that the confirmed intervals of one window add up to */
+interface Measured {
+    coveredMs : number;
+    healthyMs : number;
+    stoppedMs : number;
+    incidents : number;
+}
+
+/**
+ * Describe the current state, when the last sample is recent enough to stand for it
+ * @param last Latest confirmed interval, if there is one
+ * @param now Moment the question is asked at
+ * @returns The current status and how long it has held, or nothing when the reading is stale
+ */
+function describeCurrent(last : StatusChange | undefined, now : number) : Pick<Availability, "currentStatus" | "currentForMs"> | null {
+    if (last?.until === undefined || last.until < last.at || now - last.until > OBSERVATION_FRESHNESS_MS) {
+        return null;
+    }
+    return {
+        currentStatus: last.status,
+        currentForMs: last.status === UNKNOWN ? null : now - last.at,
+    };
+}
+
+/**
+ * Add up the confirmed intervals that fall inside the window
+ * @param sorted Intervals in the order they started
+ * @param windowMs Length of the window ending at `now`
+ * @param now Moment the window ends at
+ * @returns Covered, healthy and stopped time, and how many incidents there were
+ */
+function measure(sorted : readonly StatusChange[], windowMs : number, now : number) : Measured {
+    const measured : Measured = {
+        coveredMs: 0,
+        healthyMs: 0,
+        stoppedMs: 0,
+        incidents: 0,
+    };
+    let lastEnd = -Infinity;
+    let insideIncident = false;
+    for (const [ index, change ] of sorted.entries()) {
+        const start = Math.max(change.at, now - windowMs);
+        const end = Math.min(change.until ?? change.at, sorted[index + 1]?.at ?? now, now);
+        if (change.status === UNKNOWN || end <= start || !Number.isFinite(end)) {
+            insideIncident = false;
+            continue;
+        }
+        const duration = end - start;
+        measured.coveredMs += duration;
+        if (isHealthyStatus(change.status)) {
+            measured.healthyMs += duration;
+        }
+        if (STOPPED.has(change.status)) {
+            measured.stoppedMs += duration;
+        }
+        const degraded = change.status === ATTENTION;
+        if (degraded && (!insideIncident || start > lastEnd)) {
+            measured.incidents += 1;
+        }
+        insideIncident = degraded;
+        lastEnd = end;
+    }
+    return measured;
+}
+
 /**
  * Calculate availability only inside explicitly confirmed observation intervals.
  * Legacy timestamps and gaps carry no duration. UNKNOWN means absence of evidence,
@@ -49,45 +114,22 @@ export function computeAvailability(changes : readonly StatusChange[], windowMs 
     }
     const sorted = changes.filter((change) => Number.isFinite(change.at) && change.at <= now)
         .slice().sort((a, b) => a.at - b.at);
-    const last = sorted.at(-1);
-    if (last?.until !== undefined && last.until >= last.at && now - last.until <= OBSERVATION_FRESHNESS_MS) {
-        result.currentStatus = last.status;
-        result.currentForMs = last.status === UNKNOWN ? null : now - last.at;
+    const current = describeCurrent(sorted.at(-1), now);
+    if (current) {
+        result.currentStatus = current.currentStatus;
+        result.currentForMs = current.currentForMs;
     }
-    let healthyMs = 0;
-    let stoppedMs = 0;
-    let lastEnd = -Infinity;
-    let insideIncident = false;
-    for (const [ index, change ] of sorted.entries()) {
-        const start = Math.max(change.at, now - windowMs);
-        const end = Math.min(change.until ?? change.at, sorted[index + 1]?.at ?? now, now);
-        if (change.status === UNKNOWN || end <= start || !Number.isFinite(end)) {
-            insideIncident = false;
-            continue;
-        }
-        const duration = end - start;
-        result.coveredMs += duration;
-        if (isHealthyStatus(change.status)) {
-            healthyMs += duration;
-        }
-        if (STOPPED.has(change.status)) {
-            stoppedMs += duration;
-        }
-        const degraded = change.status === ATTENTION;
-        if (degraded && (!insideIncident || start > lastEnd)) {
-            result.incidents += 1;
-        }
-        insideIncident = degraded;
-        lastEnd = end;
-    }
-    if (result.coveredMs === 0) {
+    const measured = measure(sorted, windowMs, now);
+    result.incidents = measured.incidents;
+    result.coveredMs = measured.coveredMs;
+    if (measured.coveredMs === 0) {
         return result;
     }
-    if (stoppedMs === result.coveredMs) {
+    if (measured.stoppedMs === measured.coveredMs) {
         result.verdict = "stopped";
-    } else if (result.coveredMs >= MIN_COVERAGE_MS) {
-        result.ratio = healthyMs / result.coveredMs;
-        result.verdict = healthyMs === result.coveredMs ? "clean" : "degraded";
+    } else if (measured.coveredMs >= MIN_COVERAGE_MS) {
+        result.ratio = measured.healthyMs / measured.coveredMs;
+        result.verdict = measured.healthyMs === measured.coveredMs ? "clean" : "degraded";
     }
     return result;
 }

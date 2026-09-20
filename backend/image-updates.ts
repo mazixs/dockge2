@@ -1,6 +1,7 @@
 import { spawn } from "./child-process";
 import { log } from "./log";
 import { isNewerImage, parseLocalRepoDigest, parseRemoteDigest, parseSingleManifestDigest } from "../common/image-digest";
+import type { ImageUpdate } from "../common/image-source";
 
 /**
  * Asking the registry whether a newer image exists.
@@ -9,19 +10,6 @@ import { isNewerImage, parseLocalRepoDigest, parseRemoteDigest, parseSingleManif
  * demand: the answer is a preview the owner asked for, not something the list polls.
  * Nothing is pulled and nothing is started - only manifests are read.
  */
-
-/** What is known about one image of a stack */
-export interface ImageUpdate {
-    image : string;
-    /** Digest the local image was pulled by, empty when it is not pulled */
-    local : string;
-    /** Digest the registry serves, empty when it could not be read */
-    remote : string;
-    /** True when the registry has another image, null when it cannot be told */
-    newer : boolean | null;
-    /** Why the answer is unknown: notPulled, registryUnreachable or empty */
-    reason : string;
-}
 
 /** One registry call must not hold the panel */
 const TIMEOUT_MS = 8_000;
@@ -36,15 +24,32 @@ const TIMEOUT_MS = 8_000;
  */
 const CONCURRENCY = 4;
 
-/** Answers are reused for this long, so repeated presses do not hammer the registry */
+/** Registry answers are reused for this long, so repeated presses do not hammer it */
 const CACHE_MS = 10 * 60_000;
 
-interface CacheEntry {
-    update : ImageUpdate;
+/**
+ * How many images the cache remembers.
+ *
+ * The time to live decides whether an entry may be used, not whether it is still kept.
+ * On a machine with many stacks the map would otherwise only ever grow, so the oldest
+ * entries make way once this many images are known.
+ */
+const MAX_CACHE_ENTRIES = 500;
+
+interface RemoteEntry {
+    digest : string;
     readAt : number;
 }
 
-const cache = new Map<string, CacheEntry>();
+/**
+ * What the registry answered, and nothing else.
+ *
+ * Only the remote side is worth caching: it needs the network and does not change
+ * between two presses. The local digest is read every time, because an update changes
+ * exactly that - a cached "newer" would keep announcing the update the owner just
+ * installed until the entry expired.
+ */
+const remoteCache = new Map<string, RemoteEntry>();
 
 /**
  * Digest the local image was pulled by
@@ -120,22 +125,14 @@ async function remoteDigest(image : string) : Promise<string> {
  * @param now Current time, injectable for tests
  * @returns One answer per image, in the order they were given
  */
+export type { ImageUpdate };
+
 export async function readImageUpdates(images : readonly string[], now = Date.now()) : Promise<ImageUpdate[]> {
     const unique = [ ...new Set(images.filter((image) => image.trim() !== "")) ];
     const answers = new Map<string, ImageUpdate>();
-    const pending : string[] = [];
+    const queue = [ ...unique ];
 
-    for (const image of unique) {
-        const cached = cache.get(image);
-
-        if (cached && now - cached.readAt < CACHE_MS) {
-            answers.set(image, cached.update);
-        } else {
-            pending.push(image);
-        }
-    }
-
-    const queue = [ ...pending ];
+    dropExpired(now);
 
     /**
      * Take images off the queue one by one until it is empty
@@ -143,7 +140,20 @@ export async function readImageUpdates(images : readonly string[], now = Date.no
      */
     const worker = async () : Promise<void> => {
         for (let image = queue.shift(); image !== undefined; image = queue.shift()) {
-            const [ local, remote ] = await Promise.all([ localDigest(image), remoteDigest(image) ]);
+            const cached = remoteCache.get(image);
+            const fresh = cached && now - cached.readAt < CACHE_MS;
+
+            // The local digest is always read again: it is a local call, and it is the
+            // side an update changes
+            const [ local, remote ] = await Promise.all([
+                localDigest(image),
+                fresh ? Promise.resolve(cached.digest) : remoteDigest(image),
+            ]);
+
+            if (!fresh) {
+                remember(image, remote, now);
+            }
+
             const newer = isNewerImage(local || null, remote || null);
 
             let reason = "";
@@ -151,15 +161,11 @@ export async function readImageUpdates(images : readonly string[], now = Date.no
                 reason = local ? "registryUnreachable" : "notPulled";
             }
 
-            const update : ImageUpdate = { image,
+            answers.set(image, { image,
                 local,
                 remote,
                 newer,
-                reason };
-
-            cache.set(image, { update,
-                readAt: now });
-            answers.set(image, update);
+                reason });
         }
     };
 
@@ -169,9 +175,55 @@ export async function readImageUpdates(images : readonly string[], now = Date.no
 }
 
 /**
- * Forget cached answers, used after an update actually pulled new images
+ * Keep what the registry answered, without letting the map grow without end
+ * @param image Image reference
+ * @param digest Digest the registry served, empty when it could not be read
+ * @param now Current time
+ */
+function remember(image : string, digest : string, now : number) : void {
+    remoteCache.set(image, { digest,
+        readAt: now });
+
+    while (remoteCache.size > MAX_CACHE_ENTRIES) {
+        const oldest = remoteCache.keys().next();
+
+        if (oldest.done) {
+            break;
+        }
+
+        remoteCache.delete(oldest.value);
+    }
+}
+
+/**
+ * Remove entries nobody may use any more, so an expired answer does not occupy memory
+ * until the same image is asked about again
+ * @param now Current time
+ */
+function dropExpired(now : number) : void {
+    for (const [ image, entry ] of remoteCache) {
+        if (now - entry.readAt >= CACHE_MS) {
+            remoteCache.delete(image);
+        }
+    }
+}
+
+/**
+ * Forget what the registry answered.
+ *
+ * Called after an operation that changed the local images: a pull brings the local side
+ * up to the digest the registry served, and the cached answer from before the pull would
+ * describe a comparison that no longer exists.
+ * @param images Images to forget, or nothing to forget them all
  * @returns void
  */
-export function clearImageUpdateCache() : void {
-    cache.clear();
+export function clearImageUpdateCache(images? : readonly string[]) : void {
+    if (!images) {
+        remoteCache.clear();
+        return;
+    }
+
+    for (const image of images) {
+        remoteCache.delete(image);
+    }
 }

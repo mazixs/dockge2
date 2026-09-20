@@ -3,24 +3,25 @@
     "include": [
         "backend/**/*.ts",
         "common/**/*.ts",
+        "frontend/src/**/*.ts",
         "extra/deploy-stack.ts",
-        "extra/update-dockge.ts"
+        "extra/update-dockge.ts",
+        "extra/check-coverage.ts",
+        "extra/check-bundle.ts"
     ],
     "exclude": [
         "backend/index.ts",
         "backend/migrations/**",
         "**/*.d.ts",
         "common/types/**",
-        "backend/dockge-server.ts",
-        "backend/agent-manager.ts",
-        "backend/agent-socket-handler.ts",
-        "backend/check-version.ts",
-        "backend/router.ts",
-        "backend/socket-handler.ts",
-        "backend/agent-socket-handlers/terminal-socket-handler.ts",
-        "backend/routers/**",
-        "backend/socket-handlers/agent-proxy-socket-handler.ts",
-        "backend/socket-handlers/manage-agent-socket-handler.ts"
+        "frontend/src/root-api.ts",
+        "frontend/src/main.ts",
+        "frontend/src/root.ts",
+        "frontend/src/router.ts",
+        "frontend/src/icon.ts",
+        "frontend/src/auth-client.ts",
+        "frontend/src/directives/**",
+        "frontend/src/mixins/**"
     ],
     "excludeAfterRemap": true,
     "checkCoverage": true,

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { MachineIdentity } from "./mcp-keys";
-import type { UserRole } from "./auth-access";
+import type { UserRole } from "./auth-runtime";
 
 export const MCP_READ_TOOLS = [ "servers_list", "stacks_list", "containers_list", "container_status", "stability_get" ] as const;
 

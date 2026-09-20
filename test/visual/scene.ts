@@ -766,6 +766,25 @@ const scene = createApp({
                     msg: "Visual fixture: operations are disabled" });
             }
         },
+
+        /**
+         * The same request as above, answered the way the application waits for it.
+         *
+         * Screens ask an agent through `emitAgentRequest`, which returns a promise and
+         * sets a deadline. A fixture that only offers the callback form leaves those
+         * screens without an answer, and they render as if the server never replied.
+         * @param {string} endpoint Agent the request goes to
+         * @param {string} event Event of the agent protocol
+         * @param {Array} args Arguments of that event, without the acknowledgement
+         * @returns {Promise} The answer of the fixture
+         */
+        emitAgentRequest(endpoint : string, event : string, args : unknown[] = []) {
+            // No deadline here on purpose: the fixture always answers, and a timer would
+            // make the same revision produce different frames
+            return new Promise((resolve) => {
+                this.emitAgent(endpoint, event, ...args, resolve);
+            });
+        },
     },
     render: () => h("div", [ h("div", { class: "scene-mark",
         style: "position:fixed;bottom:0;right:0;z-index:10000;padding:3px 8px;background:var(--surface-panel);color:var(--text-muted);font-size:11px;pointer-events:none" }, "Тестовая сцена · Docker не подключен"), h(RouterView) ]),

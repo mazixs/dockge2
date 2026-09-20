@@ -175,14 +175,70 @@ export function fromDockerPs(raw : DockerPsRaw) : ComposePsEntry & { project : s
 }
 
 /**
+ * Read the explicit one-shot marking of a single service
+ *
+ * Three spellings mean the same thing: the `x-dockge` extension, the same key written
+ * flat, and the container label.
+ * @param service One entry of the `services` map
+ * @returns Whether the service says it is expected to finish
+ */
+function markedOneShot(service : Record<string, unknown>) : boolean {
+    // x-dockge: { lifecycle: one-shot }
+    const extension = service[ONE_SHOT_EXTENSION] as { lifecycle? : unknown } | undefined;
+    if (extension && typeof extension === "object" && extension.lifecycle === ONE_SHOT_VALUE) {
+        return true;
+    }
+
+    // x-dockge.lifecycle: one-shot written as a flat key
+    if (service[`${ONE_SHOT_EXTENSION}.lifecycle`] === ONE_SHOT_VALUE) {
+        return true;
+    }
+
+    // dockge.lifecycle: one-shot as a container label
+    const labels = service["labels"];
+    if (labels && typeof labels === "object" && !Array.isArray(labels)) {
+        return (labels as Record<string, unknown>)[ONE_SHOT_LABEL] === ONE_SHOT_VALUE;
+    }
+
+    return Array.isArray(labels) && labels.includes(`${ONE_SHOT_LABEL}=${ONE_SHOT_VALUE}`);
+}
+
+/**
+ * Read the services that something else waits on until they finish successfully
+ *
+ * Whatever anything waits on with `service_completed_successfully` is a job by
+ * definition: nothing waits that way for a service meant to stay up.
+ * @param services The `services` map of a compose file
+ * @returns Names of the services waited on that way
+ */
+function waitedForCompletion(services : Record<string, unknown>) : string[] {
+    const names : string[] = [];
+
+    for (const rawService of Object.values(services)) {
+        const dependsOn = (rawService as { depends_on? : unknown } | null)?.depends_on;
+
+        if (!dependsOn || typeof dependsOn !== "object" || Array.isArray(dependsOn)) {
+            continue;
+        }
+
+        for (const [ name, rawCondition ] of Object.entries(dependsOn as Record<string, unknown>)) {
+            const condition = (rawCondition as { condition? : unknown } | null)?.condition;
+
+            if (condition === "service_completed_successfully" && name in services) {
+                names.push(name);
+            }
+        }
+    }
+
+    return names;
+}
+
+/**
  * Read the services of a compose file that finish rather than keep running.
  *
- * Besides the explicit markings, one thing in a compose file says so on its own:
- * `depends_on` with `condition: service_completed_successfully`. A service is only
- * ever waited on that way because it is expected to do its work and exit, which is
- * exactly what a migration or a seeding job does. Without reading it, such a job
- * showed up as a stopped service the moment it succeeded, and the panel offered to
- * restart the thing that had just done its job correctly.
+ * Without this, a migration or a seeding job showed up as a stopped service the
+ * moment it succeeded, and the panel offered to restart the thing that had just
+ * done its job correctly.
  * @param composeYAML Compose file content
  * @returns Service names that are not expected to keep running
  */
@@ -203,50 +259,13 @@ export function readOneShotServices(composeYAML : string) : Set<string> {
 
     for (const [ name, rawService ] of Object.entries(services)) {
         const service = rawService as Record<string, unknown> | null;
-        if (!service || typeof service !== "object") {
-            continue;
-        }
 
-        // x-dockge: { lifecycle: one-shot }
-        const extension = service[ONE_SHOT_EXTENSION] as { lifecycle? : unknown } | undefined;
-        if (extension && typeof extension === "object" && extension.lifecycle === ONE_SHOT_VALUE) {
-            oneShot.add(name);
-            continue;
-        }
-
-        // x-dockge.lifecycle: one-shot written as a flat key
-        if (service[`${ONE_SHOT_EXTENSION}.lifecycle`] === ONE_SHOT_VALUE) {
-            oneShot.add(name);
-            continue;
-        }
-
-        // dockge.lifecycle: one-shot as a container label
-        const labels = service["labels"];
-        if (labels && typeof labels === "object" && !Array.isArray(labels)) {
-            if ((labels as Record<string, unknown>)[ONE_SHOT_LABEL] === ONE_SHOT_VALUE) {
-                oneShot.add(name);
-            }
-        } else if (Array.isArray(labels) && labels.includes(`${ONE_SHOT_LABEL}=${ONE_SHOT_VALUE}`)) {
+        if (service && typeof service === "object" && markedOneShot(service)) {
             oneShot.add(name);
         }
     }
-
-    // Whatever anything waits on with `service_completed_successfully` is a job by
-    // definition: nothing waits that way for a service meant to stay up
-    for (const rawService of Object.values(services)) {
-        const dependsOn = (rawService as { depends_on? : unknown } | null)?.depends_on;
-
-        if (!dependsOn || typeof dependsOn !== "object" || Array.isArray(dependsOn)) {
-            continue;
-        }
-
-        for (const [ name, rawCondition ] of Object.entries(dependsOn as Record<string, unknown>)) {
-            const condition = (rawCondition as { condition? : unknown } | null)?.condition;
-
-            if (condition === "service_completed_successfully" && name in services) {
-                oneShot.add(name);
-            }
-        }
+    for (const name of waitedForCompletion(services)) {
+        oneShot.add(name);
     }
 
     return oneShot;
@@ -347,54 +366,59 @@ export function resolveInstanceIssue(instance : ContainerInstanceStatus) : strin
     }
 }
 
-/**
- * Aggregate instances into a stack status with the reasons behind it.
- * RUNNING means at least one service of the stack is up and nothing about the stack
- * is degraded: every issue found on any instance turns the stack into ATTENTION.
- * @param instances Normalised instances of the stack
- * @param expectedServices Services declared in the compose file, used to detect missing instances
- * @returns Stack status and the list of issues explaining it
- */
-export function resolveStackStatus(
-    instances : readonly ContainerInstanceStatus[],
-    expectedServices : readonly string[] = [],
-) : StackStatusResult {
-    const issues : StackStatusIssue[] = [];
+/** What one pass over the instances of a stack establishes */
+interface StackSummary {
+    /** Something meant to keep running is up and not unhealthy */
+    hasRunningLongLived : boolean;
+    /** A job is still doing its work */
+    hasRunningOneShot : boolean;
+    /** Nothing of the stack was ever started */
+    allCreated : boolean;
+    issues : StackStatusIssue[];
+}
 
+/**
+ * Report the services of the compose file that have no instance at all
+ * @param instances Normalised instances of the stack
+ * @param expectedServices Services declared in the compose file
+ * @returns One issue per service that should be there and is not
+ */
+function missingInstances(instances : readonly ContainerInstanceStatus[], expectedServices : readonly string[]) : StackStatusIssue[] {
     // A stack that was never started has no containers at all, so a missing instance is
     // only worth reporting when the rest of the stack is up
-    const stackIsUp = instances.some((instance) => instance.state === "running");
-
-    if (stackIsUp) {
-        for (const service of expectedServices) {
-            if (!instances.some((instance) => instance.service === service)) {
-                issues.push({ service,
-                    name: "",
-                    reason: "missingInstance" });
-            }
-        }
+    if (!instances.some((instance) => instance.state === "running")) {
+        return [];
     }
 
-    if (instances.length === 0) {
-        // Nothing to judge, do not claim the stack is stopped
-        return { status: UNKNOWN,
-            issues };
-    }
+    return expectedServices.filter((service) => !instances.some((instance) => instance.service === service))
+        .map((service) : StackStatusIssue => ({ service,
+            name: "",
+            reason: "missingInstance" }));
+}
 
-    let hasRunningLongLived = false;
-    let hasRunningOneShot = false;
-    let allCreated = true;
+/**
+ * Read every instance of the stack once
+ * @param instances Normalised instances of the stack
+ * @returns What is up, whether anything was started at all, and the issues found
+ */
+function summariseInstances(instances : readonly ContainerInstanceStatus[]) : StackSummary {
+    const summary : StackSummary = {
+        hasRunningLongLived: false,
+        hasRunningOneShot: false,
+        allCreated: true,
+        issues: [],
+    };
 
     for (const instance of instances) {
         if (instance.state !== "created") {
-            allCreated = false;
+            summary.allCreated = false;
         }
 
         if (instance.state === "running" && instance.health !== "unhealthy") {
             if (instance.isOneShot) {
-                hasRunningOneShot = true;
+                summary.hasRunningOneShot = true;
             } else {
-                hasRunningLongLived = true;
+                summary.hasRunningLongLived = true;
             }
         }
 
@@ -409,23 +433,45 @@ export function resolveStackStatus(
                 issue.detail = String(instance.exitCode);
             }
 
-            issues.push(issue);
+            summary.issues.push(issue);
         }
     }
 
-    if (allCreated) {
+    return summary;
+}
+
+/**
+ * Aggregate instances into a stack status with the reasons behind it.
+ * RUNNING means at least one service of the stack is up and nothing about the stack
+ * is degraded: every issue found on any instance turns the stack into ATTENTION.
+ * @param instances Normalised instances of the stack
+ * @param expectedServices Services declared in the compose file, used to detect missing instances
+ * @returns Stack status and the list of issues explaining it
+ */
+export function resolveStackStatus(
+    instances : readonly ContainerInstanceStatus[],
+    expectedServices : readonly string[] = [],
+) : StackStatusResult {
+    const issues : StackStatusIssue[] = missingInstances(instances, expectedServices);
+
+    if (instances.length === 0) {
+        // Nothing to judge, do not claim the stack is stopped
+        return { status: UNKNOWN,
+            issues };
+    }
+
+    const summary = summariseInstances(instances);
+
+    issues.push(...summary.issues);
+
+    if (summary.allCreated) {
         // Nothing was started yet, that is the created state and not a problem on its own
         return { status: CREATED_STACK,
             issues: issues.filter((issue) => issue.reason !== "notStarted") };
     }
 
-    if (hasRunningLongLived) {
-        return { status: issues.length > 0 ? ATTENTION : RUNNING,
-            issues };
-    }
-
     // A stack whose only services are one-shot jobs is running while a job runs
-    if (hasRunningOneShot) {
+    if (summary.hasRunningLongLived || summary.hasRunningOneShot) {
         return { status: issues.length > 0 ? ATTENTION : RUNNING,
             issues };
     }

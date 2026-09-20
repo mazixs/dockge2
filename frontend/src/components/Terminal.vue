@@ -14,6 +14,7 @@
 
 <script>
 import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERMINAL_COLS, TERMINAL_ROWS } from "../../../common/util-common";
 import TerminalContextMenu from "./TerminalContextMenu.vue";

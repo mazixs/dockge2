@@ -4,16 +4,11 @@ import path from "node:path";
 import { createLocalAccountIssuer } from "better-auth/db";
 import { APIError, createAuthEndpoint, formCsrfMiddleware, originCheckMiddleware } from "better-auth/api";
 import { Database } from "./database";
-import { getAuth, resolveSocketIdentity } from "./auth";
+import { getAuthRuntime, type UserRole } from "./auth-runtime";
 import type { DockgeSocket } from "./util-server";
+import type { StackSummaryDTO, ViewerStackSummary } from "../common/types/stack";
 
-export type UserRole = "admin" | "operator" | "viewer";
 let bootstrapPath = "";
-
-/** Unknown roles never grant privileges. */
-export function normalizeRole(role : unknown) : UserRole {
-    return role === "admin" || role === "operator" ? role : "viewer";
-}
 
 /** Preserve the existing owner and prepare a local, one-use setup credential. */
 export async function initializeAccess(dataDir : string, hadRoles : boolean) {
@@ -85,8 +80,7 @@ export function validateNewUser(data : unknown) : NewUser {
 /** Issue a credential account atomically using better-auth's password format. */
 export async function issueUser(input : unknown, bootstrap = false) {
     const data = validateNewUser(input);
-    const context = await getAuth().$context;
-    const password = await context.password.hash(data.password);
+    const password = await getAuthRuntime().hashPassword(data.password);
     const id = randomUUID();
     const now = Date.now();
     await Database.getKnex().transaction(async (trx) => {
@@ -159,8 +153,10 @@ export function accessPlugin() {
     };
 }
 
-const VIEWER_EVENTS = new Set([ "requestStackList", "serviceStatusList", "stackAvailability", "stabilityOverview" ]);
-const OPERATOR_EVENTS = new Set([
+/** Agent events a status-only account may send */
+export const VIEWER_EVENTS = new Set([ "requestStackList", "serviceStatusList", "stackAvailability", "stabilityOverview" ]);
+/** Agent events an operator may send, a viewer being allowed a part of them */
+export const OPERATOR_EVENTS = new Set([
     ...VIEWER_EVENTS, "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
     "restartStack", "updateStack", "downStack", "stackUpdatePreview", "abortCompose", "getStackFiles",
     "setStackFiles", "saveEnvFile", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
@@ -181,7 +177,7 @@ export function roleAllowsEvent(role : UserRole, event : string, agent = false) 
 
 /** Revalidate the cookie and current role before every protected operation. */
 export async function authorizeSocketEvent(socket : DockgeSocket, event : string, agent = false) : Promise<void> {
-    const identity = await resolveSocketIdentity(socket.request.headers);
+    const identity = await getAuthRuntime().identify(socket.request.headers);
     if (!identity.userID || identity.userID !== socket.userID) {
         throw new Error("authSessionExpired");
     }
@@ -252,8 +248,7 @@ export async function resetUserPassword(id : unknown, password : unknown) {
     if (typeof password !== "string" || password.length < 10 || password.length > 128) {
         throw new Error("authPasswordLength");
     }
-    const context = await getAuth().$context;
-    const hash = await context.password.hash(password);
+    const hash = await getAuthRuntime().hashPassword(password);
     await Database.getKnex().transaction(async (trx) => {
         const updated = await trx("account").where({ userId: id,
             providerId: "credential" }).update({ password: hash,
@@ -265,19 +260,26 @@ export async function resetUserPassword(id : unknown, password : unknown) {
     });
 }
 
-/** Keep viewer broadcasts restricted to status fields, including remote agent data. */
-export function viewerStackSummary(input : object) {
-    const stack = input as Record<string, unknown>;
+/**
+ * Keep viewer broadcasts restricted to status fields, including remote agent data.
+ *
+ * The summary of a remote agent arrives over the network, so the two lists are copied
+ * only when they are lists: another build may send something else, and a viewer row is
+ * no place to find that out.
+ * @param input Full summary, either built here or received from an agent
+ * @returns The same stack without anything about its files
+ */
+export function viewerStackSummary(input : StackSummaryDTO) : ViewerStackSummary {
     return {
-        name: stack.name,
-        status: stack.status,
-        endpoint: stack.endpoint,
-        isManagedByDockge: stack.isManagedByDockge,
-        availability: stack.availability,
-        services: Array.isArray(stack.services) ? stack.services.map((service) => ({ name: service.name,
+        name: input.name,
+        status: input.status,
+        endpoint: input.endpoint,
+        isManagedByDockge: input.isManagedByDockge,
+        availability: input.availability,
+        services: Array.isArray(input.services) ? input.services.map((service) => ({ name: service.name,
             state: service.state,
             isOneShot: service.isOneShot })) : [],
-        issues: Array.isArray(stack.issues) ? stack.issues.map((issue) => ({ service: issue.service,
+        issues: Array.isArray(input.issues) ? input.issues.map((issue) => ({ service: issue.service,
             name: issue.name,
             reason: issue.reason })) : [],
     };

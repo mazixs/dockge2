@@ -393,6 +393,26 @@ export class Terminal {
     public static getTerminalCount() {
         return Terminal.terminalMap.size;
     }
+
+    /**
+     * End every session this process owns.
+     *
+     * Shells are asked to exit and killed if they will not, the same way a single session
+     * ends. One session that will not go must not keep the others open, so the failures
+     * are collected rather than thrown.
+     * @param graceMs How long each shell may take to exit on its own
+     */
+    public static async endAll(graceMs = 3000) : Promise<void> {
+        const terminals = [ ...Terminal.terminalMap.values() ];
+
+        await Promise.all(terminals.map(async (terminal) => {
+            try {
+                await terminal.end(graceMs);
+            } catch (e) {
+                log.debug("Terminal", "Failed to end terminal " + terminal.name + ": " + (e instanceof Error ? e.message : String(e)));
+            }
+        }));
+    }
 }
 
 /**

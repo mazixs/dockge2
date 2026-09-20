@@ -38,7 +38,10 @@ export default {
     components: { InterfaceIcon,
         ShieldCheck },
     props: {
-        source: { type: Object,
+        /** Происхождение каталога стека, null когда его не удалось прочитать */
+        source: {
+            /** @type {import("vue").PropType<import("../../../common/stack-source").StackSource | null>} */
+            type: Object,
             default: null },
         directory: { type: String,
             default: "" },

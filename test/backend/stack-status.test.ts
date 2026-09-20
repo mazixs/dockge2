@@ -1,14 +1,14 @@
 import { strict as assert } from "node:assert";
 import os from "node:os";
 import test from "node:test";
-import { looksLikeContainerId, Stack } from "../../backend/stack";
+import { looksLikeContainerId, readOwnProjectName, resolveProjectStatus } from "../../backend/stack-state";
 import type { ComposePsEntry } from "../../common/compose-status";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 
 const project = "demo";
 
 /**
- * Build the host wide container map the way Stack.getInstanceMap() returns it
+ * Build the host wide container map the way readInstanceMap() returns it
  * @param entries Containers of the demo project
  * @returns Instance map
  */
@@ -18,7 +18,7 @@ function instanceMap(entries : ComposePsEntry[]) : Map<string, ComposePsEntry[]>
 
 test("project status comes from container states, not from the aggregated compose line", () => {
     // Issue #806: a clean-exit worker next to a running service is not a stopped stack
-    const withWorker = Stack.resolveProjectStatus({ Name: project,
+    const withWorker = resolveProjectStatus({ Name: project,
         Status: "exited(1), running(1)" }, instanceMap([
         { Service: "app",
             Name: "demo-app-1",
@@ -34,7 +34,7 @@ test("project status comes from container states, not from the aggregated compos
     assert.equal(withWorker.issues[0]?.reason, "serviceStopped");
 
     // Marking the worker as one-shot makes the same stack healthy
-    const markedWorker = Stack.resolveProjectStatus({ Name: project,
+    const markedWorker = resolveProjectStatus({ Name: project,
         Status: "exited(1), running(1)" }, instanceMap([
         { Service: "app",
             Name: "demo-app-1",
@@ -51,7 +51,7 @@ test("project status comes from container states, not from the aggregated compos
     assert.deepEqual(markedWorker.issues, []);
 
     // A failed worker is reported with its exit code
-    const failedWorker = Stack.resolveProjectStatus({ Name: project,
+    const failedWorker = resolveProjectStatus({ Name: project,
         Status: "exited(1), running(1)" }, instanceMap([
         { Service: "app",
             Name: "demo-app-1",
@@ -75,15 +75,15 @@ test("project status comes from container states, not from the aggregated compos
 
 test("project status stays fail-closed when Docker output is missing", () => {
     // Docker could not be read at all
-    assert.equal(Stack.resolveProjectStatus({ Name: project,
+    assert.equal(resolveProjectStatus({ Name: project,
         Status: "running(1)" }, null).status, UNKNOWN);
 
     // The project has no container, so nothing can be claimed about it
-    assert.equal(Stack.resolveProjectStatus({ Name: project,
+    assert.equal(resolveProjectStatus({ Name: project,
         Status: "running(1)" }, new Map()).status, UNKNOWN);
 
     // An unreadable state is never promoted to running
-    assert.equal(Stack.resolveProjectStatus({ Name: project,
+    assert.equal(resolveProjectStatus({ Name: project,
         Status: "running(1)" }, instanceMap([
         { Service: "app",
             Name: "demo-app-1",
@@ -92,7 +92,7 @@ test("project status stays fail-closed when Docker output is missing", () => {
 });
 
 test("stopped and created projects keep their own status", () => {
-    assert.equal(Stack.resolveProjectStatus({ Name: project,
+    assert.equal(resolveProjectStatus({ Name: project,
         Status: "exited(2)" }, instanceMap([
         { Service: "app",
             Name: "demo-app-1",
@@ -106,7 +106,7 @@ test("stopped and created projects keep their own status", () => {
             Status: "Exited (0) 1 hour ago" },
     ])).status, EXITED);
 
-    assert.equal(Stack.resolveProjectStatus({ Name: project,
+    assert.equal(resolveProjectStatus({ Name: project,
         Status: "created(1)" }, instanceMap([
         { Service: "app",
             Name: "demo-app-1",
@@ -130,15 +130,15 @@ test("a stack whose compose project was renamed is still matched by its director
     const map = new Map([[ "renamed", entries ], [ stackDir, entries ]]);
     const stack = { isManagedByDockge: true,
         path: stackDir,
-        composeYAML: "services:\n  app:\n    image: nginx\n" } as unknown as Stack;
+        composeYAML: "services:\n  app:\n    image: nginx\n" };
 
     // Looked up by the stack directory, the status is correct
-    const matched = Stack.resolveProjectStatus({ Name: "demo",
+    const matched = resolveProjectStatus({ Name: "demo",
         Status: "running(1)" }, map, stack);
     assert.equal(matched.status, RUNNING);
 
     // Without the directory index the project name of the stack finds nothing
-    const nameOnly = Stack.resolveProjectStatus({ Name: "demo",
+    const nameOnly = resolveProjectStatus({ Name: "demo",
         Status: "running(1)" }, new Map([[ "renamed", entries ]]));
     assert.equal(nameOnly.status, UNKNOWN);
 });
@@ -161,8 +161,8 @@ test("asking which project the panel runs as never throws, and is asked once", a
     // Deliberately not asserting a value: these tests run on a development machine, in
     // CI, and inside the container ./local.sh builds, and the honest answer differs in
     // each. What must hold everywhere is that the question is safe to ask and settles
-    const first = await Stack.getOwnProjectName();
-    const second = await Stack.getOwnProjectName();
+    const first = await readOwnProjectName();
+    const second = await readOwnProjectName();
 
     assert.equal(typeof first, "string");
     assert.equal(second, first, "the answer is cached, not asked again");

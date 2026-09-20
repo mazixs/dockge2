@@ -17,6 +17,7 @@
         <template v-else-if="name === 'lock'"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11M12 15v2" /></template>
         <template v-else-if="name === 'sliders'"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></template>
         <template v-else-if="name === 'users'"><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0M15.8 5.2a3.2 3.2 0 0 1 0 5.6M17.4 13.5a5.5 5.5 0 0 1 3.1 6" /></template>
+        <template v-else-if="name === 'question'"><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6M12 17h.01" /></template>
         <template v-else-if="name === 'key'"><circle cx="7.5" cy="12" r="3.5" /><path d="M11 12h9.5M17 12v3.2M20.5 12v2.4" /></template>
     </svg>
 </template>

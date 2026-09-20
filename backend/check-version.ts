@@ -21,7 +21,7 @@ interface Release {
 class CheckVersion {
     version = packageJSON.version;
     latestVersion? : string;
-    interval? : NodeJS.Timeout;
+    interval : NodeJS.Timeout | undefined;
 
     /**
      * Разобрать ответ реестра релизов в наибольшую стабильную и наибольшую бета-версию
@@ -91,6 +91,20 @@ class CheckVersion {
 
         await check();
         this.interval = setInterval(check, UPDATE_CHECKER_INTERVAL_MS);
+    }
+
+    /**
+     * Остановить периодическую проверку.
+     *
+     * Вызывается при остановке процесса: интервал, переживший закрытие базы, обращается
+     * к настройкам, которых уже нет.
+     * @returns {void}
+     */
+    stopInterval() : void {
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = undefined;
+        }
     }
 }
 

@@ -43,7 +43,8 @@ test("compose commands name the selected file and env files explicitly", async (
         });
 
         try {
-            const server = { stacksDir } as never;
+            const server = { stacksDir,
+                config: { dataDir: stacksDir } } as never;
 
             // Without metadata the historic behaviour is kept: compose.yaml plus .env
             const legacy = await Stack.getStack(server, "files-stack");
@@ -97,7 +98,8 @@ test("an invalid file selection is rejected", async () => {
         });
 
         try {
-            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            const stack = await Stack.getStack({ stacksDir,
+                config: { dataDir: stacksDir } } as never, "files-stack");
 
             for (const config of [
                 { composeFileName: "../outside.yaml",
@@ -134,7 +136,8 @@ test("env files are written to the selected file only", async () => {
         });
 
         try {
-            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            const stack = await Stack.getStack({ stacksDir,
+                config: { dataDir: stacksDir } } as never, "files-stack");
             await stack.writeEnvFile(".env.dev", "STAGE=dev2\n");
 
             assert.equal(await readFile(path.join(stackDir, ".env.dev"), "utf8"), "STAGE=dev2\n");
@@ -157,7 +160,8 @@ test("secret files are stored with restricted permissions and never leak into th
         });
 
         try {
-            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            const stack = await Stack.getStack({ stacksDir,
+                config: { dataDir: stacksDir } } as never, "files-stack");
 
             await stack.writeSecretFile(".secret.db", "db-password");
 
@@ -206,7 +210,8 @@ test("binding a secret edits the compose file only on that action", async () => 
         });
 
         try {
-            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            const stack = await Stack.getStack({ stacksDir,
+                config: { dataDir: stacksDir } } as never, "files-stack");
 
             await stack.bindSecret("db_password", ".secret.db", [ "db" ]);
 
@@ -259,7 +264,8 @@ test("deleting a secret file removes its binding too", async () => {
         });
 
         try {
-            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            const stack = await Stack.getStack({ stacksDir,
+                config: { dataDir: stacksDir } } as never, "files-stack");
             await stack.bindSecret("db_password", ".secret.db", [ "db" ]);
 
             await stack.deleteSecretFile(".secret.db");
@@ -285,6 +291,7 @@ test("saving an existing stack writes the selected files, not the historic defau
 
         try {
             const server = { stacksDir,
+                config: { dataDir: stacksDir },
                 sendStackList: () => undefined } as never;
 
             const stack = await Stack.getStack(server, "files-stack");
@@ -327,7 +334,8 @@ test("a compose error never quotes a secret value", async () => {
         });
 
         try {
-            const stack = await Stack.getStack({ stacksDir } as never, "files-stack");
+            const stack = await Stack.getStack({ stacksDir,
+                config: { dataDir: stacksDir } } as never, "files-stack");
             await stack.bindSecret("db_password", ".secret.db", [ "db" ]);
 
             // A message that quotes the secret is redacted before it can reach a client
@@ -357,7 +365,8 @@ test("a stack directory that is a symlink cannot be written through", async () =
         await symlink(outsideDir, path.join(stacksDir, "linked"), "dir");
 
         try {
-            const server = { stacksDir } as never;
+            const server = { stacksDir,
+                config: { dataDir: stacksDir } } as never;
 
             // Reading is refused
             await assert.rejects(Stack.getStack(server, "linked"), ValidationError);
@@ -387,7 +396,8 @@ test("a file swapped for a symlink is not read or written", async () => {
         await writeFile(outside, "SECRET=outside\n");
 
         try {
-            const server = { stacksDir } as never;
+            const server = { stacksDir,
+                config: { dataDir: stacksDir } } as never;
             const stack = await Stack.getStack(server, "swap-stack");
 
             // The env file passes validation as a regular file

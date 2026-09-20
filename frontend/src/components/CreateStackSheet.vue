@@ -29,10 +29,12 @@
                 </button>
             </header>
 
-            <!-- Ошибка проверки: слой остается открытым, текст приходит от Docker Compose -->
+            <!-- Ошибка проверки: слой остается открытым, текст приходит от Docker Compose.
+                 Потерянный ответ - не отказ: стек мог быть создан, поэтому "не развернут"
+                 в этом случае не пишется -->
             <div v-if="failure" class="line failure">
-                <i class="dot failed"></i>
-                <span><b>{{ $t("notDeployed") }}</b> {{ failure }}</span>
+                <i class="dot" :class="uncertain ? 'attention' : 'failed'"></i>
+                <span><b v-if="!uncertain">{{ $t("notDeployed") }}</b> {{ failure }}</span>
             </div>
 
             <!-- Пока идет развертывание, единственное доступное действие - прервать его -->
@@ -79,7 +81,7 @@
                             v-if="restFlagCount > 0"
                             class="btn btn-quiet btn-sm"
                             type="button"
-                            :aria-expanded="String(showAllFlags)"
+                            :aria-expanded="showAllFlags"
                             @click="showAllFlags = !showAllFlags"
                         >
                             {{ showAllFlags ? $t("hideFlags") : $t("moreFlags", [ restFlagCount ]) }}
@@ -151,6 +153,7 @@
 </template>
 
 <script>
+// @ts-check
 import { parse } from "yaml";
 import { analyseConversion } from "../../../common/docker-run-flags";
 import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
@@ -164,8 +167,17 @@ const FRESH_MS = 60_000;
 /** Содержимое .env для нового стека: то же, что предлагает страница стека */
 const ENV_DEFAULT = "# VARIABLE=value #comment";
 
-let recogniseTimer = null;
-let elapsedTimer = null;
+/**
+ * How long the acknowledgement of a creation is waited for.
+ *
+ * Writing the files and starting the containers takes as long as docker compose takes,
+ * so the wait is long - but it ends, because an acknowledgement that never arrives used
+ * to leave the sheet busy for ever, with its clock still counting.
+ */
+const CREATE_REQUEST_TIMEOUT_MS = 15 * 60_000;
+
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let recogniseTimer;
 
 export default {
     props: {
@@ -187,13 +199,17 @@ export default {
     data() {
         return {
             visible: false,
-            /** Элемент, которому вернется фокус после закрытия */
+            /**
+             * Элемент, которому вернется фокус после закрытия
+             * @type {HTMLElement | null}
+             */
             opener: null,
             source: "",
             /** Исходная команда, чтобы ее можно было вернуть: правка поля ломает отмену браузера */
             originalCommand: "",
             converted: false,
             skipRecognition: false,
+            /** @type {import("../../../common/docker-run-flags").ConversionReport | null} */
             report: null,
             showAllFlags: false,
             name: "",
@@ -202,7 +218,13 @@ export default {
             saving: false,
             deploying: false,
             failure: "",
+            /** Ответа не было: результат неизвестен, повторять запись нельзя */
+            uncertain: false,
+            /** Какая попытка владеет брифом: ответ прежней ничего здесь не меняет */
+            attempt: 0,
             elapsed: 0,
+            /** @type {ReturnType<typeof setInterval> | undefined} */
+            elapsedTimer: undefined,
             titleId: "create-stack-title",
             pasteId: "create-stack-paste",
         };
@@ -212,7 +234,7 @@ export default {
         /** Можно ли уже что-то разворачивать */
         canDeploy() {
             const name = this.name.trim();
-            return !this.saving && !this.deploying && this.$root.canManageStacks
+            return !this.saving && !this.deploying && !this.uncertain && this.$root.canManageStacks
                 && this.$root.agentStatusList[this.endpoint] === "online"
                 && this.source.trim().length > 0 && name.length > 0
                 && name.length <= this.maxNameLength;
@@ -264,12 +286,19 @@ export default {
 
     watch: {
         source() {
+            // Неизвестный результат относился к тому, что было вставлено тогда:
+            // измененный текст - это новая попытка, а не продолжение прежней
+            this.uncertain = false;
+
             if (this.skipRecognition) {
                 this.skipRecognition = false;
                 return;
             }
             this.scheduleRecognition();
             this.inheritComposeName();
+        },
+        name() {
+            this.uncertain = false;
         },
         initialEndpoint(value) {
             if (!this.deploying && !this.saving) {
@@ -286,7 +315,9 @@ export default {
 
     unmounted() {
         clearTimeout(recogniseTimer);
-        clearInterval(elapsedTimer);
+        // Экрана больше нет: ответ ушедшей попытки некуда применять
+        this.attempt++;
+        this.stopClock();
     },
 
     methods: {
@@ -300,6 +331,7 @@ export default {
             this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
             this.visible = true;
             this.failure = "";
+            this.uncertain = false;
             this.deploying = false;
             this.showAllFlags = false;
 
@@ -316,7 +348,7 @@ export default {
             }
 
             this.$nextTick(() => {
-                this.$refs.paste?.focus();
+                /** @type {HTMLTextAreaElement | undefined} */ (this.$refs.paste)?.focus();
             });
         },
 
@@ -353,13 +385,13 @@ export default {
             if (this.inline) {
                 return;
             }
-            const sheet = this.$refs.sheet;
+            const sheet = /** @type {HTMLElement | undefined} */ (this.$refs.sheet);
 
             if (!sheet) {
                 return;
             }
 
-            const reachable = [ ...sheet.querySelectorAll("a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex=\"-1\"])") ]
+            const reachable = /** @type {HTMLElement[]} */ ([ ...sheet.querySelectorAll("a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex=\"-1\"])") ])
                 .filter((node) => node.offsetParent !== null);
             const first = reachable[0];
             const last = reachable[reachable.length - 1];
@@ -408,7 +440,7 @@ export default {
         convert() {
             const command = this.source;
 
-            this.$root.getSocket().emit("composerize", command, (res) => {
+            this.$root.getSocket().emit("composerize", command, (/** @type {{ ok : boolean, msg? : string, composeTemplate? : string }} */ res) => {
                 if (this.source !== command || this.converted) {
                     return;
                 }
@@ -417,14 +449,16 @@ export default {
                     return;
                 }
 
+                const composeTemplate = res.composeTemplate ?? "";
+
                 this.originalCommand = command;
-                this.source = res.composeTemplate;
+                this.source = composeTemplate;
                 this.converted = true;
                 this.failure = "";
-                this.report = analyseConversion(command, res.composeTemplate);
+                this.report = analyseConversion(command, composeTemplate);
 
                 if (!this.nameTouched) {
-                    this.name = this.suggestName(res.composeTemplate);
+                    this.name = this.suggestName(composeTemplate);
                 }
             });
         },
@@ -553,7 +587,7 @@ export default {
 
         /**
          * Отправить стек агенту
-         * @param {string} event Событие сокета
+         * @param {"deployStack" | "saveStack"} event Событие сокета
          * @param {boolean} withDeploy Нужно ли показывать прогресс развертывания
          * @returns {void}
          */
@@ -563,28 +597,42 @@ export default {
             }
             this.saving = !withDeploy;
             this.failure = "";
+            this.uncertain = false;
             const name = this.name.trim();
+
+            // Эта попытка владеет брифом, пока не ответит. Ответ той, что уже сменилась
+            // или ушла вместе с экраном, ничего здесь не меняет
+            const attempt = ++this.attempt;
 
             if (withDeploy) {
                 this.deploying = true;
                 this.elapsed = 0;
-                clearInterval(elapsedTimer);
-                elapsedTimer = setInterval(() => {
-                    this.elapsed += 1;
-                }, 1000);
+                this.startClock();
             }
 
             // Пустой .env создается сразу: его почти всегда правят следующим шагом,
             // и пусть он лежит с подсказкой, а не появляется из ниоткуда потом
             const composeENV = this.$root.envTemplate || ENV_DEFAULT;
 
-            this.$root.emitAgent(this.endpoint, event, name, this.source, composeENV, true, (res) => {
-                clearInterval(elapsedTimer);
+            // A new stack states that neither file exists yet: a directory that appeared
+            // in the meantime is reported instead of being written into
+            const baseline = { compose: null,
+                env: null };
+
+            this.$root.emitAgentRequest(this.endpoint, event, [ name, this.source, composeENV, true, baseline ], { timeoutMs: CREATE_REQUEST_TIMEOUT_MS }).then((res) => {
+                if (attempt !== this.attempt) {
+                    return;
+                }
+
+                this.stopClock();
                 this.deploying = false;
                 this.saving = false;
 
                 if (!res?.ok) {
-                    this.failure = res?.msg ? this.$t(res.msg) : this.$t("deployFailed");
+                    // Подтверждения не было: файлы могли быть записаны, а стек - подняться.
+                    // Поэтому запись не повторяется сама, а бриф отправляет смотреть список
+                    this.uncertain = Boolean(res?.unknown);
+                    this.failure = this.uncertain ? this.$t("gitUiResultUnknown") : this.$root.serverText(res?.msg, "deployFailed");
                     return;
                 }
 
@@ -600,6 +648,26 @@ export default {
                 this.$root.toastRes(res);
                 this.$router.push(this.endpoint ? `/stack/${encodeURIComponent(name)}/${encodeURIComponent(this.endpoint)}` : `/stack/${encodeURIComponent(name)}`);
             });
+        },
+
+        /**
+         * Начать отсчет времени развертывания
+         * @returns {void}
+         */
+        startClock() {
+            this.stopClock();
+            this.elapsedTimer = setInterval(() => {
+                this.elapsed += 1;
+            }, 1000);
+        },
+
+        /**
+         * Остановить отсчет: часы принадлежат попытке, а не экрану
+         * @returns {void}
+         */
+        stopClock() {
+            clearInterval(this.elapsedTimer);
+            this.elapsedTimer = undefined;
         },
 
         /**

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { Stack } from "../../backend/stack";
+import { statusConvert } from "../../backend/stack-state";
 import {
     CREATED_STACK,
     EXITED,
@@ -19,7 +20,7 @@ import {
     checkLogin,
     fileExists,
 } from "../../backend/util-server";
-import { makeAuthenticatedSocket } from "../helpers/database";
+import { makeAuthenticatedSocket, withDatabase } from "../helpers/database";
 
 /**
  * A socket with or without a session
@@ -81,11 +82,14 @@ test("fileExists checks real files", async () => {
     }
 });
 
+// Saving a stack also stores which files it is made of, and that selection lives in the
+// database: with none connected the write has nowhere to record what it just did, so the
+// test needs a real one rather than a directory alone
 test("Stack validates, saves and reads compose files using the real filesystem", async () => {
-    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-stack-test-"));
-    const server = { stacksDir } as never;
+    await withDatabase(async ({ dataDir, stacksDir }) => {
+        const server = { stacksDir,
+            config: { dataDir } } as never;
 
-    try {
         const stack = new Stack(
             server,
             "demo-stack",
@@ -150,18 +154,15 @@ test("Stack validates, saves and reads compose files using the real filesystem",
             "--format",
             "json",
         ]);
-    } finally {
-        await rm(stacksDir, { recursive: true,
-            force: true });
-    }
+    });
 });
 
 test("Stack persists environment files on save", async () => {
-    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-stack-env-"));
-    const server = { stacksDir } as never;
-    const envPath = path.join(stacksDir, "env-stack", ".env");
+    await withDatabase(async ({ dataDir, stacksDir }) => {
+        const server = { stacksDir,
+            config: { dataDir } } as never;
+        const envPath = path.join(stacksDir, "env-stack", ".env");
 
-    try {
         // 1. A new stack with env content writes .env byte for byte
         const created = new Stack(server, "env-stack", "services:\n  app:\n    image: nginx\n", "KEY=initial\n", true);
         await created.save(true);
@@ -182,10 +183,7 @@ test("Stack persists environment files on save", async () => {
         const withoutEnv = new Stack(server, "plain-stack", "services:\n  app:\n    image: nginx\n", "", true);
         await withoutEnv.save(true);
         assert.equal(await fileExists(path.join(stacksDir, "plain-stack", ".env")), false);
-    } finally {
-        await rm(stacksDir, { recursive: true,
-            force: true });
-    }
+    });
 });
 
 test("a new stack name has a length limit that an existing stack does not", () => {
@@ -210,7 +208,8 @@ test("Stack rejects unsafe names before touching the filesystem", async () => {
     await writeFile(path.join(outsideDir, "compose.yaml"), "services: {}\n");
 
     try {
-        const server = { stacksDir } as never;
+        const server = { stacksDir,
+            config: { dataDir: stacksDir } } as never;
 
         for (const unsafeName of [ "../outside", "..", "/tmp/outside", "..\\outside", "", "with space", "UPPER", "dot.stack" ]) {
             assert.throws(() => Stack.validateName(unsafeName), ValidationError, `expected ${JSON.stringify(unsafeName)} to be rejected`);
@@ -258,15 +257,16 @@ test("Stack validates names, YAML and environment files and converts statuses", 
     const invalidEnv = new Stack(server, "valid-name", "services: {}", "INVALID", true);
     assert.throws(() => invalidEnv.validate(), ValidationError);
 
-    assert.equal(Stack.statusConvert("created(1)"), CREATED_STACK);
-    assert.equal(Stack.statusConvert("exited(1), running(1)"), EXITED);
-    assert.equal(Stack.statusConvert("running(1)"), RUNNING);
-    assert.equal(Stack.statusConvert("unknown"), UNKNOWN);
+    assert.equal(statusConvert("created(1)"), CREATED_STACK);
+    assert.equal(statusConvert("exited(1), running(1)"), EXITED);
+    assert.equal(statusConvert("running(1)"), RUNNING);
+    assert.equal(statusConvert("unknown"), UNKNOWN);
 });
 
 test("a stack that builds its own image is deployed with a build", async () => {
     const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-build-test-"));
-    const server = { stacksDir } as never;
+    const server = { stacksDir,
+        config: { dataDir: stacksDir } } as never;
 
     try {
         const built = new Stack(server, "built-stack", "services:\n  app:\n    build: .\n", "", true);

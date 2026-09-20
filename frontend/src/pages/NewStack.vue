@@ -115,14 +115,24 @@
 </template>
 
 <script>
+// @ts-check
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
 import { isSafeGitRepository, stackNameFromRepository } from "../git-ui";
 import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
 
+// Клонирование с развертыванием идет столько, сколько идет git и docker compose:
+// подтверждение ждут долго, но не бесконечно
+const CLONE_REQUEST_TIMEOUT_MS = 15 * 60_000;
+
 export default {
     components: { InterfaceIcon,
         CreateStackSheet },
+    /**
+     * Hold the person on the page while a checkout is being created
+     * @this {{ busy : boolean, composeBusy : boolean }}
+     * @returns {boolean} Whether leaving is allowed
+     */
     beforeRouteLeave() {
         return !this.busy && !this.composeBusy;
     },
@@ -141,10 +151,12 @@ export default {
             busy: false,
             uncertain: false,
             composeBusy: false,
+            /** @type {string[]} */
             branches: [],
             branchesBusy: false,
             branchesFailure: "",
             failure: "",
+            /** @type {import("../../../common/types/stack-git").GitSaveResult | null} */
             result: null,
         };
     },
@@ -193,9 +205,17 @@ export default {
                 this.name = stackNameFromRepository(value);
             }
         },
-        // An emptied field is offered a name again: the user cleared it to get another one
-        name(value) {
-            this.nameChosen = Boolean(value) && value !== stackNameFromRepository(this.repository);
+        // An emptied field is offered a name again: the user cleared it to get another one.
+        // Written as an object because a shorthand watcher called "name" is inferred
+        // through the instance that owns it, which the checker cannot resolve
+        name: {
+            /**
+             * @param {string} value Name that is in the field now
+             * @returns {void}
+             */
+            handler(value) {
+                this.nameChosen = Boolean(value) && value !== stackNameFromRepository(this.repository);
+            },
         },
         endpoint() {
             this.branches = [];
@@ -238,7 +258,11 @@ export default {
             this.failure = "";
             this.uncertain = false;
         },
-        /** Open the requested accessible tab and place keyboard focus on its label. */
+        /**
+         * Open the requested accessible tab and place keyboard focus on its label.
+         * @param {string} tab Name of the tab
+         * @returns {void}
+         */
         selectTab(tab) {
             this.sourceTab = tab;
             this.$nextTick(() => document.getElementById(`new-${tab}-tab`)?.focus());
@@ -257,12 +281,13 @@ export default {
                     return;
                 }
                 this.branches = res.branches || [];
-                if (!this.branches.length) {
+                const first = this.branches[0];
+                if (!first) {
                     this.branchesFailure = this.$t("gitUiBranchesEmpty");
                     return;
                 }
                 if (!this.branches.includes(this.branch)) {
-                    this.branch = this.branches[0];
+                    this.branch = first;
                 }
             });
         },
@@ -274,32 +299,45 @@ export default {
             }
             this.sourceTab = "compose";
             this.$root.createStackSeed = "";
-            this.$nextTick(() => this.$refs.composeForm?.open(seed));
+            this.$nextTick(() => /** @type {{ open : (prefill : string) => void } | undefined} */ (this.$refs.composeForm)?.open(seed));
         },
-        /** Resolve an agent-aware route without interpolating unescaped endpoint data. */
+        /**
+         * Resolve an agent-aware route without interpolating unescaped endpoint data.
+         * @param {string} name Name of the stack
+         * @returns {string} Path of its page
+         */
         stackPath(name) {
             return `/stack/${encodeURIComponent(name)}${this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : ""}`;
         },
-        /** Create a real Git checkout; navigation stays locked until the transaction returns. */
+        /**
+         * Create a real Git checkout; navigation stays locked until the transaction returns.
+         * @param {boolean} deploy Whether the stack is started once the files are there
+         * @returns {void}
+         */
         create(deploy) {
             if (!this.canCreate) {
                 return;
             }
             this.busy = true;
             this.failure = "";
-            this.$root.emitAgent(this.endpoint, "gitCloneStack", {
+            this.$root.emitAgentRequest(this.endpoint, "gitCloneStack", [{
                 name: this.name.trim(),
                 repository: this.repository.trim(),
                 branch: this.branch.trim(),
                 composeFile: this.composeFile.trim(),
                 deploy,
-            }, (res) => {
+            }], { timeoutMs: CLONE_REQUEST_TIMEOUT_MS }).then((res) => {
                 this.busy = false;
-                this.uncertain = false;
+
                 if (!res?.ok) {
-                    this.failure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
+                    // Подтверждения не было: стек мог быть создан, поэтому кнопка не
+                    // предлагает повторить, а карточка ведет посмотреть на стек
+                    this.uncertain = Boolean(res?.unknown);
+                    this.failure = this.uncertain ? this.$t("gitUiResultUnknown") : this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
+
+                this.uncertain = false;
                 this.result = res;
                 this.$root.markStackFresh(res.stackName, 60_000);
             });

@@ -52,7 +52,8 @@ test("reading a stack never rewrites its compose file", async () => {
         await writeFile(path.join(stackDir, ".env"), "STAGE=base\n");
 
         try {
-            const server = { stacksDir } as never;
+            const server = { stacksDir,
+                config: { dataDir: stacksDir } } as never;
             const stack = await Stack.getStack(server, "tricky-stack");
 
             // Reading the stack, its status details and its files leaves the file alone
@@ -70,13 +71,14 @@ test("reading a stack never rewrites its compose file", async () => {
 });
 
 test("saving a stack writes exactly the text it was given", async () => {
-    await withDatabase(async ({ stacksDir }) => {
+    await withDatabase(async ({ stacksDir, dataDir }) => {
         const stackDir = path.join(stacksDir, "tricky-stack");
         await mkdir(stackDir);
         await writeFile(path.join(stackDir, "compose.yaml"), trickySource);
 
         const socket = makeAuthenticatedSocket();
         const server = { stacksDir,
+            config: { dataDir },
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new DockerSocketHandler().create(socket, server, agentSocket);

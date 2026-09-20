@@ -15,6 +15,7 @@ import {
 import { Settings } from "../settings";
 import fs, { promises as fsAsync } from "fs";
 import path from "path";
+import { runInBackground } from "../background";
 
 export class MainSocketHandler extends SocketHandler {
     create(socket : DockgeSocket, server : DockgeServer) {
@@ -95,7 +96,7 @@ export class MainSocketHandler extends SocketHandler {
                     msgi18n: true,
                 }, callback);
 
-                server.sendInfo(socket);
+                runInBackground("server info", () => server.sendInfo(socket));
 
             } catch (e) {
                 callbackError(e, callback);

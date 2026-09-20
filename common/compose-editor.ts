@@ -7,6 +7,21 @@ import { LooseObject } from "./util-common";
  */
 export type EditOrigin = "raw-edit" | "structured-edit" | "external-refresh";
 
+/**
+ * A compose file as an object, the way the screens hold it.
+ *
+ * Only the keys the interface reads are named. A compose file carries much more, and
+ * the editor writes it back through its source rather than through this object, so
+ * what is not named here is kept rather than described.
+ */
+export interface ComposeModel {
+    services? : Record<string, { image? : string, ports? : unknown[], container_name? : string, [key : string] : unknown }>;
+    networks? : Record<string, LooseObject> | null;
+    /** Dockge's own extension: the links a stack declares */
+    "x-dockge"? : { urls? : unknown };
+    [key : string] : unknown;
+}
+
 export interface ComposeAnalysis {
     /** Parsed source document, used as the base of every round-trip edit */
     doc : Document;

@@ -6,7 +6,7 @@ import { computeAvailability, type StatusChange } from "../common/availability";
 import {
     buildStabilityHistory, containerUptime, normaliseContainerRuntime, runtimeStatus,
     STABILITY_SCAN_INTERVAL_MS, STABILITY_STALE_MS,
-    type ContainerRuntime, type StabilityGroup, type StabilityOverview, type StabilityWindow,
+    type ContainerRuntime, type StabilityContainer, type StabilityGroup, type StabilityOverview, type StabilityWindow,
 } from "../common/stability";
 import { UNKNOWN } from "../common/util-common";
 
@@ -55,6 +55,95 @@ export async function readDockerRuntime() : Promise<ContainerRuntime[]> {
         }
     }
     return containers;
+}
+
+/** One stored observation as the database returns it */
+interface ObservationRow {
+    container_id : string;
+    observed_at : number;
+    observed_until : number;
+    status : number;
+}
+
+/** What every container of one reading is measured against */
+interface ReadContext {
+    windowMs : number;
+    now : number;
+    /** Whether the last observation is too old to stand for the present */
+    stale : boolean;
+    observedAt : number;
+}
+
+/**
+ * Group the stored observations by the container they belong to
+ * @param rows Observations that reach into the window
+ * @returns Confirmed intervals of each container, oldest first
+ */
+function groupChanges(rows : readonly ObservationRow[]) : Map<string, StatusChange[]> {
+    const changes = new Map<string, StatusChange[]>();
+    for (const row of rows) {
+        const own = changes.get(row.container_id) ?? [];
+        own.push({ at: Number(row.observed_at),
+            until: Number(row.observed_until),
+            status: Number(row.status) });
+        changes.set(row.container_id, own);
+    }
+    return changes;
+}
+
+/**
+ * Describe one container of the dashboard.
+ *
+ * A stale reading says what was observed, never what is running now: the current
+ * state, the uptime and the restart count are withheld rather than guessed.
+ * @param container The container as the last snapshot stored it
+ * @param own Its confirmed intervals inside the window
+ * @param context Window, moment and freshness of the reading
+ * @returns The container as the dashboard shows it
+ */
+function describeContainer(container : StoredContainer, own : readonly StatusChange[], context : ReadContext) : StabilityContainer {
+    const availability = computeAvailability(own, context.windowMs, context.now);
+    if (context.stale) {
+        availability.currentStatus = UNKNOWN;
+        availability.currentForMs = null;
+    }
+    return {
+        id: container.id,
+        name: container.name,
+        service: container.service,
+        state: context.stale ? "unknown" : container.state,
+        health: context.stale ? "" : container.health,
+        startedAt: container.startedAt,
+        restartCount: context.stale ? null : container.restartCount,
+        uptimeMs: context.stale ? null : containerUptime(container.state, container.startedAt, context.observedAt),
+        availability,
+        history: buildStabilityHistory(own, context.windowMs, context.now),
+    };
+}
+
+/**
+ * Put the containers of one reading under the stack they belong to
+ * @param containers The containers of the last snapshot
+ * @param changes Confirmed intervals of each container
+ * @param context Window, moment and freshness of the reading
+ * @returns Stacks and their containers, both in alphabetical order
+ */
+function groupByStack(containers : readonly StoredContainer[], changes : ReadonlyMap<string, StatusChange[]>, context : ReadContext) : StabilityGroup[] {
+    const groups = new Map<string, StabilityGroup>();
+    for (const container of containers) {
+        const key = container.stackName;
+        const group = groups.get(key) ?? { name: key,
+            managed: container.managed,
+            standalone: !container.project,
+            containers: [] };
+        group.containers.push(describeContainer(container, changes.get(container.id) ?? [], context));
+        groups.set(key, group);
+    }
+    const stacks = [ ...groups.values() ].sort((a, b) => a.name.localeCompare(b.name));
+    for (const group of stacks) {
+        group.containers.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return stacks;
 }
 
 /** Persist bounded container observations independently of whether a dashboard is open. */
@@ -153,46 +242,11 @@ export class StabilityCollector {
         }
         const containers = JSON.parse(snapshot.containers) as StoredContainer[];
         const windowMs = windowHours * 3_600_000;
-        const rows = await knex("container_observation").where("observed_until", ">=", now - windowMs).orderBy("observed_at", "asc");
-        const changes = new Map<string, StatusChange[]>();
-        for (const row of rows) {
-            const own = changes.get(row.container_id) ?? [];
-            own.push({ at: Number(row.observed_at),
-                until: Number(row.observed_until),
-                status: Number(row.status) });
-            changes.set(row.container_id, own);
-        }
-        const groups = new Map<string, StabilityGroup>();
-        for (const container of containers) {
-            const key = container.stackName;
-            const group = groups.get(key) ?? { name: key,
-                managed: container.managed,
-                standalone: !container.project,
-                containers: [] };
-            const own = changes.get(container.id) ?? [];
-            const availability = computeAvailability(own, windowMs, now);
-            if (stale) {
-                availability.currentStatus = UNKNOWN;
-                availability.currentForMs = null;
-            }
-            group.containers.push({
-                id: container.id,
-                name: container.name,
-                service: container.service,
-                state: stale ? "unknown" : container.state,
-                health: stale ? "" : container.health,
-                startedAt: container.startedAt,
-                restartCount: stale ? null : container.restartCount,
-                uptimeMs: stale ? null : containerUptime(container.state, container.startedAt, observedAt),
-                availability,
-                history: buildStabilityHistory(own, windowMs, now),
-            });
-            groups.set(key, group);
-        }
-        result.stacks = [ ...groups.values() ].sort((a, b) => a.name.localeCompare(b.name));
-        for (const group of result.stacks) {
-            group.containers.sort((a, b) => a.name.localeCompare(b.name));
-        }
+        const rows = await knex("container_observation").where("observed_until", ">=", now - windowMs).orderBy("observed_at", "asc") as ObservationRow[];
+        result.stacks = groupByStack(containers, groupChanges(rows), { windowMs,
+            now,
+            stale,
+            observedAt });
         return result;
     }
 }

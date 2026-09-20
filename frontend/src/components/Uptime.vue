@@ -19,7 +19,9 @@ export default {
         StateChip,
     },
     props: {
+        /** Стек строки: из него читаются состояние и замечания */
         stack: {
+            /** @type {import("vue").PropType<import("../../../common/types/stack").StackSummaryDTO | import("../../../common/types/stack").ViewerStackSummary | null>} */
             type: Object,
             default: null,
         },

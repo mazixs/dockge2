@@ -9,8 +9,10 @@ import { StackGitError, StackGitWorkflow } from "../stack-git";
 import { spawn } from "../child-process";
 import { composeArgs } from "../compose-args";
 import type { AgentSocket } from "../../common/agent-socket";
-import type { GitApplyInput, GitCloneInput, GitMessage, GitSaveResult } from "../../common/stack-git";
+import type { AgentRequestContract } from "../../common/agent-events";
+import type { GitApplyInput, GitCloneInput, GitMessage, GitSaveResult } from "../../common/types/stack-git";
 import type { StackFileConfig } from "../../common/types/stack";
+import { runInBackground } from "../background";
 
 const workflows = new WeakMap<DockgeServer, StackGitWorkflow>();
 
@@ -120,7 +122,7 @@ async function result(server: DockgeServer, socket: DockgeSocket, name: string, 
             deploymentError = { key: "gitDeployFailedAfterSave" };
         }
     }
-    server.sendStackList();
+    runInBackground("stack list", () => server.sendStackList());
     return { stackName: name,
         saved: true,
         deployed,
@@ -129,7 +131,7 @@ async function result(server: DockgeServer, socket: DockgeSocket, name: string, 
 
 /** Git events use the same agent routing and role gates as other stack mutations. */
 export class GitSocketHandler extends AgentSocketHandler {
-    create(socket: DockgeSocket, server: DockgeServer, agentSocket: AgentSocket): void {
+    create(socket: DockgeSocket, server: DockgeServer, agentSocket : AgentSocket<AgentRequestContract>): void {
         agentSocket.on("gitCloneStack", async (payload: unknown, callback) => {
             try {
                 const input = payload as GitCloneInput;

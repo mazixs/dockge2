@@ -3,7 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { spawn } from "../../backend/child-process";
-import { Stack } from "../../backend/stack";
+import { readStatusList } from "../../backend/stack-state";
 import { ATTENTION, RUNNING } from "../../common/util-common";
 
 const enabled = process.env.DOCKGE_DOCKER_INTEGRATION === "1";
@@ -63,7 +63,7 @@ test("a stack with a marked one-shot container is reported as running", {
         // Block until the one-shot container really exited, otherwise the check races with Docker
         await waitForInit(project, markedFixture);
 
-        const statusList = await Stack.getStatusList();
+        const statusList = await readStatusList();
         assert.equal(statusList.get(project), RUNNING);
     } finally {
         assert.equal(await docker([ "compose", "-p", project, "-f", markedFixture, "down", "-v" ]), 0);
@@ -79,7 +79,7 @@ test("an unmarked container that exited needs attention instead of looking stopp
         assert.equal(await docker([ "compose", "-p", project, "-f", unmarkedFixture, "up", "-d" ]), 0);
         await waitForInit(project, unmarkedFixture);
 
-        const statusList = await Stack.getStatusList();
+        const statusList = await readStatusList();
 
         // Issue #806: the running service must not be hidden behind a stopped one-shot container
         assert.equal(statusList.get(project), ATTENTION);

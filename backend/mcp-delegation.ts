@@ -121,41 +121,104 @@ function current(envelope : { issuedAt : number; expiresAt : number; action? : s
     return envelope.issuedAt <= now + 1000 && envelope.expiresAt > now && envelope.expiresAt - envelope.issuedAt > 0 && envelope.expiresAt - envelope.issuedAt <= (envelope.action === "operation_apply" ? APPLY_TTL : TTL);
 }
 
-function allowed(assertion : Assertion, peer : DelegationPeer) {
+/**
+ * Whether the envelope itself may be listened to at all.
+ *
+ * Nothing about the operation is looked at here: only that the assertion is still
+ * current, was addressed to this server, and stays inside what both the caller and the
+ * peer were granted.
+ * @param assertion Signed request of the other panel
+ * @param peer The panel it came from, as this one has it configured
+ * @returns True when the envelope may be read further
+ */
+function allowedEnvelope(assertion : Assertion, peer : DelegationPeer) : boolean {
+    const subject = assertion.identity;
+
+    return current(assertion) && subject.servers.includes(assertion.audience)
+        && subject.stacks.every(stack => peer.allowedStackIds.includes(stack) && subject.resources[assertion.audience]?.includes(stack))
+        && peer.actions.includes(assertion.action) && assertion.args.server_id === assertion.audience;
+}
+
+/**
+ * Whether a reading call stays within what was granted
+ * @param assertion Signed request of the other panel
+ * @returns True when the call may be answered
+ */
+function allowedRead(assertion : Assertion) : boolean {
+    const parsed = argsSchema.safeParse(assertion.args);
+
+    return parsed.success && (!parsed.data.stack_id || assertion.identity.stacks.includes(parsed.data.stack_id))
+        && ([ "servers_list", "stacks_list" ].includes(assertion.action) || Boolean(parsed.data.stack_id))
+        && (assertion.action !== "container_status" || Boolean(parsed.data.container_id))
+        && (assertion.action === "container_status" || !parsed.data.container_id)
+        && (assertion.action === "stability_get" || parsed.data.window_hours === undefined);
+}
+
+/**
+ * Whether a call that names an existing operation carries nothing else.
+ *
+ * Ownership, stored permission, hash and approval are checked by the ordinary durable
+ * registry, so the only question here is the shape of the reference.
+ * @param assertion Signed request of the other panel
+ * @returns True when the reference may be passed on
+ */
+function allowedOperationReference(assertion : Assertion) : boolean {
+    const permitted = [ "server_id", "operation_id", ...(assertion.action === "operation_apply" ? [ "parameters_hash" ] : []) ];
+
+    return Object.keys(assertion.args).every(key => permitted.includes(key))
+        && z.string().uuid().safeParse(assertion.args.operation_id).success;
+}
+
+/**
+ * Whether a writing call names a stack both sides granted, for an action both sides allow
+ * @param assertion Signed request of the other panel
+ * @param peer The panel it came from, as this one has it configured
+ * @returns True when the write may be prepared
+ */
+function allowedWrite(assertion : Assertion, peer : DelegationPeer) : boolean {
     const subject = assertion.identity;
     const args = assertion.args;
-    if (!current(assertion) || !subject.servers.includes(assertion.audience)
-        || !subject.stacks.every(stack => peer.allowedStackIds.includes(stack) && subject.resources[assertion.audience]?.includes(stack))
-        || !peer.actions.includes(assertion.action) || args.server_id !== assertion.audience) {
-        return false;
-    }
-    if ((MCP_READ_TOOLS as readonly string[]).includes(assertion.action)) {
-        const parsed = argsSchema.safeParse(args);
-        return parsed.success && (!parsed.data.stack_id || subject.stacks.includes(parsed.data.stack_id))
-            && ([ "servers_list", "stacks_list" ].includes(assertion.action) || Boolean(parsed.data.stack_id))
-            && (assertion.action !== "container_status" || Boolean(parsed.data.container_id))
-            && (assertion.action === "container_status" || !parsed.data.container_id)
-            && (assertion.action === "stability_get" || parsed.data.window_hours === undefined);
-    }
-    if (subject.role !== "operator" || peer.role !== "operator" || subject.mode === "readonly") {
-        return false;
-    }
-    if (assertion.action === "operation_apply" || assertion.action === "operation_status") {
-        // Ownership, stored permission, hash and approval are checked by the ordinary durable registry.
-        return Object.keys(args).every(key => [ "server_id", "operation_id", ...(assertion.action === "operation_apply" ? [ "parameters_hash" ] : []) ].includes(key))
-            && z.string().uuid().safeParse(args.operation_id).success;
-    }
-    const action = assertion.action === "operation_prepare" ? args.action : assertion.action;
-    const parameters = assertion.action === "operation_prepare" ? args.parameters : args;
+    const preparing = assertion.action === "operation_prepare";
+    const action = preparing ? args.action : assertion.action;
+    const parameters = preparing ? args.parameters : args;
+
     if (typeof action !== "string" || !peer.actions.includes(action) || !remotePermissions[action] || !subject.actions?.includes(remotePermissions[action]!) || !parameters || typeof parameters !== "object") {
         return false;
     }
     const target = parameters as Record<string, unknown>;
+
+    // Deploying is a separate permission: applying a git update may not smuggle it in
     if (action === "git_apply" && target.deploy === true && (!peer.actions.includes("stack_deploy") || !subject.actions?.includes("deploy"))) {
         return false;
     }
     return target.server_id === assertion.audience && typeof target.stack_id === "string" && subject.stacks.includes(target.stack_id)
-        && (assertion.action !== "operation_prepare" || Object.keys(args).every(key => [ "server_id", "action", "request_id", "parameters" ].includes(key)));
+        && (!preparing || Object.keys(args).every(key => [ "server_id", "action", "request_id", "parameters" ].includes(key)));
+}
+
+/**
+ * Whether one signed request of another panel may be served.
+ *
+ * The order is the order of the questions: is the envelope current and addressed here,
+ * is this a reading call, may this caller write at all, and only then what the write
+ * would touch. Every step answers false on anything it does not recognise.
+ * @param assertion Signed request of the other panel
+ * @param peer The panel it came from, as this one has it configured
+ * @returns True when the call may be served
+ */
+function allowed(assertion : Assertion, peer : DelegationPeer) : boolean {
+    if (!allowedEnvelope(assertion, peer)) {
+        return false;
+    }
+    if ((MCP_READ_TOOLS as readonly string[]).includes(assertion.action)) {
+        return allowedRead(assertion);
+    }
+    if (assertion.identity.role !== "operator" || peer.role !== "operator" || assertion.identity.mode === "readonly") {
+        return false;
+    }
+    if (assertion.action === "operation_apply" || assertion.action === "operation_status") {
+        return allowedOperationReference(assertion);
+    }
+    return allowedWrite(assertion, peer);
 }
 
 function identityStillAllows(currentIdentity : DelegatedIdentity | null, assertion : Assertion) {
@@ -245,6 +308,230 @@ export interface DelegationServices {
     dispatch? : (identity : DelegatedIdentity, action : string, args : unknown, refresh : () => Promise<DelegatedIdentity>) => Promise<unknown>;
 }
 
+/** One request of another panel: either a call to serve, or an assertion to confirm */
+type Envelope = Assertion | z.infer<typeof validationSchema>;
+
+/** The operation a delegated apply or status call refers to */
+type OperationTarget = { action : string; stackId : string; additionalActions? : string[] };
+
+/**
+ * Everything a request has to prove before any of it is acted on.
+ *
+ * A browser session is never accepted here: this channel is for another panel, and its
+ * only proof is a signature over the exact bytes that arrived.
+ * @param request Incoming request
+ * @param services How this panel reads its own configuration
+ * @returns The configuration in force, the envelope and the peer that signed it
+ * @throws {Error} denied, for anything that does not prove itself
+ */
+async function authenticate(request : express.Request, services : DelegationServices) : Promise<{ config : DelegationConfig; envelope : Envelope; peer : DelegationPeer }> {
+    const config = await services.getConfig();
+
+    if (!config || request.headers.authorization || request.headers.cookie || request.headers.origin || Object.keys(request.query).length) {
+        throw new Error("denied");
+    }
+    const body = request.body as Buffer;
+
+    if (!Buffer.isBuffer(body)) {
+        throw new Error("denied");
+    }
+    const raw = JSON.parse(body.toString("utf8"));
+    const envelope = request.params.operation === "read" ? readSchema.parse(raw) : request.params.operation === "validate" ? validationSchema.parse(raw) : null;
+    const peer = config.peers.find(item => item.id === envelope?.issuer);
+    const signature = request.headers["x-dockge-signature"];
+
+    if (!envelope || !peer || typeof signature !== "string" || !/^[a-zA-Z0-9_-]{86}$/.test(signature) || !current(envelope) || envelope.audience !== config.serverId || !verify(null, body, peer.publicKey, Buffer.from(signature, "base64url")) || !await services.authorizePeer(peer)) {
+        throw new Error("denied");
+    }
+    return { config,
+        envelope,
+        peer };
+}
+
+/**
+ * Serve a request exactly once.
+ *
+ * A signature stays valid for as long as the envelope says, so without this a captured
+ * request could be sent again inside that window.
+ * @param seen Requests already served, with the moment each stops being replayable
+ * @param peer The panel the request came from
+ * @param envelope The request itself
+ * @returns {void}
+ * @throws {Error} denied, when this request was already served
+ */
+function claimNonce(seen : Map<string, number>, peer : DelegationPeer, envelope : Envelope) : void {
+    for (const [ key, expiry ] of seen) {
+        if (expiry <= Date.now()) {
+            seen.delete(key);
+        }
+    }
+    const nonce = `${peer.id}:${envelope.requestId}`;
+
+    if (seen.has(nonce) || seen.size >= 1000) {
+        throw new Error("denied");
+    }
+    seen.set(nonce, envelope.expiresAt);
+}
+
+/**
+ * Confirm an assertion this panel signed earlier.
+ *
+ * The other side asks before it acts, so the answer has to be decided from the rights as
+ * they are now, not as they were when the assertion was written.
+ * @param envelope The confirmation request
+ * @param peer The panel that asks
+ * @param config Configuration in force
+ * @param services How this panel reads rights
+ * @returns {void}
+ * @throws {Error} denied, when the assertion may no longer be acted on
+ */
+async function confirmAssertion(envelope : z.infer<typeof validationSchema>, peer : DelegationPeer, config : DelegationConfig, services : DelegationServices) : Promise<void> {
+    const original = envelope.assertion;
+    const target = envelope.operationTarget;
+
+    if ([ "operation_apply", "operation_status" ].includes(original.action) && !target) {
+        throw new Error("denied");
+    }
+    if (original.issuer !== config.serverId || original.audience !== peer.id || !allowed(original, peer)) {
+        throw new Error("denied");
+    }
+    if (target && (!peer.actions.includes(target.action) || target.additionalActions?.some(action => !peer.actions.includes(action)) || !original.identity.stacks.includes(target.stackId))) {
+        throw new Error("denied");
+    }
+    if (!identityStillAllows(await services.resolveIdentity(original.identity.keyId), original)) {
+        throw new Error("denied");
+    }
+}
+
+/**
+ * Whether the peer is still the one the request was accepted from.
+ *
+ * Read between accepting a call and acting on it: the configuration may have been
+ * rewritten, and a key or a stack taken away in between has to stop the call.
+ * @param fresh Configuration as it is now
+ * @param trust The peer as it is now
+ * @param peer The peer as it was when the request arrived
+ * @param config Configuration as it was then
+ * @param assertion The call
+ * @param target The operation the call refers to, when it refers to one
+ * @returns True when nothing that mattered has changed
+ */
+function trustUnchanged(fresh : DelegationConfig, trust : DelegationPeer, peer : DelegationPeer, config : DelegationConfig, assertion : Assertion, target : OperationTarget | null) : boolean {
+    if (trust.publicKey !== peer.publicKey || fresh.serverId !== config.serverId || !allowed(assertion, trust)) {
+        return false;
+    }
+    return !target || (trust.actions.includes(target.action) && !target.additionalActions?.some(action => !trust.actions.includes(action))
+        && trust.allowedStackIds.includes(target.stackId) && assertion.identity.stacks.includes(target.stackId));
+}
+
+/**
+ * The arguments as this panel serves them locally.
+ *
+ * The caller names a server of its own catalogue; here the call is always about this
+ * panel, so the name is replaced rather than passed on.
+ * @param assertion The call
+ * @returns Arguments for the local tool
+ */
+function localArguments(assertion : Assertion) : Record<string, unknown> {
+    const args = { ...assertion.args };
+
+    if (assertion.action === "operation_prepare") {
+        delete args.server_id;
+        args.parameters = { ...(assertion.args.parameters as Record<string, unknown>),
+            server_id: "local" };
+    } else if ([ "operation_apply", "operation_status" ].includes(assertion.action)) {
+        delete args.server_id;
+    } else {
+        args.server_id = "local";
+    }
+    return args;
+}
+
+/**
+ * Who the caller is, as far as this panel is concerned.
+ *
+ * The rights of the other panel are not imported: a reading call becomes a viewer of the
+ * named stacks here and nothing more, whatever the caller holds at home.
+ * @param assertion The call
+ * @param observer True when the call only reads
+ * @returns Identity used for the local check
+ */
+function effectiveIdentity(assertion : Assertion, observer : boolean) : DelegatedIdentity {
+    return { ...assertion.identity,
+        keyId: delegatedSubjectId(assertion.issuer, assertion.identity.keyId),
+        role: observer ? "viewer" : "operator",
+        servers: [ "local" ],
+        stacks: assertion.identity.stacks,
+        resources: { local: assertion.identity.stacks },
+        actions: observer ? [] : assertion.identity.actions ?? [],
+        mode: observer ? "readonly" : assertion.identity.mode ?? "readonly" };
+}
+
+/**
+ * Carry out one call of another panel.
+ *
+ * The rights are checked again immediately before the work and once more after it: the
+ * call travels, and a key revoked while it was in flight must not leave a result behind.
+ * @param assertion The call
+ * @param peer The panel it came from
+ * @param config Configuration in force when it arrived
+ * @param services How this panel reads rights and does the work
+ * @returns The answer, as the JSON text to send back
+ * @throws {Error} denied, when the call may not be served
+ */
+async function serve(assertion : Assertion, peer : DelegationPeer, config : DelegationConfig, services : DelegationServices) : Promise<string> {
+    let operationTarget : OperationTarget | null = null;
+
+    if ([ "operation_apply", "operation_status" ].includes(assertion.action)) {
+        operationTarget = await services.operationTarget?.(delegatedSubjectId(assertion.issuer, assertion.identity.keyId), String(assertion.args.operation_id)) ?? null;
+        if (!operationTarget) {
+            throw new Error("denied");
+        }
+    }
+    const revalidate = async () => {
+        const fresh = await services.getConfig();
+        const trust = fresh?.peers.find(item => item.id === peer.id);
+
+        if (!fresh || !trust || !trustUnchanged(fresh, trust, peer, config, assertion, operationTarget) || !await services.authorizePeer(trust)) {
+            throw new Error("denied");
+        }
+        const now = Date.now();
+        const verdict = await signedPost(fresh, trust, "validate", { kind: "validate",
+            issuer: fresh.serverId,
+            audience: trust.id,
+            requestId: randomUUID(),
+            issuedAt: now,
+            expiresAt: now + TTL,
+            assertion,
+            ...(operationTarget ? { operationTarget } : {}) }) as { valid? : boolean };
+
+        if (verdict.valid !== true || !current(assertion)) {
+            throw new Error("denied");
+        }
+    };
+    const observer = (MCP_READ_TOOLS as readonly string[]).includes(assertion.action);
+    const refresh = async () => {
+        await revalidate();
+        return effectiveIdentity(assertion, observer);
+    };
+    const localArgs = localArguments(assertion);
+    const effective = await refresh();
+    const result = observer ? await services.read(effective, assertion.action, localArgs)
+        : services.dispatch ? await services.dispatch(effective, assertion.action, localArgs, refresh) : (() => {
+            throw new Error("denied");
+        })();
+
+    await revalidate();
+    const output = result && typeof result === "object" && "server_id" in result && result.server_id === "local" ? { ...result,
+        server_id: assertion.audience } : result;
+    const resultText = JSON.stringify(output);
+
+    if (Buffer.byteLength(resultText) > MAX_BYTES) {
+        throw new Error("denied");
+    }
+    return resultText;
+}
+
 /** Independently authorized, replay-protected peer channel; never uses browser agent sessions. */
 export function createDelegationRouter(services : DelegationServices) {
     const router = express.Router();
@@ -263,102 +550,15 @@ export function createDelegationRouter(services : DelegationServices) {
     router.post("/internal/mcp-delegation/:operation", express.raw({ type: "application/json",
         limit: "32kb" }), async (request, response) => {
         try {
-            const config = await services.getConfig();
-            if (!config || request.headers.authorization || request.headers.cookie || request.headers.origin || Object.keys(request.query).length) {
-                throw new Error("denied");
-            }
-            const body = request.body as Buffer;
-            if (!Buffer.isBuffer(body)) {
-                throw new Error("denied");
-            }
-            const raw = JSON.parse(body.toString("utf8"));
-            const envelope = request.params.operation === "read" ? readSchema.parse(raw) : request.params.operation === "validate" ? validationSchema.parse(raw) : null;
-            const peer = config.peers.find(item => item.id === envelope?.issuer);
-            const signature = request.headers["x-dockge-signature"];
-            if (!envelope || !peer || typeof signature !== "string" || !/^[a-zA-Z0-9_-]{86}$/.test(signature) || !current(envelope) || envelope.audience !== config.serverId || !verify(null, body, peer.publicKey, Buffer.from(signature, "base64url")) || !await services.authorizePeer(peer)) {
-                throw new Error("denied");
-            }
-            for (const [ key, expiry ] of seen) {
-                if (expiry <= Date.now()) {
-                    seen.delete(key);
-                }
-            }
-            const nonce = `${peer.id}:${envelope.requestId}`;
-            if (seen.has(nonce) || seen.size >= 1000) {
-                throw new Error("denied");
-            }
-            seen.set(nonce, envelope.expiresAt);
+            const { config, envelope, peer } = await authenticate(request, services);
+
+            claimNonce(seen, peer, envelope);
             if (envelope.kind === "validate") {
-                const original = envelope.assertion;
-                if ([ "operation_apply", "operation_status" ].includes(original.action) && !envelope.operationTarget || original.issuer !== config.serverId || original.audience !== peer.id || !allowed(original, peer) || envelope.operationTarget && (!peer.actions.includes(envelope.operationTarget.action) || envelope.operationTarget.additionalActions?.some(action => !peer.actions.includes(action)) || !original.identity.stacks.includes(envelope.operationTarget.stackId)) || !identityStillAllows(await services.resolveIdentity(original.identity.keyId), original)) {
-                    throw new Error("denied");
-                }
+                await confirmAssertion(envelope, peer, config, services);
                 response.json({ valid: true });
                 return;
             }
-            const assertion = envelope;
-            let operationTarget : { action : string; stackId : string; additionalActions? : string[] } | null = null;
-            if ([ "operation_apply", "operation_status" ].includes(assertion.action)) {
-                operationTarget = await services.operationTarget?.(delegatedSubjectId(assertion.issuer, assertion.identity.keyId), String(assertion.args.operation_id)) ?? null;
-                if (!operationTarget) {
-                    throw new Error("denied");
-                }
-            }
-            const revalidate = async () => {
-                const fresh = await services.getConfig();
-                const trust = fresh?.peers.find(item => item.id === peer.id);
-                if (!fresh || !trust || trust.publicKey !== peer.publicKey || fresh.serverId !== config.serverId || !allowed(assertion, trust) || operationTarget && (!trust.actions.includes(operationTarget.action) || operationTarget.additionalActions?.some(action => !trust.actions.includes(action)) || !trust.allowedStackIds.includes(operationTarget.stackId) || !assertion.identity.stacks.includes(operationTarget.stackId)) || !await services.authorizePeer(trust)) {
-                    throw new Error("denied");
-                }
-                const now = Date.now();
-                const verdict = await signedPost(fresh, trust, "validate", { kind: "validate",
-                    issuer: fresh.serverId,
-                    audience: trust.id,
-                    requestId: randomUUID(),
-                    issuedAt: now,
-                    expiresAt: now + TTL,
-                    assertion,
-                    ...(operationTarget ? { operationTarget } : {}) }) as { valid? : boolean };
-                if (verdict.valid !== true || !current(assertion)) {
-                    throw new Error("denied");
-                }
-            };
-            const observer = (MCP_READ_TOOLS as readonly string[]).includes(assertion.action);
-            const effectiveIdentity = () : DelegatedIdentity => ({ ...assertion.identity,
-                keyId: delegatedSubjectId(assertion.issuer, assertion.identity.keyId),
-                role: observer ? "viewer" : "operator",
-                servers: [ "local" ],
-                stacks: assertion.identity.stacks,
-                resources: { local: assertion.identity.stacks },
-                actions: observer ? [] : assertion.identity.actions ?? [],
-                mode: observer ? "readonly" : assertion.identity.mode ?? "readonly" });
-            const refresh = async () => {
-                await revalidate();
-                return effectiveIdentity();
-            };
-            const localArgs = { ...assertion.args };
-            if (assertion.action === "operation_prepare") {
-                delete localArgs.server_id;
-                localArgs.parameters = { ...(assertion.args.parameters as Record<string, unknown>),
-                    server_id: "local" };
-            } else if ([ "operation_apply", "operation_status" ].includes(assertion.action)) {
-                delete localArgs.server_id;
-            } else {
-                localArgs.server_id = "local";
-            }
-            const effective = await refresh();
-            const result = observer ? await services.read(effective, assertion.action, localArgs)
-                : services.dispatch ? await services.dispatch(effective, assertion.action, localArgs, refresh) : (() => {
-                    throw new Error("denied");
-                })();
-            await revalidate();
-            const output = result && typeof result === "object" && "server_id" in result && result.server_id === "local" ? { ...result,
-                server_id: assertion.audience } : result;
-            const resultText = JSON.stringify(output);
-            if (Buffer.byteLength(resultText) > MAX_BYTES) {
-                throw new Error("denied");
-            }
-            response.type("application/json").send(resultText);
+            response.type("application/json").send(await serve(envelope, peer, config, services));
         } catch {
             response.status(403).json({ error: "mcpDelegationDenied" });
         }

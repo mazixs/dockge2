@@ -122,34 +122,55 @@
 </template>
 
 <script>
+// @ts-check
 import { canApplyGitChoices, diffLineRows } from "../git-ui";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
 
+/**
+ * How long the acknowledgement of an apply is waited for.
+ *
+ * Writing the chosen files and deploying them takes as long as docker compose takes. The
+ * wait is long, but it ends: while it lasts the page refuses to be left, so an answer
+ * that never arrived used to keep the person on a page that could do nothing.
+ */
+const APPLY_REQUEST_TIMEOUT_MS = 15 * 60_000;
+
 export default {
+    /**
+     * Hold the person on the page while the files are being applied
+     * @this {{ applying : boolean }}
+     * @returns {boolean} Whether leaving is allowed
+     */
     beforeRouteLeave() {
         return !this.applying;
     },
     data() {
         return {
+            /** @type {import("../../../common/types/stack-git").GitUpdatePreview | null} */
             preview: null,
             selectedPath: "",
+            /** @type {Record<string, import("../../../common/types/stack-git").GitFileChoice>} */
             choices: {},
+            /** Черновик результата по каждому файлу @type {Record<string, string>} */
             editedContents: {},
             loading: false,
             applying: false,
             failure: "",
             review: false,
+            /** @type {import("../../../common/types/stack-git").GitSaveResult | null} */
             result: null,
             requestVersion: 0,
-            previewTimeout: null,
+            /** @type {ReturnType<typeof setTimeout> | undefined} */
+            previewTimeout: undefined,
         };
     },
     computed: {
         stackName() {
-            return this.$route.params.stackName;
+            // Параметр маршрута может прийти списком: страница работает с одним стеком
+            return String(this.$route.params.stackName ?? "");
         },
         endpoint() {
-            return this.$route.params.endpoint || "";
+            return String(this.$route.params.endpoint || "");
         },
         stackPath() {
             return `/stack/${encodeURIComponent(this.stackName)}${this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : ""}`;
@@ -158,12 +179,18 @@ export default {
             return this.$root.completeStackList[this.stackName + "_" + this.endpoint];
         },
         statusLabel() {
+            /** @type {Record<number, string>} */
             const labels = { [CREATED_FILE]: "pagesNotDeployed",
                 [CREATED_STACK]: "pagesStopped",
                 [RUNNING]: "pagesRunning",
                 [EXITED]: "pagesFailed",
                 [ATTENTION]: "pagesAttention" };
-            return this.$root.agentStatusList[this.endpoint] === "online" ? labels[this.currentStack?.status] || "pagesUnknown" : "pagesUnknown";
+            const status = this.currentStack?.status;
+
+            if (this.$root.agentStatusList[this.endpoint] !== "online" || status === undefined) {
+                return "pagesUnknown";
+            }
+            return labels[status] || "pagesUnknown";
         },
         servicesRunning() {
             return this.statusLabel === "pagesRunning";
@@ -172,10 +199,10 @@ export default {
             return this.preview?.files.find(file => file.path === this.selectedPath);
         },
         serverLines() {
-            return diffLineRows(this.selectedFile.serverText, this.selectedFile.gitText);
+            return diffLineRows(this.selectedFile?.serverText ?? null, this.selectedFile?.gitText ?? null);
         },
         gitLines() {
-            return diffLineRows(this.selectedFile.gitText, this.selectedFile.serverText);
+            return diffLineRows(this.selectedFile?.gitText ?? null, this.selectedFile?.serverText ?? null);
         },
         resolvedCount() {
             return this.preview?.files.filter(file => Object.hasOwn(this.choices, file.path)).length || 0;
@@ -195,6 +222,9 @@ export default {
             }
         },
         "$route.fullPath"() {
+            // Смена стека на том же маршруте оставляла ожидание прежнего стека: его
+            // ответ применился бы к новому экрану, а чтение изменений не начиналось
+            this.forgetRequest();
             this.loadPreview();
         },
     },
@@ -202,15 +232,36 @@ export default {
         this.loadPreview();
     },
     unmounted() {
-        clearTimeout(this.previewTimeout);
-        this.requestVersion++;
+        this.forgetRequest();
     },
     methods: {
-        /** Show the commit identifier provided by the server. */
+        /**
+         * Stop waiting for whatever was asked: the page this asked for is gone.
+         *
+         * The wait is ended here, not the work on the server: an apply that was sent
+         * carries on, and the state it leaves is read again by the next preview.
+         * @returns {void}
+         */
+        forgetRequest() {
+            clearTimeout(this.previewTimeout);
+            this.previewTimeout = undefined;
+            this.requestVersion++;
+            this.loading = false;
+            this.applying = false;
+        },
+        /**
+         * Show the commit identifier provided by the server.
+         * @param {string} [commit] Commit the preview named
+         * @returns {string} Its short form
+         */
         shortCommit(commit) {
             return commit?.slice(0, 7) || "?";
         },
-        /** Read the exact per-file decision, never an inherited object property. */
+        /**
+         * Read the exact per-file decision, never an inherited object property.
+         * @param {string} path File the decision is about
+         * @returns {string} What the decision says
+         */
         choiceLabel(path) {
             if (!Object.hasOwn(this.choices, path)) {
                 return this.$t("gitUiNeedsChoice");
@@ -220,16 +271,26 @@ export default {
             }
             return this.$t(this.choices[path] === "server" ? "gitUiKeepServer" : "gitUiTakeGit");
         },
-        /** Record an explicit selection while preserving all other file decisions. */
+        /**
+         * Record an explicit selection while preserving all other file decisions.
+         * @param {"server" | "git" | "edited"} choice Which version wins for this file
+         * @returns {void}
+         */
         choose(choice) {
             this.choices = { ...this.choices,
                 [this.selectedPath]: choice };
         },
         /** Start with exact source bytes; retain the in-memory draft across choices. */
         editResult() {
+            const file = this.selectedFile;
+
+            if (!file) {
+                return;
+            }
+
             if (!Object.hasOwn(this.editedContents, this.selectedPath)) {
                 this.editedContents = { ...this.editedContents,
-                    [this.selectedPath]: (this.choices[this.selectedPath] === "git" ? this.selectedFile.gitText : this.selectedFile.serverText) ?? this.selectedFile.gitText ?? this.selectedFile.serverText ?? "" };
+                    [this.selectedPath]: (this.choices[this.selectedPath] === "git" ? file.gitText : file.serverText) ?? file.gitText ?? file.serverText ?? "" };
             }
             this.choose("edited");
         },
@@ -272,22 +333,33 @@ export default {
                 this.selectedPath = res.preview.files[0]?.path || "";
             });
         },
-        /** Apply the reviewed snapshot; the server revalidates disk state before writing. */
+        /**
+         * Apply the reviewed snapshot; the server revalidates disk state before writing.
+         * @param {boolean} deploy Whether the stack is started once the files are written
+         * @returns {void}
+         */
         apply(deploy) {
-            if (!this.ready || this.applying || this.failure) {
+            if (!this.ready || this.applying || this.failure || !this.preview) {
                 return;
             }
             this.applying = true;
-            this.$root.emitAgent(this.endpoint, "gitApplyUpdate", {
+            const version = ++this.requestVersion;
+            this.$root.emitAgentRequest(this.endpoint, "gitApplyUpdate", [{
                 stackName: this.stackName,
                 previewId: this.preview.id,
                 choices: this.choices,
                 editedContents: Object.fromEntries(Object.entries(this.editedContents).filter(([ path ]) => this.choices[path] === "edited")),
                 deploy,
-            }, (res) => {
+            }], { timeoutMs: APPLY_REQUEST_TIMEOUT_MS }).then((res) => {
+                if (version !== this.requestVersion) {
+                    return;
+                }
                 this.applying = false;
+
                 if (!res?.ok) {
-                    this.failure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
+                    // Подтверждения не было: файлы могли быть записаны, а стек - переподнят.
+                    // Страница не повторяет применение, а предлагает перечитать изменения
+                    this.failure = res?.unknown ? this.$t("gitUiResultUnknown") : this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
                 this.failure = "";

@@ -12,6 +12,46 @@ export function canApplyGitChoices(files: Array<{path: string; redacted?: boolea
         && ([ "server", "git" ].includes(choices[file.path] || "") || (choices[file.path] === "edited" && !file.redacted && !file.binary && Object.hasOwn(edited, file.path) && typeof edited[file.path] === "string")));
 }
 
+/** Find the lines of a changed block that appear on both sides.
+ * The block is aligned with a longest common subsequence. A very large block is
+ * left unaligned instead, so a huge file cannot cost unbounded memory.
+ * @param lines This side of the comparison
+ * @param opposite Other side of the comparison
+ * @param start First line the two sides differ at
+ * @param rows How many lines of this side the changed block has
+ * @param columns How many lines of the other side the changed block has
+ * @returns Indexes of this side that also exist on the other side
+ */
+function matchedLines(lines: string[], opposite: string[], start: number, rows: number, columns: number): Set<number> {
+    const unchanged = new Set<number>();
+    if (rows <= 0 || columns <= 0 || (rows + 1) * (columns + 1) > 250_000) {
+        return unchanged;
+    }
+    const stride = columns + 1;
+    const lengths = new Uint32Array((rows + 1) * stride);
+    for (let row = rows - 1; row >= 0; row--) {
+        for (let column = columns - 1; column >= 0; column--) {
+            lengths[row * stride + column] = lines[start + row] === opposite[start + column]
+                ? 1 + (lengths[(row + 1) * stride + column + 1] || 0)
+                : Math.max(lengths[(row + 1) * stride + column] || 0, lengths[row * stride + column + 1] || 0);
+        }
+    }
+    let row = 0;
+    let column = 0;
+    while (row < rows && column < columns) {
+        if (lines[start + row] === opposite[start + column]) {
+            unchanged.add(start + row);
+            row++;
+            column++;
+        } else if ((lengths[(row + 1) * stride + column] || 0) >= (lengths[row * stride + column + 1] || 0)) {
+            row++;
+        } else {
+            column++;
+        }
+    }
+    return unchanged;
+}
+
 /** Compare complete lines while preserving the exact original text for rendering.
  * Uses line alignment for separate hunks. Very large comparisons fall back to
  * a changed block between the shared prefix/suffix, keeping memory bounded.
@@ -35,33 +75,7 @@ export function diffLineRows(source: string | null, other: string | null): Array
         end--;
         otherEnd--;
     }
-    const unchanged = new Set<number>();
-    const rows = end - start;
-    const columns = otherEnd - start;
-    if (rows > 0 && columns > 0 && (rows + 1) * (columns + 1) <= 250_000) {
-        const stride = columns + 1;
-        const lengths = new Uint32Array((rows + 1) * stride);
-        for (let row = rows - 1; row >= 0; row--) {
-            for (let column = columns - 1; column >= 0; column--) {
-                lengths[row * stride + column] = lines[start + row] === opposite[start + column]
-                    ? 1 + (lengths[(row + 1) * stride + column + 1] || 0)
-                    : Math.max(lengths[(row + 1) * stride + column] || 0, lengths[row * stride + column + 1] || 0);
-            }
-        }
-        let row = 0;
-        let column = 0;
-        while (row < rows && column < columns) {
-            if (lines[start + row] === opposite[start + column]) {
-                unchanged.add(start + row);
-                row++;
-                column++;
-            } else if ((lengths[(row + 1) * stride + column] || 0) >= (lengths[row * stride + column + 1] || 0)) {
-                row++;
-            } else {
-                column++;
-            }
-        }
-    }
+    const unchanged = matchedLines(lines, opposite, start, end - start, otherEnd - start);
     return lines.map((text, index) => ({ text,
         changed: index >= start && index < end && !unchanged.has(index) }));
 }

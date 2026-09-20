@@ -4,9 +4,10 @@ import os from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import { runGit } from "./git-command";
 import { clearStackSourceCache } from "./stack-source";
-import type { GitApplyInput, GitCloneInput, GitPreviewFile, GitUpdatePreview } from "../common/stack-git";
+import type { GitApplyInput, GitCloneInput, GitPreviewFile, GitUpdatePreview } from "../common/types/stack-git";
 import type { StackFileConfig } from "../common/types/stack";
 import { gitRepositoryProblem } from "../common/git-repository";
+import { stackLockBusy, withStackLock } from "./stack-lock";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -173,6 +174,111 @@ async function writeTree(dir: string, tree: FileTree): Promise<void> {
 }
 
 /** Return an entire file as hidden when it might contain credentials. */
+/**
+ * Check that the choice covers exactly the files that were compared.
+ *
+ * A comparison the browser did not see in full, or an answer for a file nobody offered,
+ * means the two sides are talking about different states of the directory.
+ * @param preview Comparison the choice was made on
+ * @param input What the browser chose
+ * @returns {void}
+ */
+function assertChoices(preview: StoredPreview, input: GitApplyInput): void {
+    if (!input.choices || typeof input.choices !== "object" || Array.isArray(input.choices)) {
+        throw new StackGitError("gitChooseResultForEveryFile");
+    }
+    if (Object.keys(input.choices).length !== preview.public.files.length) {
+        throw new StackGitError("gitChooseResultForEveryFile");
+    }
+    for (const file of preview.public.files) {
+        if (!Object.hasOwn(input.choices, file.path) || ![ "server", "git", "edited" ].includes(input.choices[file.path]!)) {
+            throw new StackGitError("gitChooseResultForEveryFile");
+        }
+    }
+}
+
+/**
+ * Check the texts offered in place of both versions.
+ *
+ * Only a file the user was shown as text may be typed over: a redacted or binary file
+ * has no text to edit, and bytes that do not survive a round trip through UTF-8 would be
+ * written back as something else than what was on the screen.
+ * @param preview Comparison the choice was made on
+ * @param input What the browser chose
+ * @returns {void}
+ */
+function assertEditedResults(preview: StoredPreview, input: GitApplyInput): void {
+    const edited = input.editedContents ?? {};
+
+    if (typeof edited !== "object" || Array.isArray(edited)) {
+        throw new StackGitError("gitInvalidEditedResults");
+    }
+    for (const name of Object.keys(edited)) {
+        if (!preview.public.files.some((file) => file.path === name && input.choices[name] === "edited")) {
+            throw new StackGitError("gitInvalidEditedResults");
+        }
+    }
+    for (const file of preview.public.files) {
+        if (input.choices[file.path] !== "edited") {
+            continue;
+        }
+        const content = edited[file.path];
+
+        if (file.redacted || file.binary || typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES || content.includes("\0") || Buffer.from(content).toString("utf8") !== content) {
+            throw new StackGitError("gitEditOnlyForTextFiles");
+        }
+    }
+    let editedBytes = 0;
+
+    for (const content of Object.values(edited)) {
+        editedBytes += Buffer.byteLength(content, "utf8");
+        if (editedBytes > MAX_BYTES) {
+            throw new StackGitError("gitEditedResultsTooLarge");
+        }
+    }
+}
+
+/**
+ * What the directory becomes once every choice is applied.
+ *
+ * Nothing is read or written here: the answer is decided from the comparison alone, so
+ * the state of the disk is checked once, later, against a result that is already known.
+ * @param preview Comparison the choice was made on
+ * @param input What the browser chose
+ * @returns The files as they should end up, and which of them the choice touches
+ */
+function resolveResult(preview: StoredPreview, input: GitApplyInput): { result: FileTree; changed: string[] } {
+    const result: FileTree = new Map(preview.before);
+    const changed: string[] = [];
+    const edited = input.editedContents ?? {};
+
+    for (const file of preview.public.files) {
+        const choice = input.choices[file.path];
+
+        if (choice === "edited") {
+            const original = preview.before.get(file.path) ?? preview.target.get(file.path)!;
+
+            result.set(file.path, { bytes: Buffer.from(edited[file.path]!, "utf8"),
+                mode: original.mode });
+            changed.push(file.path);
+        } else if (choice === "git") {
+            const target = preview.target.get(file.path);
+            const previous = preview.before.get(file.path);
+
+            if (target) {
+                // Git tracks only executability. Preserve existing private read/write permissions.
+                result.set(file.path, { bytes: target.bytes,
+                    mode: previous ? (previous.mode & ~0o111) | (target.mode & 0o111) : target.mode });
+            } else {
+                result.delete(file.path);
+            }
+            changed.push(file.path);
+        }
+    }
+    return { result,
+        changed };
+}
+
 function previewFile(name: string, before: FileState | undefined, after: FileState | undefined, config: StackFileConfig): GitPreviewFile {
     const texts = [ before?.bytes.toString("utf8") ?? "", after?.bytes.toString("utf8") ?? "" ];
     const binary = [ before, after ].some((file) => file && (file.bytes.includes(0) || !Buffer.from(file.bytes.toString("utf8")).equals(file.bytes)));
@@ -190,7 +296,6 @@ function previewFile(name: string, before: FileState | undefined, after: FileSta
 /** Immutable, bounded previews and file selection without checkout/reset/stash. */
 export class StackGitWorkflow {
     private previews = new Map<string, StoredPreview>();
-    private busy = new Set<string>();
 
     constructor(private options: GitWorkflowOptions) {}
 
@@ -262,16 +367,22 @@ export class StackGitWorkflow {
         return result;
     }
 
+    /**
+     * Run a Git operation while nothing else writes this stack directory.
+     *
+     * The lock is the one the editor and MCP take, because all three replace the same
+     * files. Git does not wait for its turn: a comparison made against files that are
+     * being rewritten would be shown to the user as if it still applied.
+     * @param dir Stack directory
+     * @param operation Work to run exclusively
+     * @returns Whatever the operation returns
+     * @throws {StackGitError} When another operation already holds the directory
+     */
     private async exclusive<T>(dir: string, operation: () => Promise<T>): Promise<T> {
-        if (this.busy.has(dir)) {
+        if (stackLockBusy(dir)) {
             throw new StackGitError("gitOperationAlreadyRunning");
         }
-        this.busy.add(dir);
-        try {
-            return await operation();
-        } finally {
-            this.busy.delete(dir);
-        }
+        return withStackLock(dir, operation);
     }
 
     /** List the branches a remote advertises so the name does not have to be typed from memory.
@@ -408,49 +519,12 @@ export class StackGitWorkflow {
             if (!preview || preview.dir !== dir || Date.now() - preview.createdAt > PREVIEW_MS) {
                 throw new StackGitError("gitComparisonExpired");
             }
-            if (!input.choices || typeof input.choices !== "object" || Array.isArray(input.choices) || Object.keys(input.choices).length !== preview.public.files.length || preview.public.files.some((file) => !Object.hasOwn(input.choices, file.path) || ![ "server", "git", "edited" ].includes(input.choices[file.path]!))) {
-                throw new StackGitError("gitChooseResultForEveryFile");
-            }
-            const edited = input.editedContents ?? {};
-            if (typeof edited !== "object" || Array.isArray(edited) || Object.keys(edited).some(name => !preview.public.files.some(file => file.path === name && input.choices[name] === "edited"))) {
-                throw new StackGitError("gitInvalidEditedResults");
-            }
-            let editedBytes = 0;
-            for (const file of preview.public.files) {
-                if (input.choices[file.path] === "edited" && (file.redacted || file.binary || !Object.hasOwn(edited, file.path) || typeof edited[file.path] !== "string" || Buffer.byteLength(edited[file.path]!, "utf8") > MAX_FILE_BYTES || edited[file.path]!.includes("\0") || Buffer.from(edited[file.path]!).toString("utf8") !== edited[file.path])) {
-                    throw new StackGitError("gitEditOnlyForTextFiles");
-                }
-            }
-            for (const content of Object.values(edited)) {
-                editedBytes += Buffer.byteLength(content, "utf8");
-                if (editedBytes > MAX_BYTES) {
-                    throw new StackGitError("gitEditedResultsTooLarge");
-                }
-            }
+            assertChoices(preview, input);
+            assertEditedResults(preview, input);
             if (JSON.stringify(config) !== JSON.stringify(preview.config)) {
                 throw new StackGitError("gitFileConfigChanged");
             }
-            const result: FileTree = new Map(preview.before);
-            const changed: string[] = [];
-            for (const file of preview.public.files) {
-                if (input.choices[file.path] === "edited") {
-                    const original = preview.before.get(file.path) ?? preview.target.get(file.path)!;
-                    result.set(file.path, { bytes: Buffer.from(edited[file.path]!, "utf8"),
-                        mode: original.mode });
-                    changed.push(file.path);
-                } else if (input.choices[file.path] === "git") {
-                    const target = preview.target.get(file.path);
-                    if (target) {
-                        const previous = preview.before.get(file.path);
-                        // Git tracks only executability. Preserve existing private read/write permissions.
-                        result.set(file.path, { bytes: target.bytes,
-                            mode: previous ? (previous.mode & ~0o111) | (target.mode & 0o111) : target.mode });
-                    } else {
-                        result.delete(file.path);
-                    }
-                    changed.push(file.path);
-                }
-            }
+            const { result, changed } = resolveResult(preview, input);
             if (result.size > MAX_FILES || [ ...result.values() ].reduce((total, file) => total + file.bytes.length, 0) > MAX_BYTES) {
                 throw new StackGitError("gitResultTooLarge");
             }
@@ -463,81 +537,114 @@ export class StackGitWorkflow {
                     force: true });
             }
             await this.assertRepository(dir);
-            const indexLockPath = path.join(dir, ".git/index.lock");
-            let indexLock;
-            try {
-                indexLock = await fs.open(indexLockPath, "wx", 0o600);
-            } catch {
-                throw new StackGitError("gitBusyElsewhere");
-            }
-            const temporaryIndex = path.join(dir, `.git/dockge-index-${randomUUID()}`);
-            const recovery = path.join(dir, `.git/dockge-recovery-${randomUUID()}`);
-            let preserveRecovery = false;
-            const written: string[] = [];
-            let indexUpdated = false;
-            try {
-                if (await this.commit(dir) !== preview.public.currentCommit || await this.branch(dir) !== preview.public.branch || !sameTree(await snapshot(dir), preview.before) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
-                    throw new StackGitError("gitChangedSinceComparison");
-                }
-                // Build Git metadata separately; the real index stays locked and unchanged until all files succeed.
-                await this.git(dir, [ "read-tree", preview.public.targetCommit ], temporaryIndex);
-                await fs.mkdir(recovery, { mode: 0o700 });
-                const originals: FileTree = new Map(changed.filter((name) => preview.before.has(name)).map((name) => [ name, preview.before.get(name)! ]));
-                await fs.mkdir(path.join(recovery, "files"));
-                await writeTree(path.join(recovery, "files"), originals);
-                await fs.writeFile(path.join(recovery, "index"), preview.index, { mode: 0o600 });
-                await fs.writeFile(path.join(recovery, "manifest.json"), JSON.stringify({ currentCommit: preview.public.currentCommit,
-                    targetCommit: preview.public.targetCommit,
-                    files: changed }), { mode: 0o600 });
-                for (const name of changed) {
-                    await this.options.beforeWrite?.(name);
-                    if (!equalFile(await this.currentFile(dir, name), preview.before.get(name))) {
-                        throw new StackGitError("gitFileChangedWhileApplying");
-                    }
-                    await this.replaceFile(dir, name, result.get(name));
-                    written.push(name);
-                }
-                // Validation covers unchanged inputs too: detect edits made during our writes.
-                if (!sameTree(await snapshot(dir), result) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
-                    throw new StackGitError("gitChangedWhileApplying");
-                }
-                await fs.rename(temporaryIndex, path.join(dir, ".git/index"));
-                indexUpdated = true;
-                await this.git(dir, [ "update-ref", `refs/heads/${preview.public.branch}`, preview.public.targetCommit, preview.public.currentCommit ]);
-            } catch (error) {
-                try {
-                    for (const name of written.reverse()) {
-                        if (!equalFile(await this.currentFile(dir, name), result.get(name))) {
-                            throw new Error("Concurrent edit during rollback", { cause: error });
-                        }
-                        if (preview.before.has(name)) {
-                            await fs.rename(path.join(recovery, "files", name), path.join(dir, name));
-                        } else {
-                            await this.replaceFile(dir, name);
-                        }
-                    }
-                    if (indexUpdated) {
-                        await fs.rename(path.join(recovery, "index"), path.join(dir, ".git/index"));
-                    }
-                } catch {
-                    preserveRecovery = true;
-                    throw new StackGitError("gitRollbackIncomplete", { backup: path.basename(recovery) });
-                }
-                throw error;
-            } finally {
-                await indexLock.close();
-                await fs.rm(indexLockPath, { force: true });
-                await fs.rm(temporaryIndex, { force: true });
-                await fs.rm(`${temporaryIndex}.lock`, { force: true });
-                if (!preserveRecovery) {
-                    await fs.rm(recovery, { recursive: true,
-                        force: true });
-                }
-                clearStackSourceCache(dir);
-            }
+            await this.write(dir, preview, result, changed);
             this.previews.delete(input.previewId);
             return { filesHash: treeHash(result) };
         });
+    }
+
+    /**
+     * Put the chosen result on disk, or leave the directory as it was.
+     *
+     * Everything before this point decided what the files should become; here nothing is
+     * decided any more. The state is checked once more against the comparison, because
+     * time passed while the user was choosing, and every write is undone when a later one
+     * fails. Rolling files back does not roll container data back, so the caller still has
+     * to redeploy.
+     * @param dir Stack directory
+     * @param preview Comparison the choice was made on
+     * @param result What every file has to become
+     * @param changed Files the choice actually touches
+     * @returns {void}
+     */
+    private async write(dir: string, preview: StoredPreview, result: FileTree, changed: string[]): Promise<void> {
+        const indexLockPath = path.join(dir, ".git/index.lock");
+        let indexLock;
+        try {
+            indexLock = await fs.open(indexLockPath, "wx", 0o600);
+        } catch {
+            throw new StackGitError("gitBusyElsewhere");
+        }
+        const temporaryIndex = path.join(dir, `.git/dockge-index-${randomUUID()}`);
+        const recovery = path.join(dir, `.git/dockge-recovery-${randomUUID()}`);
+        let preserveRecovery = false;
+        const written: string[] = [];
+        let indexUpdated = false;
+        try {
+            if (await this.commit(dir) !== preview.public.currentCommit || await this.branch(dir) !== preview.public.branch || !sameTree(await snapshot(dir), preview.before) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
+                throw new StackGitError("gitChangedSinceComparison");
+            }
+            // Build Git metadata separately; the real index stays locked and unchanged until all files succeed.
+            await this.git(dir, [ "read-tree", preview.public.targetCommit ], temporaryIndex);
+            await this.keepOriginals(recovery, preview, changed);
+            for (const name of changed) {
+                await this.options.beforeWrite?.(name);
+                if (!equalFile(await this.currentFile(dir, name), preview.before.get(name))) {
+                    throw new StackGitError("gitFileChangedWhileApplying");
+                }
+                await this.replaceFile(dir, name, result.get(name));
+                written.push(name);
+            }
+            // Validation covers unchanged inputs too: detect edits made during our writes.
+            if (!sameTree(await snapshot(dir), result) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
+                throw new StackGitError("gitChangedWhileApplying");
+            }
+            await fs.rename(temporaryIndex, path.join(dir, ".git/index"));
+            indexUpdated = true;
+            await this.git(dir, [ "update-ref", `refs/heads/${preview.public.branch}`, preview.public.targetCommit, preview.public.currentCommit ]);
+        } catch (error) {
+            try {
+                for (const name of written.reverse()) {
+                    if (!equalFile(await this.currentFile(dir, name), result.get(name))) {
+                        throw new Error("Concurrent edit during rollback", { cause: error });
+                    }
+                    if (preview.before.has(name)) {
+                        await fs.rename(path.join(recovery, "files", name), path.join(dir, name));
+                    } else {
+                        await this.replaceFile(dir, name);
+                    }
+                }
+                if (indexUpdated) {
+                    await fs.rename(path.join(recovery, "index"), path.join(dir, ".git/index"));
+                }
+            } catch {
+                preserveRecovery = true;
+                throw new StackGitError("gitRollbackIncomplete", { backup: path.basename(recovery) });
+            }
+            throw error;
+        } finally {
+            await indexLock.close();
+            await fs.rm(indexLockPath, { force: true });
+            await fs.rm(temporaryIndex, { force: true });
+            await fs.rm(`${temporaryIndex}.lock`, { force: true });
+            if (!preserveRecovery) {
+                await fs.rm(recovery, { recursive: true,
+                    force: true });
+            }
+            clearStackSourceCache(dir);
+        }
+    }
+
+    /**
+     * Keep the bytes a failed write would otherwise destroy.
+     *
+     * The copy survives a crash on purpose: a directory left behind names the commit it
+     * belongs to, so the files can be put back by hand.
+     * @param recovery Directory the originals are kept in
+     * @param preview Comparison the choice was made on
+     * @param changed Files the choice touches
+     * @returns {void}
+     */
+    private async keepOriginals(recovery: string, preview: StoredPreview, changed: string[]): Promise<void> {
+        const originals: FileTree = new Map(changed.filter((name) => preview.before.has(name)).map((name) => [ name, preview.before.get(name)! ]));
+
+        await fs.mkdir(recovery, { mode: 0o700 });
+        await fs.mkdir(path.join(recovery, "files"));
+        await writeTree(path.join(recovery, "files"), originals);
+        await fs.writeFile(path.join(recovery, "index"), preview.index, { mode: 0o600 });
+        await fs.writeFile(path.join(recovery, "manifest.json"), JSON.stringify({ currentCommit: preview.public.currentCommit,
+            targetCommit: preview.public.targetCommit,
+            files: changed }), { mode: 0o600 });
     }
 
     private async currentFile(dir: string, name: string): Promise<FileState | undefined> {

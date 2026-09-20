@@ -9,26 +9,100 @@ import { hasBuildServices, readComposeImages } from "../../common/compose-status
 import { Terminal } from "../terminal";
 import { getComposeTerminalName } from "../../common/util-common";
 import { ContainerInstanceStatus } from "../../common/compose-status";
-import type { StackFileConfig } from "../../common/types/stack";
+import type { StackFileBaseline, StackFileConfig } from "../../common/types/stack";
+import { isSafeStackFileName } from "../../common/stack-files";
 import { AgentSocket } from "../../common/agent-socket";
+import type { AgentRequestContract, AgentRequestResult } from "../../common/agent-events";
+import { runInBackground } from "../background";
+
+/** A file hash as the write service produces it */
+const FILE_HASH = /^[0-9a-f]{64}$/;
+
+/**
+ * Read the optional baseline of a save, whichever argument shape the caller used.
+ *
+ * The baseline arrived with a later generation of the agent protocol, so an older caller
+ * simply passes its callback where the baseline now is. Saving without one is still
+ * allowed: it is what an explicit "overwrite anyway" sends after a conflict was shown.
+ * @param baselineOrCallback Fifth argument of the event
+ * @returns The baseline to check against, or undefined when the caller sent none
+ * @throws {ValidationError} If the baseline is not a pair of hashes
+ */
+function readSaveBaseline(baselineOrCallback : unknown) : StackFileBaseline | undefined {
+    if (typeof baselineOrCallback === "function" || baselineOrCallback === undefined || baselineOrCallback === null) {
+        return undefined;
+    }
+
+    if (typeof baselineOrCallback !== "object" || Array.isArray(baselineOrCallback)) {
+        throw new ValidationError("Baseline must be an object");
+    }
+
+    const raw = baselineOrCallback as Record<string, unknown>;
+    const baseline : StackFileBaseline = {};
+
+    for (const key of [ "compose", "env" ] as const) {
+        if (!(key in raw)) {
+            continue;
+        }
+        const value = raw[key];
+        if (value !== null && (typeof value !== "string" || !FILE_HASH.test(value))) {
+            throw new ValidationError("Baseline must hold file hashes");
+        }
+        baseline[key] = value;
+    }
+
+    // The names travel with the hashes: a save is for the files the editor read, and an
+    // unsafe name is refused here rather than being compared against a selection
+    for (const key of [ "composeFileName", "envFileName" ] as const) {
+        if (!(key in raw) || raw[key] === undefined) {
+            continue;
+        }
+        const value = raw[key];
+        if (typeof value !== "string" || !isSafeStackFileName(value)) {
+            throw new ValidationError("Baseline must hold safe file names");
+        }
+        baseline[key] = value;
+    }
+
+    return baseline;
+}
+
+/** What a save answers, whichever of the two events it was */
+type SaveAck = (response : AgentRequestResult<"saveStack">) => void;
+
+/**
+ * The acknowledgement of a save, whichever argument shape the caller used.
+ *
+ * Which argument holds it depends on the generation the caller speaks, so it is picked
+ * out here and named as the acknowledgement of a save. That the caller really sent a
+ * function is decided when it is answered, not here.
+ * @param baselineOrCallback Fifth argument of the event
+ * @param maybeCallback Sixth argument of the event, when there is one
+ * @returns The acknowledgement to answer
+ */
+function readSaveCallback(baselineOrCallback : unknown, maybeCallback : unknown) : SaveAck {
+    return (typeof baselineOrCallback === "function" ? baselineOrCallback : maybeCallback) as SaveAck;
+}
 
 /** Окна, которые предлагает интерфейс: сутки, неделя, месяц */
 const AVAILABILITY_WINDOWS = [ 24, 168, 720 ];
 
 export class DockerSocketHandler extends AgentSocketHandler {
-    create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
+    create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
         // Do not call super.create()
 
-        agentSocket.on("deployStack", async (name : unknown, composeYAML : unknown, composeENV : unknown, isAdd : unknown, callback) => {
+        agentSocket.on("deployStack", async (name : unknown, composeYAML : unknown, composeENV : unknown, isAdd : unknown, baselineOrCallback : unknown, maybeCallback : unknown) => {
+            const callback = readSaveCallback(baselineOrCallback, maybeCallback);
             try {
                 checkLogin(socket);
-                const stack = await this.saveStack(server, name, composeYAML, composeENV, isAdd);
+                const { stack, fileHashes } = await this.saveStack(server, name, composeYAML, composeENV, isAdd, readSaveBaseline(baselineOrCallback));
                 await stack.deploy(socket);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
                     msg: "Deployed",
                     msgi18n: true,
+                    fileHashes,
                 }, callback);
                 stack.joinCombinedTerminal(socket);
             } catch (e) {
@@ -36,16 +110,18 @@ export class DockerSocketHandler extends AgentSocketHandler {
             }
         });
 
-        agentSocket.on("saveStack", async (name : unknown, composeYAML : unknown, composeENV : unknown, isAdd : unknown, callback) => {
+        agentSocket.on("saveStack", async (name : unknown, composeYAML : unknown, composeENV : unknown, isAdd : unknown, baselineOrCallback : unknown, maybeCallback : unknown) => {
+            const callback = readSaveCallback(baselineOrCallback, maybeCallback);
             try {
                 checkLogin(socket);
-                await this.saveStack(server, name, composeYAML, composeENV, isAdd);
+                const { fileHashes } = await this.saveStack(server, name, composeYAML, composeENV, isAdd, readSaveBaseline(baselineOrCallback));
                 callbackResult({
                     ok: true,
                     msg: "Saved",
                     msgi18n: true,
+                    fileHashes,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -62,11 +138,11 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 try {
                     await stack.delete(socket);
                 } catch (e) {
-                    server.sendStackList();
+                    runInBackground("stack list", () => server.sendStackList());
                     throw e;
                 }
 
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
                     msg: "Deleted",
@@ -105,7 +181,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
         agentSocket.on("requestStackList", async (callback) => {
             try {
                 checkLogin(socket);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
                     msg: "Updated",
@@ -132,7 +208,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Started",
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
 
                 stack.joinCombinedTerminal(socket);
 
@@ -157,7 +233,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Stopped",
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
 
                 stack.leaveCombinedTerminal(socket);
             } catch (e) {
@@ -181,7 +257,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Restarted",
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -203,7 +279,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Updated",
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -225,7 +301,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Downed",
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -390,7 +466,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msgi18n: true,
                 }, callback);
 
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -592,7 +668,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     ok: true,
                     dockerStats,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -618,7 +694,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     },
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -643,7 +719,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     },
                     msgi18n: true,
                 }, callback);
-                server.sendStackList();
+                runInBackground("stack list", () => server.sendStackList());
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -687,7 +763,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
         });
     }
 
-    async saveStack(server : DockgeServer, name : unknown, composeYAML : unknown, composeENV : unknown, isAdd : unknown) : Promise<Stack> {
+    async saveStack(server : DockgeServer, name : unknown, composeYAML : unknown, composeENV : unknown, isAdd : unknown, baseline? : StackFileBaseline) : Promise<{ stack : Stack, fileHashes : StackFileBaseline }> {
         // Check types
         if (typeof(name) !== "string") {
             throw new ValidationError("Name must be a string");
@@ -708,14 +784,64 @@ export class DockerSocketHandler extends AgentSocketHandler {
         }
 
         const stack = new Stack(server, name, composeYAML, composeENV, false);
-        await stack.save(isAdd);
-        return stack;
+        const fileHashes = await stack.save(isAdd, baseline);
+        return { stack,
+            fileHashes };
     }
 
 }
 
 /** A stack directory never holds more files than this, so anything above is refused */
 const MAX_FILE_LIST_LENGTH = 64;
+
+/**
+ * Read the secret bindings of a file selection.
+ * Only shapes and types are checked here; which file a name may point at is decided
+ * by the stack directory, not by the browser.
+ * @param raw Raw value from the socket
+ * @returns Typed bindings, empty when the selection carries none
+ * @throws {ValidationError} If the shape is wrong
+ */
+function parseSecretBindings(raw : unknown) : StackFileConfig["secretBindings"] {
+    if (raw === undefined) {
+        return [];
+    }
+
+    if (!Array.isArray(raw)) {
+        throw new ValidationError("secretBindings must be an array");
+    }
+
+    if (raw.length > MAX_FILE_LIST_LENGTH) {
+        throw new ValidationError("Too many secret bindings");
+    }
+
+    const bindings : StackFileConfig["secretBindings"] = [];
+
+    for (const item of raw) {
+        const binding = item as Record<string, unknown>;
+
+        if (typeof binding?.name !== "string" || typeof binding?.fileName !== "string") {
+            throw new ValidationError("A secret binding needs a name and a file name");
+        }
+
+        const services = binding.services;
+        if (services !== undefined && (!Array.isArray(services) || services.some((service) => typeof service !== "string"))) {
+            throw new ValidationError("Secret binding services must be a string array");
+        }
+
+        if (Array.isArray(services) && services.length > MAX_FILE_LIST_LENGTH) {
+            throw new ValidationError("Too many services for one secret");
+        }
+
+        bindings.push({
+            name: binding.name,
+            fileName: binding.fileName,
+            services: (services as string[] | undefined) ?? [],
+        });
+    }
+
+    return bindings;
+}
 
 /**
  * Read a file selection coming from the browser.
@@ -749,46 +875,11 @@ function parseStackFileConfig(config : unknown) : StackFileConfig {
         throw new ValidationError("activeEnvFileName must be a string");
     }
 
-    const bindings = [];
-
-    if (raw.secretBindings !== undefined) {
-        if (!Array.isArray(raw.secretBindings)) {
-            throw new ValidationError("secretBindings must be an array");
-        }
-
-        if (raw.secretBindings.length > MAX_FILE_LIST_LENGTH) {
-            throw new ValidationError("Too many secret bindings");
-        }
-
-        for (const item of raw.secretBindings) {
-            const binding = item as Record<string, unknown>;
-
-            if (typeof binding?.name !== "string" || typeof binding?.fileName !== "string") {
-                throw new ValidationError("A secret binding needs a name and a file name");
-            }
-
-            const services = binding.services;
-            if (services !== undefined && (!Array.isArray(services) || services.some((service) => typeof service !== "string"))) {
-                throw new ValidationError("Secret binding services must be a string array");
-            }
-
-            if (Array.isArray(services) && services.length > MAX_FILE_LIST_LENGTH) {
-                throw new ValidationError("Too many services for one secret");
-            }
-
-            bindings.push({
-                name: binding.name,
-                fileName: binding.fileName,
-                services: (services as string[] | undefined) ?? [],
-            });
-        }
-    }
-
     return {
         composeFileName: raw.composeFileName,
         envFileNames: raw.envFileNames as string[],
         activeEnvFileName: (raw.activeEnvFileName as string | undefined) ?? "",
-        secretBindings: bindings,
+        secretBindings: parseSecretBindings(raw.secretBindings),
     };
 }
 

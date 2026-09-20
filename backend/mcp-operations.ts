@@ -149,76 +149,105 @@ export class McpOperations {
     /** Route strict prepare/apply/status inputs without accepting a caller-selected event. */
     async call(identity: MachineIdentity, name: string, input: unknown): Promise<unknown> {
         if (name === "operation_prepare") {
-            const current = await this.current(identity);
-            const request = prepareSchema.parse(input);
-            const handler = this.handlers.get(request.action);
-            if (!handler || current.role !== "operator" || current.mode === "readonly" || !current.actions.includes(handler.requiredAction)) {
-                throw new Error("mcpPermissionDenied");
-            }
-            const args = handler.schema.parse(request.parameters);
-            const hash = createHash("sha256").update(canonical({ action: request.action,
-                args })).digest("hex");
-            const existing = await this.knex("mcp_operation").where({ key_id: current.keyId,
-                request_id: request.request_id }).first();
-            if (existing) {
-                const { row } = await this.owned(current, existing.id);
-                if (row.parameters_hash !== hash) {
-                    throw new Error("mcpRequestChanged");
-                }
-                return this.summary(row);
-            }
-            const prepared = await handler.prepare(current, args);
-            access(current, handler.requiredAction, prepared.serverId, prepared.stackId);
-            const fresh = await this.current(current);
-            access(fresh, handler.requiredAction, prepared.serverId, prepared.stackId);
-            if (fresh.policyVersion !== current.policyVersion) {
-                throw new Error("mcpPermissionDenied");
-            }
-            if (this.prepared.size >= 500) {
-                for (const [ id ] of this.prepared) {
-                    const row = await this.knex("mcp_operation").where({ id }).first();
-                    if (!row || row.expires_at <= Date.now()) {
-                        this.prepared.delete(id);
-                    }
-                }
-                if (this.prepared.size >= 500) {
-                    throw new Error("mcpTooManyOperations");
-                }
-            }
-            const row = { id: randomUUID(),
-                key_id: fresh.keyId,
-                request_id: request.request_id,
-                action: request.action,
-                permission: handler.requiredAction,
-                server_id: prepared.serverId,
-                stack_id: prepared.stackId,
-                parameters_hash: hash,
-                fingerprint: prepared.fingerprint,
-                policy_version: fresh.policyVersion,
-                summary: prepared.summary.slice(0, 200),
-                state: fresh.mode === "approval" ? "awaiting_approval" : "prepared",
-                created_at: Date.now(),
-                expires_at: Date.now() + 10 * 60_000 };
-            try {
-                await this.knex("mcp_operation").insert(row);
-            } catch {
-                const duplicate = await this.knex("mcp_operation").where({ key_id: fresh.keyId,
-                    request_id: request.request_id }).first();
-                if (!duplicate || duplicate.parameters_hash !== hash) {
-                    throw new Error("mcpRequestChanged");
-                }
-                return this.summary((await this.owned(fresh, duplicate.id)).row);
-            }
-            this.prepared.set(row.id, prepared);
-            return this.summary(row);
+            return this.prepare(identity, input);
         }
         if (name === "operation_status") {
             const request = statusSchema.parse(input);
+
             return this.summary((await this.owned(identity, request.operation_id)).row);
         }
         if (name !== "operation_apply") {
             throw new Error("mcpPermissionDenied");
         }
+        return this.apply(identity, input);
+    }
+
+    /**
+     * Write down what an operation would do, without doing any of it.
+     *
+     * The rights are read, the arguments are validated, the rights are read again, and
+     * only then is the operation stored. The same request twice is the same operation:
+     * the caller may lose the answer and ask again without the work happening twice.
+     * @param identity Who is asking
+     * @param input Arguments of the call
+     * @returns The stored operation
+     */
+    private async prepare(identity: MachineIdentity, input: unknown): Promise<unknown> {
+        const current = await this.current(identity);
+        const request = prepareSchema.parse(input);
+        const handler = this.handlers.get(request.action);
+        if (!handler || current.role !== "operator" || current.mode === "readonly" || !current.actions.includes(handler.requiredAction)) {
+            throw new Error("mcpPermissionDenied");
+        }
+        const args = handler.schema.parse(request.parameters);
+        const hash = createHash("sha256").update(canonical({ action: request.action,
+            args })).digest("hex");
+        const existing = await this.knex("mcp_operation").where({ key_id: current.keyId,
+            request_id: request.request_id }).first();
+        if (existing) {
+            const { row } = await this.owned(current, existing.id);
+            if (row.parameters_hash !== hash) {
+                throw new Error("mcpRequestChanged");
+            }
+            return this.summary(row);
+        }
+        const prepared = await handler.prepare(current, args);
+        access(current, handler.requiredAction, prepared.serverId, prepared.stackId);
+        const fresh = await this.current(current);
+        access(fresh, handler.requiredAction, prepared.serverId, prepared.stackId);
+        if (fresh.policyVersion !== current.policyVersion) {
+            throw new Error("mcpPermissionDenied");
+        }
+        if (this.prepared.size >= 500) {
+            for (const [ id ] of this.prepared) {
+                const row = await this.knex("mcp_operation").where({ id }).first();
+                if (!row || row.expires_at <= Date.now()) {
+                    this.prepared.delete(id);
+                }
+            }
+            if (this.prepared.size >= 500) {
+                throw new Error("mcpTooManyOperations");
+            }
+        }
+        const row = { id: randomUUID(),
+            key_id: fresh.keyId,
+            request_id: request.request_id,
+            action: request.action,
+            permission: handler.requiredAction,
+            server_id: prepared.serverId,
+            stack_id: prepared.stackId,
+            parameters_hash: hash,
+            fingerprint: prepared.fingerprint,
+            policy_version: fresh.policyVersion,
+            summary: prepared.summary.slice(0, 200),
+            state: fresh.mode === "approval" ? "awaiting_approval" : "prepared",
+            created_at: Date.now(),
+            expires_at: Date.now() + 10 * 60_000 };
+        try {
+            await this.knex("mcp_operation").insert(row);
+        } catch {
+            const duplicate = await this.knex("mcp_operation").where({ key_id: fresh.keyId,
+                request_id: request.request_id }).first();
+            if (!duplicate || duplicate.parameters_hash !== hash) {
+                throw new Error("mcpRequestChanged");
+            }
+            return this.summary((await this.owned(fresh, duplicate.id)).row);
+        }
+        this.prepared.set(row.id, prepared);
+        return this.summary(row);
+    }
+
+    /**
+     * Carry out an operation that was prepared earlier.
+     *
+     * Ownership, the hash of the arguments and the state of the files are all checked
+     * again here, because time passed since the operation was written down. The claim on
+     * the row happens before any side effect, so a second caller finds it taken.
+     * @param identity Who is asking
+     * @param input Arguments of the call
+     * @returns The operation as it ended
+     */
+    private async apply(identity: MachineIdentity, input: unknown): Promise<unknown> {
         const request = applySchema.parse(input);
         const { current, row } = await this.owned(identity, request.operation_id);
         if (row.parameters_hash !== request.parameters_hash) {
@@ -263,6 +292,7 @@ export class McpOperations {
             this.prepared.delete(row.id);
         }
         return this.summary((await this.owned(current, row.id)).row);
+
     }
 
     /** Reveal exact volatile review details only to a currently active owner session. */
@@ -382,6 +412,49 @@ export async function stackOperationFingerprint(directory: string, config?: Stac
             await read(resolve(base, object ? object.path : entry), object?.required === false);
         }
     };
+    const serviceRefs = async (service: Record<string, unknown>, base: string): Promise<void> => {
+        // Build contexts can include arbitrary trees and remote sources; no false exact snapshot promise.
+        if (options.deployment !== false && (service.build || service.develop || service.provider)) {
+            throw new Error("mcpUnsupportedComposeInput");
+        }
+        await fileRefs(service.env_file, base);
+        await fileRefs(service.label_file, base);
+        const credential = service.credential_spec;
+        if (credential && typeof credential === "object" && "file" in credential) {
+            await read(resolve(base, credential.file));
+        }
+        const extendsValue = service.extends;
+        if (extendsValue && typeof extendsValue === "object" && "file" in extendsValue) {
+            await compose(resolve(base, extendsValue.file));
+        }
+    };
+    const sectionRefs = async (doc: Record<string, unknown>, base: string): Promise<void> => {
+        for (const section of [ doc.configs, doc.secrets ]) {
+            if (!section || typeof section !== "object") {
+                continue;
+            }
+            for (const value of Object.values(section)) {
+                if (value && typeof value === "object" && "file" in value) {
+                    await read(resolve(base, value.file));
+                }
+            }
+        }
+    };
+    const includeRefs = async (doc: Record<string, unknown>, base: string): Promise<void> => {
+        for (const include of Array.isArray(doc.include) ? doc.include : doc.include ? [ doc.include ] : []) {
+            const object = include && typeof include === "object" ? include as Record<string, unknown> : null;
+            if (object?.project_directory) {
+                throw new Error("mcpUnsupportedComposeInput");
+            }
+            const paths = object ? object.path : include;
+            for (const included of Array.isArray(paths) ? paths : [ paths ]) {
+                const includedPath = resolve(base, included);
+                await read(resolve(path.dirname(includedPath), ".env"), true);
+                await fileRefs(object?.env_file, path.dirname(includedPath));
+                await compose(includedPath);
+            }
+        }
+    };
     const compose = async (relative: string): Promise<void> => {
         if (composeSeen.has(relative)) {
             return;
@@ -401,48 +474,12 @@ export async function stackOperationFingerprint(directory: string, config?: Stac
         const base = path.dirname(relative);
         const services = doc.services && typeof doc.services === "object" ? Object.values(doc.services) : [];
         for (const value of services) {
-            if (!value || typeof value !== "object") {
-                continue;
-            }
-            const service = value as Record<string, unknown>;
-            // Build contexts can include arbitrary trees and remote sources; no false exact snapshot promise.
-            if (options.deployment !== false && (service.build || service.develop || service.provider)) {
-                throw new Error("mcpUnsupportedComposeInput");
-            }
-            await fileRefs(service.env_file, base);
-            await fileRefs(service.label_file, base);
-            const credential = service.credential_spec;
-            if (credential && typeof credential === "object" && "file" in credential) {
-                await read(resolve(base, credential.file));
-            }
-            const extendsValue = service.extends;
-            if (extendsValue && typeof extendsValue === "object" && "file" in extendsValue) {
-                await compose(resolve(base, extendsValue.file));
+            if (value && typeof value === "object") {
+                await serviceRefs(value as Record<string, unknown>, base);
             }
         }
-        for (const section of [ doc.configs, doc.secrets ]) {
-            if (!section || typeof section !== "object") {
-                continue;
-            }
-            for (const value of Object.values(section)) {
-                if (value && typeof value === "object" && "file" in value) {
-                    await read(resolve(base, value.file));
-                }
-            }
-        }
-        for (const include of Array.isArray(doc.include) ? doc.include : doc.include ? [ doc.include ] : []) {
-            const object = include && typeof include === "object" ? include as Record<string, unknown> : null;
-            if (object?.project_directory) {
-                throw new Error("mcpUnsupportedComposeInput");
-            }
-            const paths = object ? object.path : include;
-            for (const included of Array.isArray(paths) ? paths : [ paths ]) {
-                const includedPath = resolve(base, included);
-                await read(resolve(path.dirname(includedPath), ".env"), true);
-                await fileRefs(object?.env_file, path.dirname(includedPath));
-                await compose(includedPath);
-            }
-        }
+        await sectionRefs(doc, base);
+        await includeRefs(doc, base);
     };
     const main = config?.composeFileName || (await readdir(directory)).find(name => acceptedComposeFileNames.includes(name));
     if (!main) {

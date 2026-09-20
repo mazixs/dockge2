@@ -83,6 +83,7 @@
 </template>
 
 <script lang="ts">
+import { defineComponent, markRaw } from "vue";
 import { Modal } from "bootstrap";
 import Confirm from "./Confirm.vue";
 import { authClient } from "../auth-client";
@@ -91,7 +92,7 @@ import VueQrcode from "vue-qrcode";
 import StateChip from "./StateChip.vue";
 import { toast } from "vue3-toastify";
 
-export default {
+export default defineComponent({
     components: {
         Confirm,
         StateChip,
@@ -102,27 +103,33 @@ export default {
         return {
             currentPassword: "",
             processing: false,
-            uri: null,
-            twoFAStatus: null,
-            token: null,
+            /** The dialog itself, kept as it is: Bootstrap works on the element, not on a copy */
+            modal: null as Modal | null,
+            /** Address the authenticator reads, null while the setup has not started */
+            uri: null as string | null,
+            /** Whether the account has two factor on, null while it is not known */
+            twoFAStatus: null as boolean | null,
+            /** Code the person typed from the authenticator */
+            token: null as string | null,
             showURI: false,
             /** Codes to use when the authenticator is unavailable, shown once the setup is confirmed */
-            backupCodes: [],
+            backupCodes: [] as string[],
             /** The same codes while the setup is still unfinished, so nothing is shown too early */
-            pendingBackupCodes: [],
+            pendingBackupCodes: [] as string[],
             /** Whether the code from the app has been accepted, which is what turns two factor on */
             confirmed: false,
         };
     },
     mounted() {
-        this.modal = new Modal(this.$refs.modal);
+        const element = this.$refs.modal as HTMLElement;
+        this.modal = markRaw(new Modal(element));
         this.getStatus();
 
         // Closing the dialog halfway leaves a secret the account never confirmed. It is
         // harmless - `better-auth` does not switch two factor on until the code is
         // verified, so the next login still takes the password alone - but the dialog
         // has to say so, or the reader is left thinking they locked themselves out
-        this.$refs.modal.addEventListener("hidden.bs.modal", () => {
+        element.addEventListener("hidden.bs.modal", () => {
             if (this.uri && !this.confirmed) {
                 this.$root.toastError("twoFASetupAbandoned");
             }
@@ -133,7 +140,7 @@ export default {
     methods: {
         /** Show the dialog */
         show() {
-            this.modal.show();
+            this.modal?.show();
         },
 
         /** Forget everything the unfinished setup put on the screen */
@@ -149,17 +156,17 @@ export default {
 
         /** Close the dialog once the codes have been written down */
         finish() {
-            this.modal.hide();
+            this.modal?.hide();
         },
 
         /** Show dialog to confirm enabling 2FA */
         confirmEnableTwoFA() {
-            this.$refs.confirmEnableTwoFA.show();
+            (this.$refs.confirmEnableTwoFA as InstanceType<typeof Confirm>).show();
         },
 
         /** Show dialog to confirm disabling 2FA */
         confirmDisableTwoFA() {
-            this.$refs.confirmDisableTwoFA.show();
+            (this.$refs.confirmDisableTwoFA as InstanceType<typeof Confirm>).show();
         },
 
         /**
@@ -180,10 +187,13 @@ export default {
                     return;
                 }
 
-                this.uri = data?.totpURI ?? null;
+                // Only the TOTP answer carries an address and codes; the one-time code
+                // method answers with neither, and the dialog offers nothing to set up
+                const setup = data && "totpURI" in data ? data : null;
+                this.uri = setup?.totpURI ?? null;
                 // Held, not shown: until the code from the app is accepted these open
                 // nothing, and a list of secrets on screen reads as a finished setup
-                this.pendingBackupCodes = data?.backupCodes ?? [];
+                this.pendingBackupCodes = setup?.backupCodes ?? [];
             } finally {
                 this.processing = false;
             }
@@ -249,7 +259,7 @@ export default {
                 this.$root.toastSuccess("Saved");
                 await this.getStatus();
                 this.reset();
-                this.modal.hide();
+                this.modal?.hide();
             } finally {
                 this.processing = false;
             }
@@ -272,7 +282,7 @@ export default {
             this.twoFAStatus = Boolean((data.user as { twoFactorEnabled? : boolean }).twoFactorEnabled);
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

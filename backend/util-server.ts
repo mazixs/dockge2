@@ -6,15 +6,22 @@ import fs from "fs";
 import { fromNodeHeaders } from "better-auth/node";
 import { getAuth, getSessionFromHeaders, resolveSocketIdentity, verifyAccountPassword } from "./auth";
 import { AgentManager } from "./agent-manager";
+import type { AgentBroadcastArgs, AgentBroadcastName } from "../common/agent-events";
 
 export interface DockgeSocket extends Socket {
     /** Identifier of the signed in user, empty when the socket has no session */
     userID: string;
-    userRole? : import("./auth-access").UserRole;
+    userRole? : import("./auth-runtime").UserRole;
     consoleTerminal? : Terminal;
     instanceManager : AgentManager;
     endpoint : string;
-    emitAgent : (eventName : string, ...args : unknown[]) => void;
+    /**
+     * Tell the browser something without being asked.
+     *
+     * The name and the arguments come from the broadcast contract, so a message this
+     * build does not send, or one sent with the wrong arguments, does not compile.
+     */
+    emitAgent : <E extends AgentBroadcastName>(eventName : E, ...args : AgentBroadcastArgs<E>) => void;
 }
 
 // For command line arguments, so they are nullable
@@ -97,7 +104,26 @@ export function callbackError(error : unknown, callback : unknown) {
     }
 }
 
-export function callbackResult(result : unknown, callback : unknown) {
+/**
+ * What an acknowledgement expects to be answered with.
+ *
+ * An acknowledgement that came off the socket untyped answers `unknown`, so a handler
+ * that has not been brought under the event contract yet still compiles.
+ * @template C Type of the acknowledgement
+ */
+type ResponseOf<C> = C extends (response : infer R) => void ? R : unknown;
+
+/**
+ * Answer a request.
+ *
+ * The shape of the answer comes from the acknowledgement, so it is checked against the
+ * event contract rather than against itself: a renamed or forgotten field of the payload
+ * does not compile.
+ * @param result What to answer with
+ * @param callback Acknowledgement of the request
+ * @returns Nothing: a caller that sent no acknowledgement is only logged
+ */
+export function callbackResult<C>(result : ResponseOf<C>, callback : C) : void {
     if (typeof(callback) !== "function") {
         log.error("console", "Callback is not a function");
         return;

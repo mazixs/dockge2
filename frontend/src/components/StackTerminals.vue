@@ -136,6 +136,7 @@ export default {
 
         /** Просьба открыть оболочку, приходит из таблицы сервисов */
         request: {
+            /** @type {import("vue").PropType<import("../stack-services").ShellRequest | null>} */
             type: Object,
             default: null,
         },

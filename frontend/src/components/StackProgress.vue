@@ -8,10 +8,11 @@
          не должен встречать человека каждый раз -->
     <div class="run">
         <transition name="strip">
-            <div v-if="open" class="run-strip" :class="{ failed, done: finished }">
+            <div v-if="open" class="run-strip" :class="{ failed, done: finished, unknown: resultUnknown }">
                 <span class="run-mark" aria-hidden="true">
                     <InterfaceIcon v-if="finished" name="check" class="mark-icon" />
                     <InterfaceIcon v-else-if="failed" name="cross" class="mark-icon" />
+                    <InterfaceIcon v-else-if="resultUnknown" name="question" class="mark-icon" />
                     <span v-else class="mark-pulse"></span>
                 </span>
 
@@ -198,6 +199,15 @@ export default {
             return this.outcome === "failed" || this.stepFailed;
         },
 
+        /**
+         * Подтверждения не было. Это не отказ: команда могла выполниться, поэтому
+         * строка не обещает ни удачи, ни провала, а отправляет смотреть состояние
+         * @returns {boolean} Итог команды остался неизвестным
+         */
+        resultUnknown() {
+            return this.outcome === "unknown" && !this.stepFailed;
+        },
+
         finished() {
             return !this.running && this.outcome === "ok" && !this.stepFailed;
         },
@@ -221,6 +231,10 @@ export default {
                 return task ? this.$t("progressFailedAt", [ task.name ]) : this.$t("progressFailed");
             }
 
+            if (this.resultUnknown) {
+                return this.$t("progressResultUnknown");
+            }
+
             if (!this.running) {
                 return this.outcome === "ok" ? this.$t("progressFinished", [ this.elapsed ]) : "";
             }
@@ -238,6 +252,10 @@ export default {
         chipLabel() {
             if (this.running) {
                 return this.$t("deployRunningFor", [ this.elapsed ]);
+            }
+
+            if (this.resultUnknown) {
+                return this.$t("progressResultUnknown");
             }
 
             return this.failed ? this.$t("progressFailed") : this.$t("progressFinished", [ this.elapsed ]);
@@ -413,7 +431,11 @@ export default {
          * @returns {void}
          */
         publish() {
-            this.$emit("progress", { tasks: this.live ? this.tasks : [],
+            // Шаги приходят из терминала стека, поэтому в сообщении сказано,
+            // чьи они: страница остается той же при смене стека
+            this.$emit("progress", { endpoint: this.endpoint,
+                stackName: this.stackName,
+                tasks: this.live ? this.tasks : [],
                 hasOutput: this.hasOutput });
         },
 
@@ -489,6 +511,11 @@ export default {
     &.failed {
         border-color: var(--state-failed);
     }
+
+    // Неизвестный итог - не неудача: цвет тот же, что у неизвестного состояния стека
+    &.unknown {
+        border-color: var(--state-unknown);
+    }
 }
 
 .run-mark {
@@ -522,6 +549,10 @@ export default {
 
 .run-strip.failed .run-line {
     color: var(--state-failed);
+}
+
+.run-strip.unknown .run-line {
+    color: var(--state-unknown);
 }
 
 // Счет самого compose: при загрузке образов он считает слои, поэтому шагов
@@ -641,6 +672,10 @@ export default {
 .run-strip.failed .mark-icon,
 .step.failed .mark-icon {
     color: var(--state-failed);
+}
+
+.run-strip.unknown .mark-icon {
+    color: var(--state-unknown);
 }
 
 @keyframes mark-pop {

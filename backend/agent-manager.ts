@@ -6,8 +6,10 @@ import { isDev, LooseObject, sleep } from "../common/util-common";
 import semver from "semver";
 import { signInAgent, invalidateAgentSession } from "./agent-auth";
 import { authorizeSocketEvent, viewerStackSummary } from "./auth-access";
+import type { StackSummaryDTO } from "../common/types/stack";
 import dayjs, { Dayjs } from "dayjs";
-import { MIN_AGENT_PROTOCOL_VERSION } from "../common/agent-socket";
+import { BASELINE_ARGUMENT_INDEX, BASELINE_EVENTS, BASELINE_PROTOCOL_VERSION, MIN_AGENT_PROTOCOL_VERSION } from "../common/agent-socket";
+import { runInBackground } from "./background";
 
 /**
  * Decide whether an agent is too old to talk to.
@@ -43,6 +45,8 @@ export class AgentManager {
     protected socket : DockgeSocket;
     protected agentSocketList : Record<string, SocketClient> = {};
     protected agentLoggedInList : Record<string, boolean> = {};
+    /** Agent protocol generation each endpoint reported, so old ones keep working */
+    protected agentProtocolList : Record<string, number> = {};
     protected _firstConnectTime : Dayjs = dayjs();
 
     constructor(socket: DockgeSocket) {
@@ -83,7 +87,7 @@ export class AgentManager {
             invalidateAgentSession(agent.url, agent.username, agent.password);
             const endpoint = agent.endpoint;
             this.disconnect(endpoint);
-            this.sendAgentList();
+            runInBackground("agent list", () => this.sendAgentList());
             delete this.agentSocketList[endpoint];
         } else {
             throw new Error("Agent not found");
@@ -98,7 +102,7 @@ export class AgentManager {
     async update(url: string, updatedName: string) {
         const agent = await Agent.updateName(url, updatedName);
         if (agent) {
-            this.sendAgentList();
+            runInBackground("agent list", () => this.sendAgentList());
         } else {
             throw new Error("Agent not found");
         }
@@ -211,7 +215,8 @@ export class AgentManager {
                 return;
             }
             if (this.socket.userRole === "viewer" && args[0] === "stackList") {
-                const response = args[1] as { stackList? : Record<string, object> };
+                // Off the wire: the peer says it speaks this protocol, the shape is its word
+                const response = args[1] as { stackList? : Record<string, StackSummaryDTO> };
                 if (response?.stackList) {
                     args[1] = { ...response,
                         stackList: Object.fromEntries(Object.entries(response.stackList).map(([ name, stack ]) => [ name, viewerStackSummary(stack) ])) };
@@ -222,6 +227,9 @@ export class AgentManager {
 
         client.on("info", (res) => {
             log.debug("agent-manager", res);
+
+            // What this agent understands decides which arguments may be sent to it
+            this.agentProtocolList[endpoint] = typeof res?.agentProtocol === "number" ? res.agentProtocol : 1;
 
             if (!isDev && agentIsTooOld(res)) {
                 this.socket.emit("agentStatus", {
@@ -308,7 +316,32 @@ export class AgentManager {
 
         // Waiting for a remote connection must not preserve permissions revoked meanwhile.
         await authorizeSocketEvent(this.socket, eventName, true);
-        client.emit("agent", endpoint, eventName, ...args);
+        client.emit("agent", endpoint, eventName, ...this.forEndpoint(endpoint, eventName, args));
+    }
+
+    /**
+     * Adapt the arguments of an event to what this agent understands.
+     *
+     * Only the baseline of a save is generation specific: an older agent expects its
+     * acknowledgement where the baseline now sits, and would answer nobody at all.
+     * @param endpoint Agent the event is going to
+     * @param eventName Event being sent
+     * @param args Arguments as the browser sent them
+     * @returns Arguments this agent can read
+     */
+    protected forEndpoint(endpoint : string, eventName : string, args : unknown[]) : unknown[] {
+        const protocol = this.agentProtocolList[endpoint] ?? 1;
+
+        if (!BASELINE_EVENTS.has(eventName) || protocol >= BASELINE_PROTOCOL_VERSION || args.length <= BASELINE_ARGUMENT_INDEX) {
+            return args;
+        }
+
+        if (typeof args[BASELINE_ARGUMENT_INDEX] === "function") {
+            return args;
+        }
+
+        log.debug("agent-manager", `${endpoint}: agent protocol ${protocol}, saving without the conflict check`);
+        return [ ...args.slice(0, BASELINE_ARGUMENT_INDEX), ...args.slice(BASELINE_ARGUMENT_INDEX + 1) ];
     }
 
     emitToAllEndpoints(eventName: string, ...args : unknown[]) {

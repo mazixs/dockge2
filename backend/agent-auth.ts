@@ -54,35 +54,73 @@ export async function signInAgent(url : string, username : string, password : st
     return session.pending;
 }
 
+/**
+ * Ask the remote panel for a session
+ * @param base Address of the remote panel
+ * @param username Account name or email address the login uses
+ * @param password Password of that account
+ * @returns The answer of the remote panel, whatever it says
+ */
+async function postSignIn(base : URL, username : string, password : string) : Promise<Response> {
+    const emailLogin = username.includes("@");
+    return fetch(new URL(`/api/auth/sign-in/${emailLogin ? "email" : "username"}`, base), {
+        method: "POST",
+        headers: { "content-type": "application/json",
+            origin: base.origin },
+        body: JSON.stringify(emailLogin ? { email: username,
+            password } : { username,
+            password }),
+        redirect: "error",
+        signal: AbortSignal.timeout(10000),
+    });
+}
+
+/**
+ * Wait out a rate limit of the remote panel before trying again
+ * @param response The refusal that asked for the wait
+ * @returns Nothing; a cooldown longer than a minute ends the attempt instead
+ */
+async function cooldown(response : Response) : Promise<void> {
+    const retryAfter = response.headers.get("retry-after");
+    const seconds = retryAfter === null ? 60 : Number(retryAfter);
+    const wait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter ?? "") - Date.now();
+    await response.body?.cancel();
+    // Do not retry earlier than a longer server-requested cooldown.
+    if (wait > 60000) {
+        throw new Error("authAgentRateLimited");
+    }
+    // A bounded retry honors the remote limiter; all waiting tabs share it.
+    await delay(Math.max(100, Number.isFinite(wait) ? wait : 60000));
+}
+
+/**
+ * Take the session out of a successful answer
+ * @param response The answer of the remote panel
+ * @returns The cookie to send back and when it stops being trusted
+ */
+function readSessionCookie(response : Response) : { cookie : string, expiresAt : number } {
+    const cookies = response.headers.getSetCookie().filter((cookie) => /^(?:__Secure-)?better-auth\.session_token=/.test(cookie));
+    if (!cookies.length) {
+        throw new Error("authAgentLoginFailed");
+    }
+    const maxAge = Number(/Max-Age=(\d+)/i.exec(cookies[0] ?? "")?.[1]);
+    return {
+        cookie: cookies.map((cookie) => cookie.split(";")[0]).join("; "),
+        // Unknown lifetimes get a short cache; never assume an unbounded session.
+        expiresAt: Date.now() + (Number.isFinite(maxAge) ? Math.max(0, maxAge - 30) : 300) * 1000,
+    };
+}
+
 /** Establish a remote better-auth session without exposing credentials in errors. */
 async function requestAgentSession(url : string, username : string, password : string) {
     const base = new URL(url);
-    const emailLogin = username.includes("@");
     let response : Response | undefined;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        response = await fetch(new URL(`/api/auth/sign-in/${emailLogin ? "email" : "username"}`, base), {
-            method: "POST",
-            headers: { "content-type": "application/json",
-                origin: base.origin },
-            body: JSON.stringify(emailLogin ? { email: username,
-                password } : { username,
-                password }),
-            redirect: "error",
-            signal: AbortSignal.timeout(10000),
-        });
+        response = await postSignIn(base, username, password);
         if (response.status !== 429 || attempt === 2) {
             break;
         }
-        const retryAfter = response.headers.get("retry-after");
-        const seconds = retryAfter === null ? 60 : Number(retryAfter);
-        const wait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter ?? "") - Date.now();
-        await response.body?.cancel();
-        // Do not retry earlier than a longer server-requested cooldown.
-        if (wait > 60000) {
-            throw new Error("authAgentRateLimited");
-        }
-        // A bounded retry honors the remote limiter; all waiting tabs share it.
-        await delay(Math.max(100, Number.isFinite(wait) ? wait : 60000));
+        await cooldown(response);
     }
     if (!response || response.status === 429) {
         throw new Error("authAgentRateLimited");
@@ -94,14 +132,5 @@ async function requestAgentSession(url : string, username : string, password : s
     if (!response.ok) {
         throw new Error("authAgentLoginFailed");
     }
-    const cookies = response.headers.getSetCookie().filter((cookie) => /^(?:__Secure-)?better-auth\.session_token=/.test(cookie));
-    if (!cookies.length) {
-        throw new Error("authAgentLoginFailed");
-    }
-    const maxAge = Number(/Max-Age=(\d+)/i.exec(cookies[0] ?? "")?.[1]);
-    return {
-        cookie: cookies.map((cookie) => cookie.split(";")[0]).join("; "),
-        // Unknown lifetimes get a short cache; never assume an unbounded session.
-        expiresAt: Date.now() + (Number.isFinite(maxAge) ? Math.max(0, maxAge - 30) : 300) * 1000,
-    };
+    return readSessionCookie(response);
 }

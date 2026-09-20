@@ -7,7 +7,6 @@ import {
     EXITED,
     RUNNING,
     UNKNOWN,
-    copyYAMLComments,
     envsubst,
     envsubstYAML,
     genSecret,
@@ -125,54 +124,3 @@ test("environment substitution works for strings and YAML values", () => {
     });
 });
 
-test("YAML comment copier preserves comments after reordering", () => {
-    const source = parseDocument(
-        "# services\nservices:\n  # app service\n  app: # app key\n    image: nginx # image\n"
-    );
-    const target = parseDocument(
-        "services:\n  app:\n    image: nginx\n"
-    );
-
-    copyYAMLComments(target, source);
-
-    const output = target.toString();
-    assert.match(output, /# services/);
-    assert.match(output, /# app service/);
-    assert.match(output, /# app key/);
-    assert.match(output, /# image/);
-});
-
-test("YAML comment copier preserves legacy octal mode", () => {
-    const source = parseDocument(
-        "services:\n  app:\n    volumes:\n      - type: tmpfs\n        target: /cache\n        tmpfs:\n          mode: 01777\n"
-    );
-    const target = parseDocument(source.toString());
-
-    copyYAMLComments(target, source);
-
-    assert.match(target.toString(), /mode: 01777/);
-});
-
-test("YAML comment copier keeps compose strings and plain documents unchanged", () => {
-    const source = parseDocument(
-        "services:\n  app:\n    restart: on-failure\n    environment:\n      ENABLED: yes\n      DISABLED: no\n    tmpfs:\n      mode: 01777\n"
-    );
-    const target = parseDocument(source.toString());
-
-    copyYAMLComments(target, source);
-
-    const output = target.toString();
-    assert.match(output, /mode: 01777/);
-
-    // Switching the schema must not turn compose strings into booleans
-    const reparsed = parseDocument(output).toJS();
-    assert.equal(reparsed.services.app.restart, "on-failure");
-    assert.equal(reparsed.services.app.environment.ENABLED, "yes");
-    assert.equal(reparsed.services.app.environment.DISABLED, "no");
-
-    // A document without octal values keeps its original formatting
-    const plainSource = parseDocument("services:\n  app:\n    image: nginx # image\n    replicas: 2\n");
-    const plainTarget = parseDocument("services:\n  app:\n    image: nginx\n    replicas: 2\n");
-    copyYAMLComments(plainTarget, plainSource);
-    assert.equal(plainTarget.toString(), "services:\n  app:\n    image: nginx # image\n    replicas: 2\n");
-});

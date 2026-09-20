@@ -40,3 +40,7 @@ npm-debug.log*
 .eslintcache
 .vite
 .claude/settings.local.json
+
+# Left behind only by an interrupted run of test/frontend/sfc-type-check.test.ts
+/frontend/src/pages/TypeCheckProbe*.vue
+/tsconfig.vue.probe.json

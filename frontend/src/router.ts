@@ -5,10 +5,14 @@ import Layout from "./layouts/Layout.vue";
 import Setup from "./pages/Setup.vue";
 import Dashboard from "./pages/Dashboard.vue";
 import DashboardHome from "./pages/DashboardHome.vue";
-import Console from "./pages/Console.vue";
-import Compose from "./pages/Compose.vue";
-import StackInspector from "./pages/StackInspector.vue";
-import ContainerTerminal from "./pages/ContainerTerminal.vue";
+
+// Loaded when the screen is opened, not when the panel starts. The dashboard is what
+// the browser has to draw first; the inspector brings the compose editor, and both
+// terminal screens bring xterm, which together are the larger half of the interface
+const Console = () => import("./pages/Console.vue");
+const Compose = () => import("./pages/Compose.vue");
+const StackInspector = () => import("./pages/StackInspector.vue");
+const ContainerTerminal = () => import("./pages/ContainerTerminal.vue");
 
 const NewStack = () => import("./pages/NewStack.vue");
 const StackGitChanges = () => import("./pages/StackGitChanges.vue");

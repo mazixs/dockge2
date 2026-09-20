@@ -1,26 +1,27 @@
 import { DockgeServer } from "./dockge-server";
 import fs, { promises as fsAsync } from "fs";
 import { log } from "./log";
-import yaml, { type Document, isMap, isSeq, parseDocument } from "yaml";
+import yaml from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
-import os from "os";
 import path from "path";
 import { emptyStackFileConfig, resolveStackFilePath, resolveStackFilePathSync, StackConfig } from "./stack-config";
-import { classifyStackFile, isSafeNameSegment } from "../common/stack-files";
-import { serialiseEditedDocument } from "../common/compose-editor";
-import type { SecretFileMeta, StackFileConfig, StackFileInventory } from "../common/types/stack";
+import { classifyStackFile } from "../common/stack-files";
+import type { SecretFileMeta, StackDTO, StackFileBaseline, StackFileConfig, StackFileInventory, StackFileReadIssue, StackSummaryDTO } from "../common/types/stack";
+import { hashStackFileContent, StackSelectionConflictError, type StackFileTarget, type StackWriteMetadata, StackWriteConflictError, writeStackFiles } from "./stack-write";
+import {
+    bindSecret, deleteSecretFile, readSecretFile, type SecretHost, unbindSecret, writeSecretFile,
+} from "./stack-secrets";
 import {
     ComposePsEntry,
     ContainerInstanceStatus,
-    COMPOSE_PROJECT_LABEL,
     COMPOSE_WORKING_DIR_LABEL,
     DockerPsRaw,
     fromDockerPs,
     hasBuildServices,
+    readComposeImages,
     normaliseInstance,
     readComposeServices,
     readOneShotServices,
-    resolveComposePsStatus,
     resolveStackStatus,
     StackStatusIssue,
     StackStatusResult,
@@ -33,8 +34,7 @@ import {
     COMBINED_TERMINAL_COLS,
     COMBINED_TERMINAL_ROWS,
     CREATED_FILE,
-    CREATED_STACK,
-    EXITED, getCombinedTerminalName,
+    getCombinedTerminalName,
     getComposeTerminalName, getContainerExecTerminalName,
     type ContainerShell, isContainerShell,
     MAX_STACK_NAME_LENGTH,
@@ -48,43 +48,33 @@ import { composeArgs } from "./compose-args";
 import { readAvailability } from "./observations";
 import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
-
-interface ComposeLsEntry {
-    Name : string;
-    Status : string;
-    ConfigFiles? : string;
-}
-
-/**
- * Write a file without following a symlink.
- * The path was already checked, but a symlink can appear between the check and the write,
- * so the open call itself refuses to follow one.
- * @param filePath Absolute path inside the stack directory
- * @param content File content
- * @param mode File mode used when the file is created
- */
-async function writeFileNoFollow(filePath : string, content : string, mode : number = 0o644) : Promise<void> {
-    const handle = await fsAsync.open(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, mode);
-
-    try {
-        await handle.writeFile(content, "utf-8");
-    } finally {
-        await handle.close();
-    }
-}
+import { clearImageUpdateCache } from "./image-updates";
+import {
+    type ComposeLsEntry, readComposeProjects, readInstanceMap, readOwnProjectName, readStatusList,
+    resolveProjectStatus,
+} from "./stack-state";
 
 /**
- * Tell a hostname Docker generated from one someone chose.
+ * Read a stack file, telling an absent file from one that cannot be read.
  *
- * A container whose `hostname:` was not set is named after its own short id, which is
- * exactly twelve hexadecimal characters. Anything else - a name from the compose file,
- * or the host's own name outside a container - must not be inspected: the daemon would
- * happily answer about whatever else goes by that name.
- * @param hostname Hostname of this process
- * @returns True when the name is a short container id
+ * A missing optional env file is an ordinary state and reads as empty. Anything else -
+ * a permission problem, an I/O error, a name the directory refuses - is reported, because
+ * an editor that is handed an empty text would save that emptiness over the real file.
+ * @param filePath Absolute path inside the stack directory
+ * @returns Content of the file, or the error code that prevented reading it
  */
-export function looksLikeContainerId(hostname : string) : boolean {
-    return /^[0-9a-f]{12}$/.test(hostname);
+function readStackFileSync(filePath : string) : { content : string, code? : string, missing? : boolean } {
+    try {
+        return { content: fs.readFileSync(filePath, "utf-8") };
+    } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code ?? "EIO";
+        if (code === "ENOENT") {
+            return { content: "",
+                missing: true };
+        }
+        return { content: "",
+            code };
+    }
 }
 
 export class Stack {
@@ -103,6 +93,10 @@ export class Stack {
     /** Availability over the last day, filled by the list scan */
     protected _availability : Availability | null = null;
     protected _fileConfig : StackFileConfig = emptyStackFileConfig();
+    /** Files the panel failed to read, by file name and error code */
+    protected _readIssues : Map<string, string> = new Map();
+    /** Selected files that do not exist, told apart from files that are empty */
+    protected _missingFiles : Set<string> = new Set();
     protected _inventory? : StackFileInventory;
     protected server: DockgeServer;
 
@@ -114,8 +108,6 @@ export class Stack {
      * Compose project this panel itself runs as, or "" when it is not in a container.
      * Read once: the answer cannot change while the process lives.
      */
-    protected static ownProjectName : string | null = null;
-
     constructor(server : DockgeServer, name : string, composeYAML? : string, composeENV? : string, skipFSOperations = false) {
         this.name = name;
         this.server = server;
@@ -297,7 +289,7 @@ export class Stack {
         }
     }
 
-    async toJSON(endpoint : string) : Promise<object> {
+    async toJSON(endpoint : string) : Promise<StackDTO> {
 
         // Since we have multiple agents now, embed primary hostname in the stack object too.
         let primaryHostname = await Settings.get("primaryHostname");
@@ -318,10 +310,23 @@ export class Stack {
         let obj = this.toSimpleJSON(endpoint);
         const inventory = this._inventory ?? await this.loadFileConfig();
 
+        const composeYAML = this.composeYAML;
+        const composeENV = this.composeENV;
+
         return {
             ...obj,
-            composeYAML: this.composeYAML,
-            composeENV: this.composeENV,
+            composeYAML,
+            composeENV,
+            // What the editor loaded, so a save can tell the server which version it changed
+            // and which files it was looking at while it did
+            fileHashes: {
+                compose: this._readIssues.has(this._composeFileName) ? null : hashStackFileContent(composeYAML),
+                env: this._readIssues.has(this.activeEnvFileName) || this._missingFiles.has(this.activeEnvFileName) ? null : hashStackFileContent(composeENV),
+                composeFileName: this._composeFileName,
+                envFileName: this.activeEnvFileName,
+            },
+            // Files the panel could not read: an editor must not save over them
+            readIssues: this.readIssues,
             primaryHostname,
             // Only names, sizes and bindings of secrets, never their content
             files: {
@@ -336,7 +341,7 @@ export class Stack {
         };
     }
 
-    toSimpleJSON(endpoint : string) : object {
+    toSimpleJSON(endpoint : string) : StackSummaryDTO {
         return {
             name: this.name,
             status: this._status,
@@ -388,24 +393,68 @@ export class Stack {
 
     get composeYAML() : string {
         if (this._composeYAML === undefined) {
-            try {
-                this._composeYAML = fs.readFileSync(resolveStackFilePathSync(this.path, this._composeFileName), "utf-8");
-            } catch (e) {
-                this._composeYAML = "";
-            }
+            this._composeYAML = this.readSelectedFile(this._composeFileName);
         }
         return this._composeYAML;
     }
 
     get composeENV() : string {
         if (this._composeENV === undefined) {
-            try {
-                this._composeENV = fs.readFileSync(resolveStackFilePathSync(this.path, this.activeEnvFileName), "utf-8");
-            } catch (e) {
-                this._composeENV = "";
-            }
+            this._composeENV = this.readSelectedFile(this.activeEnvFileName);
         }
         return this._composeENV;
+    }
+
+    /**
+     * Read one of the selected files and remember a failure instead of hiding it.
+     *
+     * The getters cannot throw: the stack list shows every directory, including the ones
+     * whose files this process may not read. What they must not do is let a caller treat
+     * an unreadable file as an empty one, so the failure is kept and reported separately.
+     * @param fileName Selected compose or env file
+     * @returns Content, or an empty text when the file is absent or unreadable
+     */
+    protected readSelectedFile(fileName : string) : string {
+        let result : { content : string, code? : string, missing? : boolean };
+
+        try {
+            result = readStackFileSync(resolveStackFilePathSync(this.path, fileName));
+        } catch (e) {
+            // The name or the directory itself is not usable: not an empty file either
+            result = { content: "",
+                code: "EINVAL" };
+        }
+
+        if (result.code) {
+            this._readIssues.set(fileName, result.code);
+        } else {
+            this._readIssues.delete(fileName);
+        }
+
+        if (result.missing) {
+            this._missingFiles.add(fileName);
+        } else {
+            this._missingFiles.delete(fileName);
+        }
+
+        return result.content;
+    }
+
+    /**
+     * Files of this stack that could not be read, after the texts were loaded.
+     * @returns One entry per file the panel failed to read
+     */
+    get readIssues() : StackFileReadIssue[] {
+        return [ ...this._readIssues.entries() ].map(([ fileName, code ]) => ({ fileName,
+            code }));
+    }
+
+    /**
+     * Whether every selected file was read, so an editor may safely save over them.
+     * @returns True when nothing failed to read
+     */
+    get filesAreReadable() : boolean {
+        return this._readIssues.size === 0;
     }
 
     get path() : string {
@@ -428,74 +477,198 @@ export class Stack {
     }
 
     /**
-     * Save the stack to the disk
-     * @param isAdd
+     * Save the stack to the disk.
+     *
+     * The compose file and the env file are written as one transaction: either both hold
+     * the new text or both hold the old one, and an interrupted process finishes or undoes
+     * the write on the next start. When the caller states what it read, a file that has
+     * changed meanwhile is reported as a conflict instead of being overwritten.
+     * @param isAdd Whether the stack directory has to be created
+     * @param baseline What the editor read before it started changing the files
+     * @returns Hashes of the saved files, so the editor can keep saving from them
+     * @throws {StackWriteConflictError} If a file no longer holds what the caller read
      */
-    async save(isAdd : boolean) {
+    async save(isAdd : boolean, baseline? : StackFileBaseline) : Promise<StackFileBaseline> {
         this.validate();
 
-        let dir = this.path;
+        const dir = this.path;
 
-        // Check if the name is used if isAdd
-        if (isAdd) {
-            if (await fileExists(dir)) {
-                throw new ValidationError("Stack name already exists");
+        await this.prepareDirectory(isAdd);
+        const previousConfig = isAdd ? null : structuredClone(this._fileConfig);
+
+        try {
+            if (isAdd) {
+                // A new stack starts with the compose file it was created with
+                await StackConfig.setQuiet(this.name, {
+                    composeFileName: this._composeFileName,
+                    envFileNames: this.composeENV.trim() === "" ? [] : [ this.activeEnvFileName ],
+                    activeEnvFileName: this.composeENV.trim() === "" ? "" : this.activeEnvFileName,
+                    secretBindings: [],
+                });
             }
 
-            // Create the stack folder
-            await fsAsync.mkdir(dir);
-        } else {
-            if (!await fileExists(dir)) {
-                throw new ValidationError("Stack not found");
-            }
-        }
+            // Always load the stored selection before writing: the socket handlers build a
+            // Stack directly, so without this the write would fall back to compose.yaml and .env
+            await this.loadFileConfig();
 
-        if (isAdd) {
-            // A new stack starts with the compose file it was created with
-            await StackConfig.setQuiet(this.name, {
+            const envFileName = this.activeEnvFileName;
+            const envPath = await resolveStackFilePath(dir, envFileName);
+            const shouldWriteEnv = await fileExists(envPath) || this.composeENV.trim() !== "";
+
+            // The hashes say the bytes are still the ones the editor read; this says they
+            // are still the bytes of the file it had open
+            this.assertBaselineSelection(baseline, envFileName, shouldWriteEnv);
+
+            const adoption = await this.envAdoption(envFileName, shouldWriteEnv);
+            const written = await writeStackFiles(dir, this.writeTargets(envFileName, shouldWriteEnv, baseline), { journalRoot: this.server.config.dataDir,
+                ...(adoption ? { metadata: adoption } : {}) });
+
+            if (adoption) {
+                this._fileConfig = adoption.after;
+            }
+            this.applyOwnership(dir, envPath, shouldWriteEnv);
+
+            // The names travel back with the hashes, so the editor that saves again is
+            // still held to the files it has open rather than to whichever ones the
+            // stack points at by then
+            return { compose: written.hashes[this._composeFileName] ?? null,
+                env: shouldWriteEnv ? (written.hashes[envFileName] ?? null) : null,
                 composeFileName: this._composeFileName,
-                envFileNames: this.composeENV.trim() === "" ? [] : [ this.activeEnvFileName ],
-                activeEnvFileName: this.composeENV.trim() === "" ? "" : this.activeEnvFileName,
-                secretBindings: [],
-            });
+                envFileName };
+        } catch (e) {
+            // A stack that was never created must not leave a directory and a stored
+            // selection behind: the next attempt would be refused as an existing name
+            if (isAdd) {
+                await StackConfig.removeQuiet(this.name).catch(() => undefined);
+                await fsAsync.rmdir(dir).catch(() => undefined);
+            } else if (previousConfig) {
+                this._fileConfig = previousConfig;
+            }
+            throw e;
         }
+    }
 
-        // Always load the stored selection before writing: the socket handlers build a
-        // Stack directly, so without this the write would fall back to compose.yaml and .env
-        await this.loadFileConfig();
+    /**
+     * Make sure the directory is the one this save expects
+     * @param isAdd Whether the stack directory has to be created
+     * @returns {void}
+     * @throws {ValidationError} If the name is taken, or the stack is not there at all
+     */
+    private async prepareDirectory(isAdd : boolean) : Promise<void> {
+        const exists = await fileExists(this.path);
 
-        // Write or overwrite the selected compose file
-        await writeFileNoFollow(await resolveStackFilePath(dir, this._composeFileName), this.composeYAML);
+        if (isAdd && exists) {
+            throw new ValidationError("Stack name already exists");
+        }
+        if (isAdd) {
+            await fsAsync.mkdir(this.path);
+            return;
+        }
+        if (!exists) {
+            throw new ValidationError("Stack not found");
+        }
+    }
 
-        // Write the active env file, but do not create an empty one for a stack that never had it
-        const envPath = await resolveStackFilePath(dir, this.activeEnvFileName);
-        const envContent = this.composeENV;
-        const hasEnvFile = await fileExists(envPath);
-        const shouldWriteEnv = hasEnvFile || envContent.trim() !== "";
+    /**
+     * Which files this save writes, and what each of them is expected to hold now.
+     *
+     * A baseline travels per file: the caller says what it read, and a file that changed
+     * since is a conflict rather than something to overwrite.
+     * @param envFileName Env file of the stack
+     * @param shouldWriteEnv Whether the env file is written at all
+     * @param baseline What the editor read before it started changing the files
+     * @returns The files to write, in order
+     * @throws {StackWriteConflictError} If the env file the editor read is gone
+     */
+    private writeTargets(envFileName : string, shouldWriteEnv : boolean, baseline? : StackFileBaseline) : StackFileTarget[] {
+        const targets : StackFileTarget[] = [{ name: this._composeFileName,
+            content: this.composeYAML,
+            ...(baseline && "compose" in baseline ? { expectedHash: baseline.compose } : {}) }];
 
         if (shouldWriteEnv) {
-            await writeFileNoFollow(envPath, envContent);
+            targets.push({ name: envFileName,
+                content: this.composeENV,
+                ...(baseline && "env" in baseline ? { expectedHash: baseline.env } : {}) });
+        } else if (baseline && "env" in baseline && baseline.env !== null) {
+            // The editor believed it was changing an env file that is no longer there
+            throw new StackWriteConflictError(envFileName);
+        }
+        return targets;
+    }
+
+    /**
+     * Refuse a save whose editor had other files open than the ones this stack writes now.
+     *
+     * The selection lives in the settings, so it can change between the moment an editor
+     * read a stack and the moment it saves: another tab, another user, the files screen.
+     * Two files may hold the same text, so the hashes alone would let such a save land in
+     * a file the editor never showed. The caller is told to re-read instead.
+     * @param baseline What the editor read before it started changing the files
+     * @param envFileName Env file this save would write
+     * @param shouldWriteEnv Whether the env file is written at all
+     * @returns {void}
+     * @throws {StackSelectionConflictError} If the selection is no longer the one that was read
+     */
+    private assertBaselineSelection(baseline : StackFileBaseline | undefined, envFileName : string, shouldWriteEnv : boolean) : void {
+        if (!baseline) {
+            return;
         }
 
-        if (shouldWriteEnv && !this._fileConfig.envFileNames.includes(this.activeEnvFileName)) {
-            // A newly created env file becomes part of the interpolation set
-            const config = {
+        if (baseline.composeFileName !== undefined && baseline.composeFileName !== this._composeFileName) {
+            throw new StackSelectionConflictError(baseline.composeFileName, this._composeFileName);
+        }
+
+        if (shouldWriteEnv && baseline.envFileName !== undefined && baseline.envFileName !== envFileName) {
+            throw new StackSelectionConflictError(baseline.envFileName, envFileName);
+        }
+    }
+
+    /**
+     * The selection change that belongs to this save, when the env file is a new one.
+     *
+     * Writing the file and noting that compose interpolates it is one decision, so the
+     * change travels into the file transaction instead of being stored afterwards: a
+     * settings store that is unavailable then fails the save rather than leaving a file
+     * nothing refers to. What was stored before is read from the settings themselves, so
+     * an undo puts back exactly that, including "there was nothing".
+     * @param envFileName Env file this save writes
+     * @param shouldWriteEnv Whether the env file is written at all
+     * @returns The selection change, or nothing when the file is already in the set
+     */
+    private async envAdoption(envFileName : string, shouldWriteEnv : boolean) : Promise<StackWriteMetadata | undefined> {
+        if (!shouldWriteEnv || this._fileConfig.envFileNames.includes(envFileName)) {
+            return undefined;
+        }
+
+        return {
+            stack: this.name,
+            before: await StackConfig.get(this.name),
+            after: {
                 ...this._fileConfig,
-                envFileNames: [ ...this._fileConfig.envFileNames, this.activeEnvFileName ],
-                activeEnvFileName: this.activeEnvFileName,
-            };
-            await StackConfig.setQuiet(this.name, config);
-            this._fileConfig = config;
-        }
+                envFileNames: [ ...this._fileConfig.envFileNames, envFileName ],
+                activeEnvFileName: envFileName,
+            },
+        };
+    }
 
-        if (process.env.PUID && process.env.PGID) {
-            const uid = Number(process.env.PUID);
-            const gid = Number(process.env.PGID);
-            fs.lchownSync(dir, uid, gid);
-            fs.chownSync(path.join(dir, this._composeFileName), uid, gid);
-            if (shouldWriteEnv) {
-                fs.chownSync(envPath, uid, gid);
-            }
+    /**
+     * Hand the written files to the account the container runs as, when one is configured
+     * @param dir Stack directory
+     * @param envPath Path of the env file
+     * @param shouldWriteEnv Whether the env file was written
+     * @returns {void}
+     */
+    private applyOwnership(dir : string, envPath : string, shouldWriteEnv : boolean) : void {
+        if (!process.env.PUID || !process.env.PGID) {
+            return;
+        }
+        const uid = Number(process.env.PUID);
+        const gid = Number(process.env.PGID);
+
+        fs.lchownSync(dir, uid, gid);
+        fs.chownSync(path.join(dir, this._composeFileName), uid, gid);
+        if (shouldWriteEnv) {
+            fs.chownSync(envPath, uid, gid);
         }
     }
 
@@ -569,7 +742,7 @@ export class Stack {
     }
 
     async updateStatus() {
-        let statusList = await Stack.getStatusList();
+        let statusList = await readStatusList();
         let status = statusList.get(this.name);
 
         if (status) {
@@ -641,18 +814,7 @@ export class Stack {
         let composeList : ComposeLsEntry[];
 
         try {
-            const res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
-                encoding: "utf-8",
-                maxBuffer: 4 * 1024 * 1024,
-                timeoutMs: 30_000,
-            });
-
-            if (!res.stdout) {
-                await this.fillStackDetails(stackList);
-                return stackList;
-            }
-
-            composeList = JSON.parse(res.stdout.toString());
+            composeList = await readComposeProjects();
         } catch (e) {
             // Docker is unreachable. The managed stacks are still listed, but their status
             // becomes UNKNOWN instead of keeping the last known green value.
@@ -670,13 +832,18 @@ export class Stack {
             return stackList;
         }
 
+        if (composeList.length === 0) {
+            await this.fillStackDetails(stackList);
+            return stackList;
+        }
+
         // Container states of every compose project, read in one Docker call
-        const instanceMap = await this.getInstanceMap();
+        const instanceMap = await readInstanceMap();
 
         // The panel's own project, so it does not list itself as a stack it cannot touch.
         // "dockge" is kept beside it for an installation carried over from upstream, where
         // that was the project name
-        const ownProject = await this.getOwnProjectName();
+        const ownProject = await readOwnProjectName();
 
         for (let composeStack of composeList) {
             let stack = stackList.get(composeStack.Name);
@@ -694,7 +861,7 @@ export class Stack {
                 stackList.set(composeStack.Name, stack);
             }
 
-            const detailed = this.resolveProjectStatus(composeStack, instanceMap, stack);
+            const detailed = resolveProjectStatus(composeStack, instanceMap, stack);
             stack._status = detailed.status;
             stack._issues = detailed.issues;
             stack._configFilePath = composeStack.ConfigFiles;
@@ -771,192 +938,6 @@ export class Stack {
                 }
             }
         }));
-    }
-
-    /**
-     * Resolve the status of one compose project from the host wide container list
-     * @param composeStack Entry of `docker compose ls`
-     * @param instanceMap Containers grouped by project, null when Docker could not be read
-     * @param stack Stack of the project, used to read its one-shot markings
-     * @returns Status and issues of the project
-     */
-    static resolveProjectStatus(
-        composeStack : ComposeLsEntry,
-        instanceMap : Map<string, ComposePsEntry[]> | null,
-        stack? : Stack,
-    ) : StackStatusResult & { instances : ContainerInstanceStatus[] } {
-        if (!instanceMap) {
-            // Docker output could not be trusted, do not claim the stack is stopped
-            return { status: UNKNOWN,
-                issues: [],
-                instances: [] };
-        }
-
-        // The directory wins when it is known, because the project name can be overridden
-        const entries = (stack?.isManagedByDockge ? instanceMap.get(stack.path) : undefined)
-            ?? instanceMap.get(composeStack.Name)
-            ?? [];
-        const composeYAML = stack?.isManagedByDockge ? stack.composeYAML : "";
-
-        return resolveComposePsStatus(entries, readComposeServices(composeYAML), readOneShotServices(composeYAML));
-    }
-
-    /**
-     * Get the status list, it will be used to update the status of the stacks
-     * Not all status will be returned, only the stack that is deployed or created to `docker compose` will be returned
-     */
-    static async getStatusList() : Promise<Map<string, number>> {
-        let statusList = new Map<string, number>();
-
-        let composeList : ComposeLsEntry[];
-
-        try {
-            const res = await spawn("docker", [ "compose", "ls", "--all", "--format", "json" ], {
-                encoding: "utf-8",
-                maxBuffer: 4 * 1024 * 1024,
-                timeoutMs: 30_000,
-            });
-
-            if (!res.stdout) {
-                return statusList;
-            }
-
-            composeList = JSON.parse(res.stdout.toString());
-        } catch (e) {
-            if (e instanceof Error) {
-                log.warn("getStatusList", "Cannot read the compose project list: " + e.message);
-            }
-            return statusList;
-        }
-
-        const instanceMap = await this.getInstanceMap();
-
-        for (let composeStack of composeList) {
-            statusList.set(composeStack.Name, this.resolveProjectStatus(composeStack, instanceMap).status);
-        }
-
-        return statusList;
-    }
-
-    /**
-     * Convert the status string from `docker compose ls` to the status number
-     * Input Example: "exited(1), running(1)"
-     * @param status
-     */
-    static statusConvert(status : string) : number {
-        if (status.startsWith("created")) {
-            return CREATED_STACK;
-        } else if (status.includes("exited")) {
-            // If one of the service is exited, we consider the stack is exited
-            return EXITED;
-        } else if (status.startsWith("running")) {
-            // If there is no exited services, there should be only running services
-            return RUNNING;
-        } else {
-            return UNKNOWN;
-        }
-    }
-
-    /**
-     * Read every compose managed container of the host in a single Docker call.
-     * One call keeps the 10 second status cron cheap even with many stacks.
-     * @returns Entries grouped by compose project, or null when Docker output cannot be trusted
-     */
-    /**
-     * Find the compose project of the panel's own container.
-     *
-     * Docker names a container's host after its short id, so the panel can ask the
-     * daemon about itself and read the label Compose put there. This is asked rather
-     * than assumed, because the project name is the user's to change - through
-     * `name:` in the compose file, `COMPOSE_PROJECT_NAME` or `-p`.
-     * @returns The project name, or "" when the panel does not run in a compose project
-     */
-    static async getOwnProjectName() : Promise<string> {
-        if (this.ownProjectName !== null) {
-            return this.ownProjectName;
-        }
-
-        this.ownProjectName = "";
-
-        try {
-            const hostname = os.hostname();
-
-            if (!looksLikeContainerId(hostname)) {
-                return this.ownProjectName;
-            }
-
-            const res = await spawn("docker", [
-                "inspect",
-                "--format",
-                `{{index .Config.Labels "${COMPOSE_PROJECT_LABEL}"}}`,
-                hostname,
-            ], {
-                encoding: "utf-8",
-                maxBuffer: 64 * 1024,
-                timeoutMs: 15_000,
-            });
-
-            this.ownProjectName = (res.stdout?.toString() ?? "").trim();
-        } catch (e) {
-            // Not fatal: without an answer the panel simply lists its own project, which
-            // is what it did before this was asked at all
-            if (e instanceof Error) {
-                log.debug("getOwnProjectName", `Cannot tell which project this panel runs as: ${e.message}`);
-            }
-        }
-
-        return this.ownProjectName;
-    }
-
-    static async getInstanceMap() : Promise<Map<string, ComposePsEntry[]> | null> {
-        try {
-            const res = await spawn("docker", [
-                "ps",
-                "--all",
-                "--filter",
-                `label=${COMPOSE_PROJECT_LABEL}`,
-                "--format",
-                "json",
-            ], {
-                encoding: "utf-8",
-                maxBuffer: 4 * 1024 * 1024,
-                timeoutMs: 15_000,
-            });
-
-            if (!res.stdout) {
-                return new Map();
-            }
-
-            const map = new Map<string, ComposePsEntry[]>();
-
-            // Docker returns JSON Lines, one container per line
-            for (const line of res.stdout.toString().split("\n")) {
-                if (line.trim() === "") {
-                    continue;
-                }
-
-                const entry = fromDockerPs(JSON.parse(line) as DockerPsRaw);
-
-                // Indexed by project and by working directory: a stack whose `.env` renames
-                // the compose project is still found through its directory
-                for (const key of [ entry.project, entry.workingDir ]) {
-                    if (!key) {
-                        continue;
-                    }
-
-                    const list = map.get(key) ?? [];
-                    list.push(entry);
-                    map.set(key, list);
-                }
-            }
-
-            return map;
-        } catch (e) {
-            if (e instanceof Error) {
-                log.warn("getInstanceMap", `Failed to read containers: ${e.message}`);
-            }
-            return null;
-        }
     }
 
     /**
@@ -1113,6 +1094,9 @@ export class Stack {
                     throw new Error("Stack image update failed; check the operation output.");
                 }
             }
+            // The local images are now the ones the registry served, so an answer read
+            // before the pull would keep announcing the update that just happened
+            clearImageUpdateCache(readComposeImages(this.composeYAML));
             await this.updateStatus();
             if (this.status !== RUNNING && this.status !== ATTENTION) {
                 return pullCode;
@@ -1278,8 +1262,8 @@ export class Stack {
             throw new ValidationError("Not an env file: " + fileName);
         }
 
-        const filePath = await resolveStackFilePath(this.path, fileName);
-        await writeFileNoFollow(filePath, content);
+        await writeStackFiles(this.path, [{ name: fileName,
+            content }], { journalRoot: this.server.config.dataDir });
 
         if (fileName === this.activeEnvFileName) {
             this._composeENV = content;
@@ -1296,23 +1280,36 @@ export class Stack {
     }
 
     /**
+     * The stack as the secret operations see it.
+     * The compose text is read through a call, so nothing is loaded from disk for an
+     * operation that never touches it.
+     * @returns Port the functions of `stack-secrets` write through
+     */
+    private get secretHost() : SecretHost {
+        return {
+            name: this.name,
+            path: this.path,
+            journalRoot: this.server.config.dataDir,
+            composeFileName: this._composeFileName,
+            composeText: () => this.composeYAML,
+            fileConfig: () => this._fileConfig,
+            rememberCompose: (content : string) => {
+                this._composeYAML = content;
+            },
+            rememberConfig: (config : StackFileConfig) => {
+                this._fileConfig = config;
+            },
+        };
+    }
+
+    /**
      * Read the content of a secret file.
      * The caller has to authorise this separately, it is not part of the stack response.
      * @param fileName Secret file inside the stack directory
      * @returns File content
      */
     async readSecretFile(fileName : string) : Promise<string> {
-        if (classifyStackFile(fileName) !== "secret") {
-            throw new ValidationError("Not a secret file: " + fileName);
-        }
-
-        const filePath = await resolveStackFilePath(this.path, fileName);
-
-        try {
-            return await fsAsync.readFile(filePath, "utf-8");
-        } catch (e) {
-            throw new ValidationError("Secret file not found: " + fileName);
-        }
+        return readSecretFile(this.secretHost, fileName);
     }
 
     /**
@@ -1321,28 +1318,7 @@ export class Stack {
      * @param content New content
      */
     async writeSecretFile(fileName : string, content : string) : Promise<void> {
-        if (classifyStackFile(fileName) !== "secret") {
-            throw new ValidationError("Not a secret file: " + fileName);
-        }
-
-        const filePath = await resolveStackFilePath(this.path, fileName);
-
-        // mode is applied on creation, chmod covers an existing file
-        await writeFileNoFollow(filePath, content, 0o600);
-
-        if (process.platform !== "win32") {
-            await fsAsync.chmod(filePath, 0o600);
-
-            if (process.env.PUID && process.env.PGID) {
-                const uid = Number(process.env.PUID);
-                const gid = Number(process.env.PGID);
-                if (Number.isInteger(uid) && Number.isInteger(gid)) {
-                    await fsAsync.chown(filePath, uid, gid);
-                }
-            }
-        } else {
-            log.warn("writeSecretFile", "File permissions cannot be restricted on Windows, the file inherits the directory ACL");
-        }
+        await writeSecretFile(this.secretHost, fileName, content);
     }
 
     /**
@@ -1350,91 +1326,17 @@ export class Stack {
      * @param fileName Secret file inside the stack directory
      */
     async deleteSecretFile(fileName : string) : Promise<void> {
-        if (classifyStackFile(fileName) !== "secret") {
-            throw new ValidationError("Not a secret file: " + fileName);
-        }
-
-        const filePath = await resolveStackFilePath(this.path, fileName);
-        await fsAsync.rm(filePath, { force: true });
-
-        const binding = this._fileConfig.secretBindings.find((item) => item.fileName === fileName);
-        if (binding) {
-            await this.unbindSecret(binding.name);
-        }
+        await deleteSecretFile(this.secretHost, fileName);
     }
 
     /**
-     * Serialise a compose document after an explicit structural edit.
-     * `flowCollectionPadding` is disabled so untouched inline arrays such as
-     * `["sh", "-c", "..."]` keep the spacing Compose files normally use.
-     * Task 5 of the plan replaces this with real source preservation.
-     * @param doc Parsed compose document
-     * @returns YAML text
-     */
-    protected serialiseComposeDocument(doc : Document) : string {
-        return serialiseEditedDocument(this.composeYAML, doc);
-    }
-
-    /**
-     * Reference a secret file from the compose file, only on an explicit user action.
-     * The compose document is edited in place, so comments and formatting survive.
+     * Reference a secret file from the compose file, only on an explicit user action
      * @param secretName Compose secret name
      * @param fileName Secret file inside the stack directory
      * @param services Services that get access to the secret
      */
     async bindSecret(secretName : string, fileName : string, services : readonly string[]) : Promise<void> {
-        if (!isSafeNameSegment(secretName)) {
-            throw new ValidationError("Invalid secret name: " + secretName);
-        }
-
-        if (classifyStackFile(fileName) !== "secret") {
-            throw new ValidationError("Not a secret file: " + fileName);
-        }
-
-        const filePath = await resolveStackFilePath(this.path, fileName);
-        await fsAsync.access(filePath).catch(() => {
-            throw new ValidationError("Secret file not found: " + fileName);
-        });
-
-        const doc = parseDocument(this.composeYAML);
-        const declaredServices = readComposeServices(this.composeYAML);
-
-        for (const service of services) {
-            if (!declaredServices.includes(service)) {
-                throw new ValidationError("Unknown service: " + service);
-            }
-        }
-
-        doc.setIn([ "secrets", secretName, "file" ], "./" + fileName);
-
-        for (const service of services) {
-            const current = doc.getIn([ "services", service, "secrets" ]);
-            const list = isSeq(current) ? current.toJSON() as string[] : [];
-
-            if (!list.includes(secretName)) {
-                list.push(secretName);
-            }
-
-            doc.setIn([ "services", service, "secrets" ], list);
-        }
-
-        const composeYAML = this.serialiseComposeDocument(doc);
-        await writeFileNoFollow(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
-        this._composeYAML = composeYAML;
-
-        const bindings = this._fileConfig.secretBindings.filter((item) => item.name !== secretName);
-        bindings.push({
-            name: secretName,
-            fileName,
-            services: [ ...services ],
-        });
-
-        const config = {
-            ...this._fileConfig,
-            secretBindings: bindings,
-        };
-        await StackConfig.set(this.name, config);
-        this._fileConfig = config;
+        await bindSecret(this.secretHost, secretName, fileName, services);
     }
 
     /**
@@ -1442,53 +1344,7 @@ export class Stack {
      * @param secretName Compose secret name
      */
     async unbindSecret(secretName : string) : Promise<void> {
-        const doc = parseDocument(this.composeYAML);
-        let changed = false;
-
-        if (doc.hasIn([ "secrets", secretName ])) {
-            doc.deleteIn([ "secrets", secretName ]);
-            changed = true;
-        }
-
-        const secretsNode = doc.getIn([ "secrets" ]);
-        if (isMap(secretsNode) && secretsNode.items.length === 0) {
-            doc.deleteIn([ "secrets" ]);
-        }
-
-        for (const service of readComposeServices(this.composeYAML)) {
-            const current = doc.getIn([ "services", service, "secrets" ]);
-            if (!isSeq(current)) {
-                continue;
-            }
-
-            const currentList = current.toJSON() as string[];
-            const list = currentList.filter((item) => item !== secretName);
-
-            if (list.length === currentList.length) {
-                continue;
-            }
-
-            changed = true;
-
-            if (list.length === 0) {
-                doc.deleteIn([ "services", service, "secrets" ]);
-            } else {
-                doc.setIn([ "services", service, "secrets" ], list);
-            }
-        }
-
-        if (changed) {
-            const composeYAML = this.serialiseComposeDocument(doc);
-            await writeFileNoFollow(await resolveStackFilePath(this.path, this._composeFileName), composeYAML);
-            this._composeYAML = composeYAML;
-        }
-
-        const config = {
-            ...this._fileConfig,
-            secretBindings: this._fileConfig.secretBindings.filter((item) => item.name !== secretName),
-        };
-        await StackConfig.set(this.name, config);
-        this._fileConfig = config;
+        await unbindSecret(this.secretHost, secretName);
     }
 
     /**

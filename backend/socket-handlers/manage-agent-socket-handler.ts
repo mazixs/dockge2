@@ -3,6 +3,7 @@ import { DockgeServer } from "../dockge-server";
 import { log } from "../log";
 import { callbackError, callbackResult, checkLogin, DockgeSocket } from "../util-server";
 import { LooseObject } from "../../common/util-common";
+import { runInBackground } from "../background";
 
 export class ManageAgentSocketHandler extends SocketHandler {
 
@@ -28,7 +29,7 @@ export class ManageAgentSocketHandler extends SocketHandler {
                 // Refresh another sockets
                 // It is a bit difficult to control another browser sessions to connect/disconnect agents, so force them to refresh the page will be easier.
                 server.disconnectAllSocketClients(undefined, socket.id);
-                manager.sendAgentList();
+                runInBackground("agent list", () => manager.sendAgentList());
 
                 callbackResult({
                     ok: true,
@@ -55,7 +56,7 @@ export class ManageAgentSocketHandler extends SocketHandler {
                 await manager.remove(url);
 
                 server.disconnectAllSocketClients(undefined, socket.id);
-                manager.sendAgentList();
+                runInBackground("agent list", () => manager.sendAgentList());
 
                 callbackResult({
                     ok: true,
@@ -77,7 +78,7 @@ export class ManageAgentSocketHandler extends SocketHandler {
                 await manager.update(name, updatedName);
 
                 server.disconnectAllSocketClients(undefined, socket.id);
-                manager.sendAgentList();
+                runInBackground("agent list", () => manager.sendAgentList());
 
                 callbackResult({
                     ok: true,

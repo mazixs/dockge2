@@ -5,10 +5,11 @@ import { InteractiveTerminal, MainTerminal, Terminal } from "../terminal";
 import { Stack } from "../stack";
 import { AgentSocketHandler } from "../agent-socket-handler";
 import { AgentSocket } from "../../common/agent-socket";
+import type { AgentRequestContract } from "../../common/agent-events";
 import { isContainerShell } from "../../common/util-common";
 
 export class TerminalSocketHandler extends AgentSocketHandler {
-    create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
+    create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
 
         agentSocket.on("terminalInput", async (terminalName : unknown, cmd : unknown, callback) => {
             try {

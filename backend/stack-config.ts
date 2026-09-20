@@ -316,20 +316,21 @@ export class StackConfig {
     }
 
     /**
-     * Read the directory and combine what is there with the stored selection.
-     * Stacks created before this feature keep working: a single compose file is adopted
-     * silently, several files keep a deterministic choice and ask the UI for a decision.
+     * What lies in the stack directory, by kind.
+     *
+     * A symlink is never a stack file: it could point anywhere. A name that was refused
+     * is reported rather than dropped, because the file is visible on disk and a screen
+     * that never mentions it looks broken.
      * @param stackDir Stack directory
-     * @param stackName Stack name
-     * @returns Inventory of the stack files
+     * @returns The names found, sorted, in four groups
      */
-    static async inventory(stackDir : string, stackName : string) : Promise<StackFileInventory> {
+    private static async scan(stackDir : string) : Promise<{ composeFileNames : string[]; envFileNames : string[]; secretFileNames : string[]; unsupportedFileNames : string[] }> {
         const composeFileNames : string[] = [];
         const envFileNames : string[] = [];
         const secretFileNames : string[] = [];
         const unsupportedFileNames : string[] = [];
-
         let entries : string[] = [];
+
         try {
             entries = await fsAsync.readdir(stackDir);
         } catch (e) {
@@ -339,7 +340,6 @@ export class StackConfig {
         for (const entry of entries) {
             let stat;
 
-            // A symlink is not a stack file: it could point anywhere
             try {
                 stat = await fsAsync.lstat(path.join(stackDir, entry));
 
@@ -361,8 +361,6 @@ export class StackConfig {
                     secretFileNames.push(entry);
                     break;
                 default:
-                    // A refused name is reported, not silently dropped: the file is
-                    // visible on disk, so a screen that never mentions it looks broken.
                     // Control characters are stripped, the name only ever becomes text
                     if (stat.isFile() && looksLikeStackFile(entry)) {
                         unsupportedFileNames.push(entry.replace(CONTROL_CHARACTERS, ""));
@@ -375,26 +373,41 @@ export class StackConfig {
         envFileNames.sort();
         secretFileNames.sort();
         unsupportedFileNames.sort();
+        return { composeFileNames,
+            envFileNames,
+            secretFileNames,
+            unsupportedFileNames };
+    }
 
-        const stored = await this.get(stackName);
+    /**
+     * Which of the files that are there the stack actually uses.
+     *
+     * A stored choice survives as long as the file it names is still on disk; nothing is
+     * added on its own, except for the historic `.env` of a stack that never had any
+     * metadata.
+     * @param stored What was chosen before, if anything ever was
+     * @param found What lies in the directory now
+     * @returns The selection in force
+     */
+    private static resolveConfig(stored : StackFileConfig | null, found : { composeFileNames : string[]; envFileNames : string[]; secretFileNames : string[] }) : StackFileConfig {
         const config = emptyStackFileConfig();
 
         // Compose file: keep the stored choice while the file is still there
-        if (stored?.composeFileName && composeFileNames.includes(stored.composeFileName)) {
+        if (stored?.composeFileName && found.composeFileNames.includes(stored.composeFileName)) {
             config.composeFileName = stored.composeFileName;
         } else {
-            config.composeFileName = pickDefaultComposeFile(composeFileNames);
+            config.composeFileName = pickDefaultComposeFile(found.composeFileNames);
         }
 
         // Env files: stored order first, then nothing else is added on its own
         if (stored) {
-            config.envFileNames = stored.envFileNames.filter((name) => envFileNames.includes(name));
-            config.activeEnvFileName = envFileNames.includes(stored.activeEnvFileName) ? stored.activeEnvFileName : "";
-            config.secretBindings = stored.secretBindings.filter((binding) => secretFileNames.includes(binding.fileName));
+            config.envFileNames = stored.envFileNames.filter((name) => found.envFileNames.includes(name));
+            config.activeEnvFileName = found.envFileNames.includes(stored.activeEnvFileName) ? stored.activeEnvFileName : "";
+            config.secretBindings = stored.secretBindings.filter((binding) => found.secretFileNames.includes(binding.fileName));
         }
 
         // A stack that never had metadata keeps the historic behaviour of using .env
-        if (!stored && envFileNames.includes(".env")) {
+        if (!stored && found.envFileNames.includes(".env")) {
             config.envFileNames = [ ".env" ];
             config.activeEnvFileName = ".env";
         }
@@ -402,7 +415,17 @@ export class StackConfig {
         if (config.activeEnvFileName === "" && config.envFileNames.length > 0) {
             config.activeEnvFileName = config.envFileNames[0] ?? "";
         }
+        return config;
+    }
 
+    /**
+     * Describe the secret files without reading a single byte of them
+     * @param stackDir Stack directory
+     * @param secretFileNames Files classified as secrets
+     * @param config The selection in force, which says what each file is bound to
+     * @returns Metadata of every secret file
+     */
+    private static async describeSecrets(stackDir : string, secretFileNames : string[], config : StackFileConfig) : Promise<SecretFileMeta[]> {
         const secretFiles : SecretFileMeta[] = [];
 
         for (const fileName of secretFileNames) {
@@ -413,6 +436,7 @@ export class StackConfig {
             try {
                 // lstat, so a swapped symlink cannot report the size of its target
                 const stat = await fsAsync.lstat(path.join(stackDir, fileName));
+
                 size = stat.size;
                 modifiedAt = stat.mtime.toISOString();
             } catch (e) {
@@ -427,14 +451,29 @@ export class StackConfig {
                 services: binding?.services ?? [],
             });
         }
+        return secretFiles;
+    }
+
+    /**
+     * Read the directory and combine what is there with the stored selection.
+     * Stacks created before this feature keep working: a single compose file is adopted
+     * silently, several files keep a deterministic choice and ask the UI for a decision.
+     * @param stackDir Stack directory
+     * @param stackName Stack name
+     * @returns Inventory of the stack files
+     */
+    static async inventory(stackDir : string, stackName : string) : Promise<StackFileInventory> {
+        const found = await this.scan(stackDir);
+        const stored = await this.get(stackName);
+        const config = this.resolveConfig(stored, found);
 
         return {
             config,
-            composeFileNames,
-            envFileNames,
-            secretFiles,
-            needsComposeSelection: composeFileNames.length > 1 && !stored?.composeFileName,
-            unsupportedFileNames,
+            composeFileNames: found.composeFileNames,
+            envFileNames: found.envFileNames,
+            secretFiles: await this.describeSecrets(stackDir, found.secretFileNames, config),
+            needsComposeSelection: found.composeFileNames.length > 1 && !stored?.composeFileName,
+            unsupportedFileNames: found.unsupportedFileNames,
         };
     }
 }

@@ -15,7 +15,8 @@ import { classifyStackFile } from "../common/stack-files";
 import { getStackGitWorkflow } from "./agent-socket-handlers/git-socket-handler";
 import { spawn } from "./child-process";
 import { validateGitRepository } from "./stack-git";
-import type { GitUpdatePreview } from "../common/stack-git";
+import { withStackLock } from "./stack-lock";
+import type { GitUpdatePreview } from "../common/types/stack-git";
 
 const FILE_LIMIT = 1024 * 1024;
 const target = z.object({ server_id: z.literal("local"),
@@ -57,12 +58,71 @@ export async function readMcpFile(directory : string, name : string) {
     }
 }
 
+/**
+ * Check that the path still leads to the file this descriptor holds
+ * @param file Path of the file
+ * @param stat What the descriptor says the file is
+ * @returns {void}
+ * @throws {Error} mcpFileChanged, if the path now leads somewhere else
+ */
+async function assertSameInode(file : string, stat : { ino : number; dev : number }) : Promise<void> {
+    const current = await lstat(file);
+
+    if (current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev) {
+        throw new Error("mcpFileChanged");
+    }
+}
+
+/**
+ * Read what the file holds right now and refuse anything but the expected bytes
+ * @param handle Open descriptor
+ * @param size Size the file is expected to have
+ * @param expectedHash Hash the caller read before it started
+ * @returns The bytes that are there
+ * @throws {Error} mcpFileChanged, if the content is not what the caller read
+ */
+async function assertContent(handle : Awaited<ReturnType<typeof open>>, size : number, expectedHash : string) : Promise<Buffer> {
+    const bytes = Buffer.alloc(size + 1);
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+    const current = bytes.subarray(0, bytesRead);
+
+    if (bytesRead !== size || digest(current) !== expectedHash) {
+        throw new Error("mcpFileChanged");
+    }
+    return current;
+}
+
+/**
+ * Write every byte and leave nothing of what was there before.
+ *
+ * One write call may cover only part of the buffer, so a partial write is finished
+ * rather than reported as done.
+ * @param handle Open descriptor
+ * @param bytes What the file has to hold
+ * @param failure Error to raise when the write stops making progress
+ * @param cause The failure this write is undoing, when it is a recovery
+ * @returns {void}
+ */
+async function writeAll(handle : Awaited<ReturnType<typeof open>>, bytes : Buffer, failure : string, cause? : unknown) : Promise<void> {
+    for (let offset = 0; offset < bytes.length;) {
+        const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset);
+
+        if (!bytesWritten) {
+            throw cause === undefined ? new Error(failure) : new Error(failure, { cause });
+        }
+        offset += bytesWritten;
+    }
+    await handle.truncate(bytes.length);
+    await handle.sync();
+}
+
 /** Compare and write the exact UTF-8 bytes on the same no-follow descriptor; restore on failure. */
 export async function writeMcpFile(directory : string, name : string, expectedHash : string, content : string, guard : () => Promise<void> = async () => undefined) {
     if (Buffer.byteLength(content) > FILE_LIMIT || content.includes("\0") || Buffer.from(content).toString("utf8") !== content) {
         throw new Error("mcpInvalidFile");
     }
     const original = await readMcpFile(directory, name);
+
     if (original.hash !== expectedHash) {
         throw new Error("mcpFileChanged");
     }
@@ -71,53 +131,28 @@ export async function writeMcpFile(directory : string, name : string, expectedHa
     }
     const file = await resolveStackFilePath(directory, name);
     const handle = await open(file, constants.O_RDWR | constants.O_NOFOLLOW);
+
     try {
         const stat = await handle.stat();
+
         if (!stat.isFile() || stat.size > FILE_LIMIT) {
             throw new Error("mcpInvalidFile");
         }
-        const bytes = Buffer.alloc(stat.size + 1);
-        const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
-        const before = bytes.subarray(0, bytesRead);
-        if (bytesRead !== stat.size || digest(before) !== expectedHash) {
-            throw new Error("mcpFileChanged");
-        }
-        const current = await lstat(file);
-        if (current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev) {
-            throw new Error("mcpFileChanged");
-        }
+        const before = await assertContent(handle, stat.size, expectedHash);
+
+        await assertSameInode(file, stat);
         await guard();
-        const published = await lstat(file);
-        const freshBytes = Buffer.alloc(stat.size + 1);
-        const freshRead = await handle.read(freshBytes, 0, freshBytes.length, 0);
-        if (published.isSymbolicLink() || published.dev !== stat.dev || published.ino !== stat.ino || freshRead.bytesRead !== stat.size || digest(freshBytes.subarray(0, freshRead.bytesRead)) !== expectedHash) {
-            throw new Error("mcpFileChanged");
-        }
+        // The guard may have taken a while, so the same two questions are asked again:
+        // what the file holds, and whether the path still leads to it
+        await assertContent(handle, stat.size, expectedHash);
+        await assertSameInode(file, stat);
         const after = Buffer.from(content);
+
         try {
-            for (let offset = 0; offset < after.length;) {
-                const { bytesWritten } = await handle.write(after, offset, after.length - offset, offset);
-                if (!bytesWritten) {
-                    throw new Error("mcpWriteFailed");
-                }
-                offset += bytesWritten;
-            }
-            await handle.truncate(after.length);
-            await handle.sync();
-            const visible = await lstat(file);
-            if (visible.isSymbolicLink() || visible.dev !== stat.dev || visible.ino !== stat.ino) {
-                throw new Error("mcpFileChanged");
-            }
+            await writeAll(handle, after, "mcpWriteFailed");
+            await assertSameInode(file, stat);
         } catch (error) {
-            for (let offset = 0; offset < before.length;) {
-                const { bytesWritten } = await handle.write(before, offset, before.length - offset, offset);
-                if (!bytesWritten) {
-                    throw new Error("mcpRecoveryFailed", { cause: error });
-                }
-                offset += bytesWritten;
-            }
-            await handle.truncate(before.length);
-            await handle.sync();
+            await writeAll(handle, before, "mcpRecoveryFailed", error);
             throw error;
         }
     } finally {
@@ -199,7 +234,9 @@ export function registerMcpFilesGit(server : DockgeServer, operations : McpOpera
                 deployed: false },
                 revalidate: async () => await snapshot(await resolve(identity, "files:write", args)) === fingerprint,
                 execute: async (guard) => {
-                    await writeMcpFile(stack.path, args.file_name, args.expected_hash, args.content, guard);
+                    // The same lock the editor and the Git workflow take: the hash check
+                    // alone would not stop a save that starts between check and write
+                    await withStackLock(stack.path, () => writeMcpFile(stack.path, args.file_name, args.expected_hash, args.content, guard));
                     return { saved: true,
                         deployed: false };
                 } };

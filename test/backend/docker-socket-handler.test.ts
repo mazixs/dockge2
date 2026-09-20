@@ -40,7 +40,7 @@ function call(agentSocket : AgentSocket, eventName : string, ...args : unknown[]
 }
 
 test("stack file and secret events keep secret content behind a password", async () => {
-    await withDatabase(async ({ stacksDir }) => {
+    await withDatabase(async ({ stacksDir, dataDir }) => {
         // A real account created through better-auth, so the password check is the real one
         const cookie = await createTestAccount("secret-admin@example.com");
 
@@ -53,6 +53,7 @@ test("stack file and secret events keep secret content behind a password", async
 
         const socket = makeAuthenticatedSocket({ cookie });
         const server = { stacksDir,
+            config: { dataDir },
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new DockerSocketHandler().create(socket, server, agentSocket);
@@ -140,7 +141,7 @@ test("stack file and secret events keep secret content behind a password", async
 });
 
 test("stack file events reject wrong types with a type error, not by accident", async () => {
-    await withDatabase(async ({ stacksDir }) => {
+    await withDatabase(async ({ stacksDir, dataDir }) => {
         // A stack that exists, so a refusal can only come from the type checks themselves
         const stackDir = path.join(stacksDir, "typed-stack");
         await mkdir(stackDir);
@@ -149,6 +150,7 @@ test("stack file events reject wrong types with a type error, not by accident", 
 
         const socket = makeAuthenticatedSocket();
         const server = { stacksDir,
+            config: { dataDir },
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new DockerSocketHandler().create(socket, server, agentSocket);
@@ -184,8 +186,9 @@ test("stack file events reject wrong types with a type error, not by accident", 
 });
 
 test("a new stack cannot be created under a name the filesystem or Docker would choke on", async () => {
-    await withDatabase(async ({ stacksDir }) => {
+    await withDatabase(async ({ stacksDir, dataDir }) => {
         const server = { stacksDir,
+            config: { dataDir },
             sendStackList: () => undefined } as unknown as DockgeServer;
         const handler = new DockerSocketHandler();
         const tooLong = "a".repeat(65);
@@ -204,5 +207,52 @@ test("a new stack cannot be created under a name the filesystem or Docker would 
         await handler.saveStack(server, accepted, composeYAML, "", true);
         assert.equal(await readFile(path.join(stacksDir, accepted, "compose.yaml"), "utf8"), composeYAML);
         await handler.saveStack(server, accepted, composeYAML, "", false);
+    });
+});
+
+test("stack operations refuse a wrong argument and an unknown stack before Docker is touched", async () => {
+    await withDatabase(async ({ stacksDir, dataDir }) => {
+        const socket = makeAuthenticatedSocket();
+        const server = { stacksDir,
+            config: { dataDir },
+            sendStackList: () => undefined } as unknown as DockgeServer;
+        const agentSocket = new AgentSocket();
+        new DockerSocketHandler().create(socket, server, agentSocket);
+
+        // Every one of these would otherwise reach `docker compose` with whatever the
+        // caller sent. They answer instead, so the screen leaves its waiting state
+        const wrongType : Array<[string, unknown[]]> = [
+            [ "getStack", [ 5 ]],
+            [ "deleteStack", [ null ]],
+            [ "startStack", [{}]],
+            [ "stopStack", [ 5 ]],
+            [ "restartStack", [ null ]],
+            [ "updateStack", [[]]],
+            [ "downStack", [ 5 ]],
+            [ "serviceStatusList", [ 5 ]],
+            [ "stackUpdatePreview", [ null ]],
+            [ "abortCompose", [ 5 ]],
+            [ "stackAvailability", [ "app", "day" ]],
+            [ "startService", [ "app", 5 ]],
+            [ "stopService", [ 5, "web" ]],
+            [ "restartService", [ "app", null ]],
+        ];
+
+        for (const [ event, args ] of wrongType) {
+            const response = await call(agentSocket, event, ...args);
+            assert.equal(response.ok, false, `${event} should refuse ${JSON.stringify(args)}`);
+        }
+
+        // A name that is a string but names nothing is refused as well, and the refusal
+        // says what is wrong rather than quoting a filesystem error
+        for (const event of [ "getStack", "startStack", "stopStack", "restartStack", "updateStack", "downStack", "serviceStatusList", "stackUpdatePreview", "abortCompose" ]) {
+            const response = await call(agentSocket, event, "no-such-stack");
+            assert.equal(response.ok, false, event);
+            assert.match(String(response.msg), /not found|does not exist|Stack/i, event);
+        }
+
+        // Asking for the list is always allowed and is answered even when nothing is there
+        const list = await call(agentSocket, "requestStackList");
+        assert.equal(list.ok, true);
     });
 });

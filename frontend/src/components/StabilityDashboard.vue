@@ -127,7 +127,7 @@
 <script lang="ts">
 import { defineComponent } from "vue";
 import { formatDuration, formatPercent } from "../format";
-import { STABILITY_WINDOWS, STABILITY_STALE_MS, runtimeStatus, type StabilityOverview, type StabilityContainer, type StabilityHistoryBucket, type StabilityState } from "../../../common/stability";
+import { STABILITY_WINDOWS, STABILITY_STALE_MS, runtimeStatus, type StabilityOverview, type StabilityContainer, type StabilityHistoryBucket, type StabilityState, type StabilityWindow } from "../../../common/stability";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
 import AttentionStrip from "./AttentionStrip.vue";
 import StateChip from "./StateChip.vue";
@@ -148,7 +148,7 @@ export default defineComponent({
         InterfaceIcon },
     data() {
         return {
-            windowHours: 24,
+            windowHours: 24 as StabilityWindow,
             windows: STABILITY_WINDOWS,
             states: [ "running", "attention", "stopped", "unknown" ] as StabilityState[],
             snapshots: {} as Record<string, StabilityOverview>,
@@ -253,13 +253,13 @@ export default defineComponent({
                     this.requestIds[endpoint] = requestId + 1;
                 }
             }, 10_000);
-            this.$root.emitAgent(endpoint, "stabilityOverview", this.windowHours, (response : { ok? : boolean; overview? : StabilityOverview }) => {
+            this.$root.emitAgent(endpoint, "stabilityOverview", this.windowHours, (response) => {
                 if (this.disposed || this.requestIds[endpoint] !== requestId) {
                     return;
                 }
                 clearTimeout(this.requestTimers[endpoint]);
                 this.pending[endpoint] = false;
-                if (response.ok && response.overview) {
+                if (response.ok) {
                     this.snapshots[endpoint] = response.overview;
                     this.errors[endpoint] = false;
                 } else {

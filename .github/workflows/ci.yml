@@ -51,11 +51,17 @@ jobs:
       - name: Check Typescript
         run: npm run check-ts
 
-      - name: Test with coverage
+      - name: Check single file components
+        run: npm run check-vue
+
+      - name: Test with coverage and subsystem floors
         run: npm run test
 
       - name: Build
         run: npm run build:frontend
+
+      - name: Check the first load against its budget
+        run: npm run check:bundle
 
       - name: Check update command (dry run)
         run: npm run update-docker -- --dry-run

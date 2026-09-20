@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { StackGitError, StackGitWorkflow, validateGitRepository } from "../../backend/stack-git";
-import type { GitCloneInput, GitUpdatePreview } from "../../common/stack-git";
+import type { GitCloneInput, GitUpdatePreview } from "../../common/types/stack-git";
 import type { StackFileConfig } from "../../common/types/stack";
 
 const config: StackFileConfig = { composeFileName: "compose.yaml",

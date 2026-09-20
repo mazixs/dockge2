@@ -13,7 +13,8 @@ import https from "https";
 import http from "http";
 import { Router } from "./router";
 import { Socket } from "socket.io";
-import { authorizeSocketEvent, normalizeRole, viewerStackSummary } from "./auth-access";
+import { authorizeSocketEvent, viewerStackSummary } from "./auth-access";
+import { normalizeRole } from "./auth-runtime";
 import { UsersSocketHandler } from "./socket-handlers/users-socket-handler";
 import { MainSocketHandler } from "./socket-handlers/main-socket-handler";
 import { SocketHandler } from "./socket-handler";
@@ -31,17 +32,122 @@ import path from "path";
 import { TerminalSocketHandler } from "./agent-socket-handlers/terminal-socket-handler";
 import { Stack } from "./stack";
 import { recordScan } from "./observations";
-import { Cron } from "croner";
+import { ScheduledRounds } from "./scheduled-rounds";
+import { readOwnProjectName } from "./stack-state";
+import { recoverStackWrites } from "./stack-write";
 import gracefulShutdown from "http-graceful-shutdown";
 import { spawn } from "./child-process";
 import { AgentManager } from "./agent-manager";
 import { AgentProxySocketHandler } from "./socket-handlers/agent-proxy-socket-handler";
 import { AgentSocketHandler } from "./agent-socket-handler";
 import { AgentSocket, AGENT_PROTOCOL_VERSION } from "../common/agent-socket";
+import type { AgentRequestContract } from "../common/agent-events";
+import type { StackSummaryDTO, ViewerStackSummary } from "../common/types/stack";
 import { ManageAgentSocketHandler } from "./socket-handlers/manage-agent-socket-handler";
 import { Terminal } from "./terminal";
 import { toNodeHandler } from "better-auth/node";
 import { AUTH_BASE_PATH, CLIENT_IP_HEADER, countUsers, getAuth, initAuth, resolveSocketIdentity, resolveTrustedOrigins, trustsProxyHeaders } from "./auth";
+import { runInBackground } from "./background";
+import { ResourceOwner, DEFAULT_STOP_TIMEOUT_MS, type ResourceStopReport } from "./resource-owner";
+import { installFatalErrorHandlers } from "./fatal-error";
+import { SharedReading } from "./shared-reading";
+
+/** How long cleanup may take when the process is leaving after an unhandled error */
+const FATAL_STOP_TIMEOUT_MS = 5000;
+
+/**
+ * How long host statistics are handed out again before Docker is asked once more.
+ * Shorter than the two second poll of the screens, so a reading is never stale by more
+ * than one round, and long enough that several open screens share one call.
+ */
+const DOCKER_STATS_CACHE_MS = 1500;
+
+/**
+ * Read the configuration this instance runs with.
+ *
+ * A command line argument wins over an environment variable, which wins over the
+ * default. Nothing here is read again later: the settings a user can change live in the
+ * database, and these decide how the process starts.
+ * @returns Configuration of this instance
+ */
+function readConfig() : Config {
+    // Default stacks directory
+    let defaultStacksDir;
+    if (process.platform === "win32") {
+        defaultStacksDir = "./stacks";
+    } else {
+        defaultStacksDir = "/opt/stacks";
+    }
+
+    // Define all possible arguments
+    let args = parse<Arguments>({
+        sslKey: {
+            type: String,
+            optional: true,
+        },
+        sslCert: {
+            type: String,
+            optional: true,
+        },
+        sslKeyPassphrase: {
+            type: String,
+            optional: true,
+        },
+        port: {
+            type: Number,
+            optional: true,
+        },
+        hostname: {
+            type: String,
+            optional: true,
+        },
+        dataDir: {
+            type: String,
+            optional: true,
+        },
+        stacksDir: {
+            type: String,
+            optional: true,
+        },
+        enableConsole: {
+            type: Boolean,
+            optional: true,
+            defaultValue: false,
+        }
+    });
+
+    const config = args as Config;
+
+    // Load from environment variables or default values if args are not set
+    config.sslKey = args.sslKey || process.env.DOCKGE_SSL_KEY || undefined;
+    config.sslCert = args.sslCert || process.env.DOCKGE_SSL_CERT || undefined;
+    config.sslKeyPassphrase = args.sslKeyPassphrase || process.env.DOCKGE_SSL_KEY_PASSPHRASE || undefined;
+    config.port = args.port || Number(process.env.DOCKGE_PORT) || 5001;
+    config.hostname = args.hostname || process.env.DOCKGE_HOSTNAME || undefined;
+    config.dataDir = args.dataDir || process.env.DOCKGE_DATA_DIR || "./data/";
+    config.stacksDir = args.stacksDir || process.env.DOCKGE_STACKS_DIR || defaultStacksDir;
+    config.enableConsole = args.enableConsole || process.env.DOCKGE_ENABLE_CONSOLE === "true" || false;
+    return config;
+}
+
+/**
+ * Create the HTTP server, with TLS when a key and a certificate are configured
+ * @param app Express application to serve
+ * @param config Configuration of this instance
+ * @returns The server, not yet listening
+ */
+function createHttpServer(app : express.Express, config : Config) : http.Server {
+    if (config.sslKey && config.sslCert) {
+        log.info("server", "Server Type: HTTPS");
+        return https.createServer({
+            key: fs.readFileSync(config.sslKey),
+            cert: fs.readFileSync(config.sslCert),
+            passphrase: config.sslKeyPassphrase,
+        }, app);
+    }
+    log.info("server", "Server Type: HTTP");
+    return http.createServer(app);
+}
 
 export class DockgeServer {
     app : Express;
@@ -87,80 +193,28 @@ export class DockgeServer {
     stacksDir : string = "";
 
     /**
+     * Everything this process started and therefore has to stop before it exits:
+     * timers, terminals, agent connections and the database, in that order
+     */
+    resources = new ResourceOwner();
+
+    /** Host statistics, read once for everyone who asks at about the same time */
+    protected dockerStatsReading = new SharedReading(() => this.readDockerStats(), DOCKER_STATS_CACHE_MS);
+
+    /**
      *
      */
     constructor() {
-        // Catch unexpected errors here
-        let unexpectedErrorHandler = (error : unknown) => {
-            console.trace(error);
-            console.error("If you keep encountering errors, please report to https://github.com/mazixs/dockge2");
-        };
-        process.addListener("unhandledRejection", unexpectedErrorHandler);
-        process.addListener("uncaughtException", unexpectedErrorHandler);
+        // An error nobody handled leaves this process with a state it cannot describe,
+        // so it stops instead of serving from it and the supervisor starts it again
+        installFatalErrorHandlers({ stop: () => this.stop(FATAL_STOP_TIMEOUT_MS) });
 
         if (!process.env.NODE_ENV) {
             process.env.NODE_ENV = "production";
         }
 
-        // Log NODE ENV
         log.info("server", "NODE_ENV: " + process.env.NODE_ENV);
-
-        // Default stacks directory
-        let defaultStacksDir;
-        if (process.platform === "win32") {
-            defaultStacksDir = "./stacks";
-        } else {
-            defaultStacksDir = "/opt/stacks";
-        }
-
-        // Define all possible arguments
-        let args = parse<Arguments>({
-            sslKey: {
-                type: String,
-                optional: true,
-            },
-            sslCert: {
-                type: String,
-                optional: true,
-            },
-            sslKeyPassphrase: {
-                type: String,
-                optional: true,
-            },
-            port: {
-                type: Number,
-                optional: true,
-            },
-            hostname: {
-                type: String,
-                optional: true,
-            },
-            dataDir: {
-                type: String,
-                optional: true,
-            },
-            stacksDir: {
-                type: String,
-                optional: true,
-            },
-            enableConsole: {
-                type: Boolean,
-                optional: true,
-                defaultValue: false,
-            }
-        });
-
-        this.config = args as Config;
-
-        // Load from environment variables or default values if args are not set
-        this.config.sslKey = args.sslKey || process.env.DOCKGE_SSL_KEY || undefined;
-        this.config.sslCert = args.sslCert || process.env.DOCKGE_SSL_CERT || undefined;
-        this.config.sslKeyPassphrase = args.sslKeyPassphrase || process.env.DOCKGE_SSL_KEY_PASSPHRASE || undefined;
-        this.config.port = args.port || Number(process.env.DOCKGE_PORT) || 5001;
-        this.config.hostname = args.hostname || process.env.DOCKGE_HOSTNAME || undefined;
-        this.config.dataDir = args.dataDir || process.env.DOCKGE_DATA_DIR || "./data/";
-        this.config.stacksDir = args.stacksDir || process.env.DOCKGE_STACKS_DIR || defaultStacksDir;
-        this.config.enableConsole = args.enableConsole || process.env.DOCKGE_ENABLE_CONSOLE === "true" || false;
+        this.config = readConfig();
         this.stacksDir = this.config.stacksDir;
 
         // The passphrase of the TLS key must not reach the log, even in development
@@ -181,22 +235,31 @@ export class DockgeServer {
             }
         }
 
-        // Create express
         this.app = express();
+        this.httpServer = createHttpServer(this.app, this.config);
+        this.mountAuthRoutes();
+        mountMcp(this);
+        this.mountRoutes();
+        this.io = new socketIO.Server(this.httpServer, this.socketOptions());
+        this.io.on("connection", (socket : Socket) => {
+            runInBackground("socket connection", () => this.welcome(socket));
+        });
 
-        // Create HTTP server
-        if (this.config.sslKey && this.config.sslCert) {
-            log.info("server", "Server Type: HTTPS");
-            this.httpServer = https.createServer({
-                key: fs.readFileSync(this.config.sslKey),
-                cert: fs.readFileSync(this.config.sslCert),
-                passphrase: this.config.sslKeyPassphrase,
-            }, this.app);
-        } else {
-            log.info("server", "Server Type: HTTP");
-            this.httpServer = http.createServer(this.app);
+        if (isDev) {
+            setInterval(() => {
+                log.debug("terminal", "Terminal count: " + Terminal.getTerminalCount());
+            }, 5000);
         }
+    }
 
+    /**
+     * Mount the authentication endpoints.
+     *
+     * They go on before any body parser, because the auth handler has to see the bytes
+     * that arrived rather than an object somebody built from them.
+     * @returns {void}
+     */
+    private mountAuthRoutes() : void {
         // The auth handler has to see the raw body, so it is mounted before any parser
         this.app.all(`${AUTH_BASE_PATH}/*`, (request, response, next) => {
             // The address the auth layer counts attempts by comes from the connection,
@@ -244,17 +307,21 @@ export class DockgeServer {
                 .then(() => dropRevokedSessions(this.io.sockets.sockets.values() as Iterable<DockgeSocket>))
                 .catch(next);
         });
+    }
 
-        mountMcp(this);
-
+    /**
+     * Mount everything the browser loads: the routers, the built files and the page.
+     * @returns {void}
+     */
+    private mountRoutes() : void {
         // Binding Routers
         for (const router of this.routerList) {
             this.app.use(router.create(this.app, this));
         }
 
-        // Static files. Имя файла в /assets/ содержит хеш содержимого, поэтому
-        // ответ можно объявить неизменяемым: другое содержимое - другое имя, и
-        // браузер не переспрашивает про каждый файл при каждой загрузке
+        // A name under /assets/ carries the hash of the content, so the answer may be
+        // declared immutable: other content has another name, and the browser stops
+        // asking about every file on every load
         this.app.use("/assets", expressStaticGzip("frontend-dist/assets", {
             enableBrotli: true,
             serveStatic: {
@@ -263,21 +330,30 @@ export class DockgeServer {
             },
         }));
 
-        // Все остальное - index.html, manifest.json, иконки - имя не меняет.
-        // Долгий срок оставил бы браузеру прежнюю версию после обновления панели
+        // Everything else - index.html, manifest.json, the icons - keeps its name. A long
+        // lifetime would leave the browser on the previous version after an update
         this.app.use("/", expressStaticGzip("frontend-dist", {
             enableBrotli: true,
         }));
 
         // Universal Route Handler, must be at the end of all express routes.
         this.app.get("*", async (_request, response) => {
-            // index.html имени не меняет и ссылается на хешированные ассеты,
-            // поэтому браузер обязан спрашивать его заново: иначе после
-            // обновления панели он открыл бы старую страницу с мертвыми ссылками
+            // index.html keeps its name and points at hashed assets, so the browser has
+            // to ask for it again: otherwise an update leaves it on the old page, whose
+            // links lead nowhere
             response.set("Cache-Control", "no-cache");
             response.send(this.indexHTML);
         });
+    }
 
+    /**
+     * How the socket server is configured.
+     *
+     * The handshake carries the session cookie, so a credentialed request may not use a
+     * wildcard origin and every trusted origin is named.
+     * @returns Options for socket.io
+     */
+    private socketOptions() : Partial<socketIO.ServerOptions> {
         // In development the UI is served from the Vite port, so the socket is cross origin.
         // The handshake carries the session cookie, and a credentialed request may not use
         // a wildcard origin, so the trusted origins are listed explicitly.
@@ -315,137 +391,139 @@ export class DockgeServer {
         if (cors) {
             socketOptions.cors = cors;
         }
-        this.io = new socketIO.Server(this.httpServer, socketOptions);
-
-        this.io.on("connection", async (socket: Socket) => {
-            let dockgeSocket = socket as DockgeSocket;
-            const identityReady = resolveSocketIdentity(socket.request.headers).then((identity) => {
-                dockgeSocket.userID = identity.userID ?? "";
-                dockgeSocket.userRole = identity.role ?? "viewer";
-                return identity;
-            });
-            dockgeSocket.instanceManager = new AgentManager(dockgeSocket);
-            // Default deny at the transport boundary, including future handlers.
-            dockgeSocket.use(async (packet, next) => {
-                const [ event, ...args ] = packet;
-                if (event === "needsSetup") {
-                    next();
-                    return;
-                }
-                try {
-                    await identityReady;
-                    if (event === "agent") {
-                        if (typeof args[1] !== "string") {
-                            throw new Error("authPermissionDenied");
-                        }
-                        await authorizeSocketEvent(dockgeSocket, args[1], true);
-                    } else {
-                        await authorizeSocketEvent(dockgeSocket, event);
-                    }
-                    next();
-                } catch (error) {
-                    const callback = args[args.length - 1];
-                    if (typeof callback === "function") {
-                        callback({ ok: false,
-                            msg: error instanceof Error ? error.message : "authPermissionDenied",
-                            msgi18n: true });
-                    }
-                    // Do not call next: a denied packet must not reach its handler.
-                }
-            });
-            dockgeSocket.emitAgent = (event : string, ...args : unknown[]) => {
-                if (!dockgeSocket.connected || (dockgeSocket.userRole === "viewer" && event !== "stackList")) {
-                    return;
-                }
-                let obj = args[0];
-                if (typeof(obj) === "object") {
-                    let obj2 = obj as LooseObject;
-                    obj2.endpoint = dockgeSocket.endpoint;
-                }
-                dockgeSocket.emit("agent", event, ...args);
-            };
-
-            if (typeof(socket.request.headers.endpoint) === "string") {
-                dockgeSocket.endpoint = socket.request.headers.endpoint;
-            } else {
-                dockgeSocket.endpoint = "";
-            }
-
-            if (dockgeSocket.endpoint) {
-                log.info("server", "Socket connected (agent), as endpoint " + dockgeSocket.endpoint);
-            } else {
-                log.info("server", "Socket connected (direct)");
-            }
-
-            this.sendInfo(dockgeSocket, true);
-
-            // Asked per connection, not from a flag decided at start up: the account is
-            // created through the auth endpoints, so the server would otherwise keep
-            // sending every new socket to the setup screen after setup was done
-            this.needSetup = await this.shouldShowSetup();
-
-            if (this.needSetup) {
-                log.info("server", "Redirect to setup page");
-                dockgeSocket.emit("setup");
-            }
-
-            // Create socket handlers (original, no agent support)
-            for (const socketHandler of this.socketHandlerList) {
-                socketHandler.create(dockgeSocket, this);
-            }
-
-            // Create Agent Socket
-            let agentSocket = new AgentSocket();
-
-            // Create agent socket handlers
-            for (const socketHandler of this.agentSocketHandlerList) {
-                socketHandler.create(dockgeSocket, this, agentSocket);
-            }
-
-            // Create agent proxy socket handlers
-            this.agentProxySocketHandler.create2(dockgeSocket, this, agentSocket);
-
-            // ***************************
-            // Better do anything after added all socket handlers here
-            // ***************************
-
-            // Who this socket is comes from the session cookie of the handshake,
-            // verified by better-auth. There is no login event on the socket any more.
-            const identity = await identityReady;
-
-            if (identity.userID) {
-                if (identity.autoLogin) {
-                    log.info("auth", "Disabled Auth: acting as the owner account");
-                }
-
-                dockgeSocket.userRole = identity.role ?? "viewer";
-                await this.afterLogin(dockgeSocket, identity.userID);
-
-                if (identity.autoLogin) {
-                    dockgeSocket.emit("autoLogin");
-                }
-            } else {
-                log.debug("auth", "No session, the client has to sign in");
-                dockgeSocket.emit("needAuth");
-            }
-
-            // Socket disconnect
-            dockgeSocket.on("disconnect", () => {
-                log.info("server", "Socket disconnected!");
-                dockgeSocket.instanceManager.disconnectAll();
-            });
-
-        });
-
-        this.io.on("disconnect", () => {
-
-        });
-
-        if (isDev) {
-            setInterval(() => {
-                log.debug("terminal", "Terminal count: " + Terminal.getTerminalCount());
-            }, 5000);
+        if (cors) {
+            socketOptions.cors = cors;
         }
+        return socketOptions;
+    }
+
+    /**
+     * Set one browser or agent connection up.
+     *
+     * Who the socket belongs to is decided from the session cookie of the handshake, so
+     * nothing here trusts a value the client sent about itself. Every packet is checked
+     * again before it reaches a handler, because a session can end while a socket stays
+     * open.
+     * @param socket The connection that just opened
+     * @returns {void}
+     */
+    private async welcome(socket : Socket) : Promise<void> {
+        const dockgeSocket = socket as DockgeSocket;
+        const identityReady = resolveSocketIdentity(socket.request.headers).then((identity) => {
+            dockgeSocket.userID = identity.userID ?? "";
+            dockgeSocket.userRole = identity.role ?? "viewer";
+            return identity;
+        });
+        dockgeSocket.instanceManager = new AgentManager(dockgeSocket);
+        // Default deny at the transport boundary, including future handlers.
+        dockgeSocket.use(async (packet, next) => {
+            const [ event, ...args ] = packet;
+            if (event === "needsSetup") {
+                next();
+                return;
+            }
+            try {
+                await identityReady;
+                if (event === "agent") {
+                    if (typeof args[1] !== "string") {
+                        throw new Error("authPermissionDenied");
+                    }
+                    await authorizeSocketEvent(dockgeSocket, args[1], true);
+                } else {
+                    await authorizeSocketEvent(dockgeSocket, event);
+                }
+                next();
+            } catch (error) {
+                const callback = args[args.length - 1];
+                if (typeof callback === "function") {
+                    callback({ ok: false,
+                        msg: error instanceof Error ? error.message : "authPermissionDenied",
+                        msgi18n: true });
+                }
+                // Do not call next: a denied packet must not reach its handler.
+            }
+        });
+        dockgeSocket.emitAgent = (event : string, ...args : unknown[]) => {
+            if (!dockgeSocket.connected || (dockgeSocket.userRole === "viewer" && event !== "stackList")) {
+                return;
+            }
+            let obj = args[0];
+            if (typeof(obj) === "object") {
+                let obj2 = obj as LooseObject;
+                obj2.endpoint = dockgeSocket.endpoint;
+            }
+            dockgeSocket.emit("agent", event, ...args);
+        };
+
+        if (typeof(socket.request.headers.endpoint) === "string") {
+            dockgeSocket.endpoint = socket.request.headers.endpoint;
+        } else {
+            dockgeSocket.endpoint = "";
+        }
+
+        if (dockgeSocket.endpoint) {
+            log.info("server", "Socket connected (agent), as endpoint " + dockgeSocket.endpoint);
+        } else {
+            log.info("server", "Socket connected (direct)");
+        }
+
+        runInBackground("server info", () => this.sendInfo(dockgeSocket, true));
+
+        // Asked per connection, not from a flag decided at start up: the account is
+        // created through the auth endpoints, so the server would otherwise keep
+        // sending every new socket to the setup screen after setup was done
+        this.needSetup = await this.shouldShowSetup();
+
+        if (this.needSetup) {
+            log.info("server", "Redirect to setup page");
+            dockgeSocket.emit("setup");
+        }
+
+        // Create socket handlers (original, no agent support)
+        for (const socketHandler of this.socketHandlerList) {
+            socketHandler.create(dockgeSocket, this);
+        }
+
+        // Create Agent Socket
+        let agentSocket = new AgentSocket<AgentRequestContract>();
+
+        // Create agent socket handlers
+        for (const socketHandler of this.agentSocketHandlerList) {
+            socketHandler.create(dockgeSocket, this, agentSocket);
+        }
+
+        // Create agent proxy socket handlers
+        this.agentProxySocketHandler.create2(dockgeSocket, this, agentSocket);
+
+        // ***************************
+        // Better do anything after added all socket handlers here
+        // ***************************
+
+        // Who this socket is comes from the session cookie of the handshake,
+        // verified by better-auth. There is no login event on the socket any more.
+        const identity = await identityReady;
+
+        if (identity.userID) {
+            if (identity.autoLogin) {
+                log.info("auth", "Disabled Auth: acting as the owner account");
+            }
+
+            dockgeSocket.userRole = identity.role ?? "viewer";
+            await this.afterLogin(dockgeSocket, identity.userID);
+
+            if (identity.autoLogin) {
+                dockgeSocket.emit("autoLogin");
+            }
+        } else {
+            log.debug("auth", "No session, the client has to sign in");
+            dockgeSocket.emit("needAuth");
+        }
+
+        // Socket disconnect
+        dockgeSocket.on("disconnect", () => {
+            log.info("server", "Socket disconnected!");
+            dockgeSocket.instanceManager.disconnectAll();
+        });
     }
 
     /**
@@ -472,7 +550,7 @@ export class DockgeServer {
         socket.emit("authIdentity", { userID,
             role: socket.userRole });
 
-        this.sendInfo(socket);
+        runInBackground("server info", () => this.sendInfo(socket));
 
         try {
             await this.sendStackList();
@@ -480,10 +558,10 @@ export class DockgeServer {
             log.error("server", e);
         }
 
-        socket.instanceManager.sendAgentList();
+        runInBackground("agent list", () => socket.instanceManager.sendAgentList());
 
         // Also connect to other dockge instances
-        socket.instanceManager.connectAll();
+        runInBackground("agent connections", () => socket.instanceManager.connectAll());
     }
 
     /**
@@ -504,6 +582,23 @@ export class DockgeServer {
             process.exit(1);
         }
 
+        // Registered first means released last: everything below may still query it
+        this.resources.add("database", () => Database.close());
+        this.resources.add("settings cache", () => Settings.stopCacheCleaner());
+        this.resources.add("agent connections", () => this.disconnectAgents());
+        this.resources.add("terminals", () => Terminal.endAll());
+
+        // A save interrupted by a crash or a power cut is finished or undone before
+        // anything reads the files, so no stack starts from a half written pair
+        try {
+            const recovered = await recoverStackWrites(this.config.dataDir);
+            if (recovered.finished || recovered.undone || recovered.unresolved) {
+                log.info("server", `Interrupted saves: ${recovered.finished} finished, ${recovered.undone} undone, ${recovered.unresolved} need a decision`);
+            }
+        } catch (e) {
+            log.error("server", "Could not check for interrupted saves: " + (e instanceof Error ? e.message : String(e)));
+        }
+
         // First time setup if needed: the account itself is created through the auth
         // endpoints, this only decides whether the UI shows the setup screen
         this.needSetup = await this.shouldShowSetup();
@@ -521,19 +616,38 @@ export class DockgeServer {
             }
 
             // Run every 10 seconds
-            new Cron("*/10 * * * * *", {
-                protect: true,  // Enabled over-run protection.
-            }, async () => {
+            const observation = new ScheduledRounds("stack observation", "*/10 * * * * *", async () => {
+                // A round started during the shutdown would query a closing database
+                if (this.resources.stopping) {
+                    return;
+                }
+
                 await this.observeStacks().catch((e) => log.error("observations", e));
+
+                // Every step asks again: the shutdown can begin while Docker is answering,
+                // and what follows is work nobody is waiting for any more
+                if (this.resources.stopping) {
+                    return;
+                }
                 await this.sendStackList(true);
+
+                if (this.resources.stopping) {
+                    return;
+                }
 
                 // A socket is identified once, during its handshake, so a session that
                 // was signed out or revoked elsewhere has to lose its open sockets here
                 await dropRevokedSessions(this.io.sockets.sockets.values() as Iterable<DockgeSocket>)
                     .catch((e) => log.error("auth", e));
             });
+            observation.start();
 
-            checkVersion.startInterval();
+            // Stopping the schedule waits for the round that is already running, so the
+            // database below it is closed after that round is really over
+            this.resources.add("stack observation", () => observation.stop());
+
+            runInBackground("version check", () => checkVersion.startInterval());
+            this.resources.add("version check", () => checkVersion.stopInterval());
         });
 
         gracefulShutdown(this.httpServer, {
@@ -541,7 +655,7 @@ export class DockgeServer {
             timeout: 30000,                   // timeout: 30 secs
             development: false,               // not in dev mode
             forceExit: true,                  // triggers process.exit() at the end of shutdown process
-            onShutdown: this.shutdownFunction,     // shutdown function (async) - e.g. for cleanup DB, ...
+            onShutdown: (signal) => this.shutdownFunction(signal),     // shutdown function (async) - e.g. for cleanup DB, ...
             finally: this.finalFunction,            // finally function (sync) - e.g. for logging
         });
 
@@ -722,16 +836,12 @@ export class DockgeServer {
     }
 
     /**
-     * Send stack list to all connected sockets
-     * @param useCache
-     */
-    /**
-     * Записать состояние всех стеков в историю.
+     * Write down the state of every stack.
      *
-     * Отдельно от рассылки списка: доступность обязана считаться и тогда, когда панель
-     * никто не открыл, иначе процент описывал бы не работу стека, а время, которое
-     * владелец смотрел в экран.
-     * @returns void
+     * Kept apart from sending the list: availability has to be counted while nobody has
+     * the panel open, or the percentage would describe how long someone was watching the
+     * screen rather than how the stack ran.
+     * @returns {void}
      */
     async observeStacks() : Promise<void> {
         const stackList = await Stack.getStackList(this, true);
@@ -741,7 +851,7 @@ export class DockgeServer {
             endpoint: "",
             status: stack.status,
         })));
-        await observeContainerStability(stackList, await Stack.getOwnProjectName());
+        await observeContainerStability(stackList, await readOwnProjectName());
     }
 
     async sendStackList(useCache = false) {
@@ -761,7 +871,7 @@ export class DockgeServer {
                     await Stack.fillAvailability(stackList);
                 }
 
-                let map : Map<string, object> = new Map();
+                let map : Map<string, StackSummaryDTO | ViewerStackSummary> = new Map();
 
                 for (let [ stackName, stack ] of stackList) {
                     const summary = stack.toSimpleJSON(dockgeSocket.endpoint);
@@ -800,7 +910,24 @@ export class DockgeServer {
         return list;
     }
 
+    /**
+     * Host wide container statistics, read at most once per short window.
+     *
+     * Every open screen asks for the same figures, and each answer used to start another
+     * `docker stats --no-stream`, which is one of the slower Docker calls there is. So
+     * the callers share one reading: whoever asks while a call runs waits for that call,
+     * and a fresh answer is handed out as it is.
+     * @returns Statistics by container name
+     */
     async getDockerStats() : Promise<Map<string, object>> {
+        return this.dockerStatsReading.get();
+    }
+
+    /**
+     * Ask Docker for the statistics of every running container
+     * @returns Statistics by container name, empty when Docker cannot answer
+     */
+    protected async readDockerStats() : Promise<Map<string, object>> {
         let stats = new Map<string, object>();
 
         try {
@@ -844,10 +971,39 @@ export class DockgeServer {
         log.info("server", "Shutdown requested");
         log.info("server", "Called signal: " + signal);
 
-        // TODO: Close all terminals?
+        await this.stop();
+    }
 
-        await Database.close();
-        Settings.stopCacheCleaner();
+    /**
+     * Stop everything this process owns, in one bounded pass.
+     *
+     * Timers go first so nothing new starts, then the terminals and agent connections
+     * this panel opened, and only then the database they were using. Stopping twice is
+     * the same as stopping once: two signals in a row are normal. Containers of the user
+     * are not touched - the panel going down is not a reason to stop their stacks.
+     * @param timeoutMs Total budget for the shutdown
+     * @returns What was stopped and what refused to
+     */
+    async stop(timeoutMs : number = DEFAULT_STOP_TIMEOUT_MS) : Promise<ResourceStopReport> {
+        const report = await this.resources.stop(timeoutMs);
+
+        log.info("server", `Stopped in ${report.durationMs}ms: ${report.stopped.join(", ") || "nothing to stop"}`);
+
+        for (const failure of report.failed) {
+            log.error("server", `Could not stop ${failure.name}: ${failure.error}`);
+        }
+
+        return report;
+    }
+
+    /**
+     * Close the outgoing agent connections of every open browser socket.
+     * They belong to this process, unlike the remote panels they lead to.
+     */
+    protected disconnectAgents() {
+        for (const rawSocket of this.io.sockets.sockets.values()) {
+            (rawSocket as DockgeSocket).instanceManager?.disconnectAll();
+        }
     }
 
     /**

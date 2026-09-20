@@ -3,9 +3,18 @@ import { Socket } from "socket.io-client";
 import { defineComponent } from "vue";
 import { authClient } from "../auth-client";
 import { authErrorMessage, isTotpCode } from "../auth-messages";
-import { Terminal } from "@xterm/xterm";
+import type { Terminal } from "@xterm/xterm";
 import { createSessionBootstrap, reduceSessionBootstrap, sessionConnectionReady, type SessionBootstrapEvent } from "../session-bootstrap";
+import { AgentRequests, type AgentRequestOptions } from "../agent-requests";
 import { AgentSocket } from "../../../common/agent-socket";
+import type { StackSummaryDTO, ViewerStackSummary } from "../../../common/types/stack";
+import type {
+    AgentBroadcastContract,
+    AgentErrorResponse,
+    AgentRequestArgs,
+    AgentRequestName,
+    AgentRequestResult,
+} from "../../../common/agent-events";
 
 let socket : Socket;
 let initializationDeadline : ReturnType<typeof setTimeout> | undefined;
@@ -13,31 +22,58 @@ let sessionRefresh : { generation : number; socketID : string | undefined; userI
 
 let terminalMap : Map<string, Terminal> = new Map();
 
-interface StackInfo {
-    [key: string]: unknown;
-}
+/**
+ * Requests still waiting for their acknowledgement, and what happens when none comes.
+ *
+ * The transport is the socket of this module; the deadline, the single answer per
+ * request and the ending of everything still waiting live in `AgentRequests`, where they
+ * are tested without a browser.
+ */
+const agentRequests = new AgentRequests((endpoint, eventName, args, ack) => {
+    socket.emit("agent", endpoint, eventName, ...args, ack);
+});
 
-type StackList = Record<string, StackInfo>;
+/**
+ * Stacks of one endpoint, by their name.
+ *
+ * A viewer is sent rows without anything about files, so a screen that wants such a
+ * field has to establish that it is there rather than assume it.
+ */
+export type StackList = Record<string, StackSummaryDTO | ViewerStackSummary>;
 
-interface AgentInfo {
+/** An agent as the settings list and the endpoint picker show it */
+export interface AgentInfo {
     endpoint: string;
     name: string;
     [key: string]: unknown;
 }
 
-interface AgentInstance {
+/** What is known about the stacks of one agent */
+export interface AgentInstance {
     stackList: StackList;
 }
 
-interface SocketInfo {
+/** What the server says about itself when a socket connects */
+export interface SocketInfo {
     version?: string;
+    /** Newest release this panel knows about, absent until it was asked */
+    latestVersion?: string;
+    /** Agent protocol this panel speaks, absent before sign-in */
+    agentProtocol?: number;
+    /** Whether the panel itself runs in a container */
+    isContainer?: boolean;
+    /** Hostname the links of a stack are built from, empty when nothing was set */
+    primaryHostname?: string;
     [key: string]: unknown;
 }
 
-interface SocketResponse {
+/** The answer of a request that does not go through the agent contract */
+export interface SocketResponse {
     ok?: boolean;
     endpoint?: string;
     msg?: string;
+    /** True when no answer arrived at all, so the caller may not say it failed */
+    unknown?: boolean;
     [key: string]: unknown;
 }
 
@@ -69,6 +105,8 @@ export default defineComponent({
             userID: null as string | null,
             userRole: "viewer" as "admin" | "operator" | "viewer",
             composeTemplate: "",
+            /** Environment a new stack starts from, set by the screen that prepared it */
+            envTemplate: "",
 
             stackList: {} as StackList,
 
@@ -103,8 +141,8 @@ export default defineComponent({
             return Object.keys(this.agentList).length;
         },
 
-        completeStackList() {
-            let list : Record<string, object> = {};
+        completeStackList() : StackList {
+            let list : StackList = {};
 
             for (let stackName in this.stackList) {
                 const stack = this.stackList[stackName];
@@ -227,7 +265,7 @@ export default defineComponent({
             });
 
             // Handling events from agents
-            let agentSocket = new AgentSocket();
+            let agentSocket = new AgentSocket<AgentBroadcastContract>();
             socket.on("agent", (eventName : unknown, ...args : unknown[]) => {
                 if (typeof eventName === "string") {
                     agentSocket.call(eventName, ...args);
@@ -263,6 +301,10 @@ export default defineComponent({
                 this.socketIO.connectionErrorMsg = `${this.$t("Lost connection to the socket server. Reconnecting...")}`;
                 this.socketIO.connected = false;
                 clearTimeout(initializationDeadline);
+
+                // Nothing will answer these any more, and a screen waiting for an answer
+                // that cannot arrive is the state this exists to prevent
+                this.failPendingRequests();
             });
 
             socket.on("connect_error", (err: Error) => {
@@ -341,10 +383,9 @@ export default defineComponent({
                 terminal.write(data);
             });
 
-            agentSocket.on("stackList", (...args: unknown[]) => {
-                const res = args[0] as SocketResponse | undefined;
-                if (res?.ok && res.stackList && typeof res.stackList === "object") {
-                    const stackList = res.stackList as StackList;
+            agentSocket.on("stackList", (res) => {
+                if (res.ok && res.stackList && typeof res.stackList === "object") {
+                    const stackList = res.stackList;
                     // Когда список пришел: шапка честно говорит, насколько он свежий
                     this.stackListAt = Date.now();
                     if (!res.endpoint) {
@@ -369,8 +410,11 @@ export default defineComponent({
                 if (res.ok && res.stackStatusList) {
                     for (let stackName in res.stackStatusList) {
                         const stackObj = this.stackList[stackName];
-                        if (stackObj) {
-                            stackObj.status = res.stackStatusList[stackName];
+                        const status = res.stackStatusList[stackName];
+                        // A status is a number of `common/util-common.ts`; anything else
+                        // is not a status this build knows, and a row keeps what it had
+                        if (stackObj && typeof status === "number") {
+                            stackObj.status = status;
                         }
                     }
                 }
@@ -405,8 +449,54 @@ export default defineComponent({
             return socket;
         },
 
-        emitAgent(endpoint : string, eventName : string, ...args : unknown[]) {
+        /**
+         * Send an event to an agent without waiting for it.
+         *
+         * The name and the arguments come from the event contract, so an event this
+         * build does not serve, or one sent with the wrong arguments, does not compile.
+         * Nothing here bounds the wait: a caller that needs an answer uses
+         * `emitAgentRequest` instead.
+         * @param endpoint Agent the event goes to
+         * @param eventName Event of the agent protocol
+         * @param args Arguments of that event, with the acknowledgement last when the caller wants one
+         */
+        emitAgent<E extends AgentRequestName>(
+            endpoint : string,
+            eventName : E,
+            ...args : [ ...AgentRequestArgs<E>, ack? : (response : AgentRequestResult<E>) => void ]
+        ) {
             this.getSocket().emit("agent", endpoint, eventName, ...args);
+        },
+
+        /**
+         * Ask an agent something and always get an answer.
+         *
+         * The plain emit above has no deadline: a lost acknowledgement leaves the caller
+         * waiting for ever. Here every request ends - with the server's answer, or with
+         * "the result is unknown" when the connection went away or the deadline passed.
+         * The caller then shows what it knows and re-reads the state instead of guessing
+         * or repeating a command the server may already have run.
+         * @param endpoint Agent the request goes to
+         * @param eventName Event of the agent protocol
+         * @param args Arguments of that event, without the acknowledgement
+         * @param options How long to wait
+         * @returns The answer, or the unknown result
+         */
+        emitAgentRequest<E extends AgentRequestName>(
+            endpoint : string,
+            eventName : E,
+            args : AgentRequestArgs<E>,
+            options : AgentRequestOptions = {},
+        ) : Promise<AgentRequestResult<E>> {
+            return agentRequests.request(endpoint, eventName, args, options);
+        },
+
+        /**
+         * End every request that is still waiting, because nothing will answer it
+         * @returns {void}
+         */
+        failPendingRequests() {
+            agentRequests.failAll();
         },
 
         /**
@@ -680,15 +770,12 @@ export default defineComponent({
 
         bindTerminal(endpoint : string, terminalName : string, terminal : Terminal) {
             // Load terminal, get terminal screen
-            this.emitAgent(endpoint, "terminalJoin", terminalName, (res: SocketResponse) => {
+            this.emitAgent(endpoint, "terminalJoin", terminalName, (res) => {
                 if (res.ok) {
-                    const buffer = res.buffer;
-                    if (typeof buffer === "string" || buffer instanceof Uint8Array) {
-                        terminal.write(buffer);
-                    }
+                    terminal.write(res.buffer);
                     terminalMap.set(terminalName, terminal);
                 } else {
-                    const root = this.$root as unknown as { toastRes: (response: SocketResponse) => void };
+                    const root = this.$root as unknown as { toastRes: (response: AgentErrorResponse) => void };
                     root.toastRes(res);
                 }
             });

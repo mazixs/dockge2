@@ -73,3 +73,77 @@ test("a stack refuses a service that its compose file does not declare", async (
         assert.throws(() => stack.assertServiceExists(""), ValidationError);
     });
 });
+
+test("terminal events answer the browser instead of leaving it waiting", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const socket = { userID: 1,
+            endpoint: "",
+            emitAgent: () => undefined } as unknown as DockgeSocket;
+        const server = { stacksDir,
+            config: { enableConsole: false } } as unknown as DockgeServer;
+        const agentSocket = new AgentSocket();
+        new TerminalSocketHandler().create(socket, server, agentSocket);
+
+        // Every one of these ends with an answer: a screen that only leaves its waiting
+        // state in the callback would otherwise stay there
+        const missing = await call(agentSocket, "terminalInput", "container-exec-nothing", "ls");
+        assert.equal(missing.ok, false);
+        assert.match(String(missing.msg), /not found|Interactive/);
+
+        const wrongType = await call(agentSocket, "terminalInput", 5, "ls");
+        assert.equal(wrongType.ok, false);
+
+        // The console is a deployment decision, and a refusal is not a failure
+        const console = await call(agentSocket, "checkMainTerminal");
+        assert.equal(console.ok, false);
+
+        const refused = await call(agentSocket, "mainTerminal", "console");
+        assert.equal(refused.ok, false);
+        assert.match(String(refused.msg), /Console is not enabled/);
+
+        // A terminal nobody opened has no output, which is not an error
+        const joined = await call(agentSocket, "terminalJoin", "container-exec-nothing");
+        assert.equal(joined.ok, true);
+        assert.equal(joined.buffer, "");
+
+        const joinType = await call(agentSocket, "terminalJoin", 5);
+        assert.equal(joinType.ok, false);
+
+        // Leaving a session this client never joined changes nothing and still answers
+        const left = await call(agentSocket, "terminalLeave", "container-exec-nothing");
+        assert.equal(left.ok, true);
+
+        const leaveType = await call(agentSocket, "terminalLeave", null);
+        assert.equal(leaveType.ok, false);
+
+        const combined = await call(agentSocket, "joinCombinedTerminal", 7);
+        assert.equal(combined.ok, false);
+
+        const leaveCombined = await call(agentSocket, "leaveCombinedTerminal", 7);
+        assert.equal(leaveCombined.ok, false);
+    });
+});
+
+test("a resize of a terminal that is not ours is ignored rather than thrown at the window", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const socket = { userID: 1,
+            endpoint: "",
+            emitAgent: () => undefined } as unknown as DockgeSocket;
+        const server = { stacksDir,
+            config: { enableConsole: false } } as unknown as DockgeServer;
+        const agentSocket = new AgentSocket();
+        new TerminalSocketHandler().create(socket, server, agentSocket);
+
+        // The event carries no acknowledgement: it is sent while the window is being
+        // dragged. Nothing may escape from it, whatever the arguments are
+        for (const args of [
+            [ "container-exec-nothing", 50, 100 ],
+            [ 5, 50, 100 ],
+            [ "console", "50", 100 ],
+            [ "console", 50, null ],
+        ]) {
+            agentSocket.call("terminalResize", ...args);
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+    });
+});

@@ -8,7 +8,7 @@
             <div class="identity">
                 <span class="stack-avatar" :class="`stack-color-${stackColor(stackName)}`" aria-hidden="true">{{ stackName?.slice(0, 1).toUpperCase() }}</span>
                 <h1>{{ stackName }}</h1>
-                <Uptime :stack="globalStack" />
+                <Uptime :stack="globalStack ?? null" />
             </div>
 
             <div class="facts" role="list">
@@ -22,7 +22,7 @@
                 <button v-else class="btn btn-sm btn-normal" :disabled="processing" @click="run('stopStack')">{{ $t("stopStack") }}</button>
                 <button v-if="active" class="btn btn-sm btn-normal" :disabled="processing" @click="run('restartStack')">{{ $t("restartStack") }}</button>
 
-                <BDropdown right :text="$t('moreActions')" variant="normal" size="sm">
+                <BDropdown placement="bottom-end" :text="$t('moreActions')" variant="normal" size="sm">
                     <!-- Значок есть у каждого пункта: без него подпись первого стояла
                          левее остальных, и левый край меню шел лесенкой -->
                     <BDropdownItem :disabled="processing" @click="openUpdatePreview">
@@ -45,7 +45,7 @@
 
         <div v-if="gitFilesPending && $root.canManageStacks" class="git-update-notice">
             <InterfaceIcon name="git" />
-            <div><strong>{{ $t(source.behind > 0 ? "familiarGitNotice" : "pagesLocalChanges") }}</strong><p>{{ $t("familiarGitNoticeHint") }}</p></div>
+            <div><strong>{{ $t(gitNoticeKey) }}</strong><p>{{ $t("familiarGitNoticeHint") }}</p></div>
             <router-link :to="gitUrl" class="btn btn-normal">{{ $t("familiarGitCompare") }}</router-link>
         </div>
         <!-- Ход команды: одна строка под кнопками, видна с любой вкладки. Что
@@ -118,10 +118,10 @@
                 </div>
 
                 <!-- Причина: одна названа словами, рядом - чем ее лечить -->
-                <div v-if="issues.length > 0" class="attention attention-block" role="status">
+                <div v-if="firstIssue" class="attention attention-block" role="status">
                     <div class="reason-line">
                         <span class="attention-badge">{{ $t("reasonBadge") }}</span>
-                        <span class="reason">{{ issueText(issues[0]) }}</span>
+                        <span class="reason">{{ issueText(firstIssue) }}</span>
                     </div>
 
                     <div class="reason-actions">
@@ -244,7 +244,7 @@
                                     <button
                                         v-for="hours in availabilityWindows" :key="hours"
                                         class="window" type="button"
-                                        :aria-pressed="String(windowHours === hours)"
+                                        :aria-pressed="windowHours === hours"
                                         :class="{ on: windowHours === hours }"
                                         @click="selectWindow(hours)"
                                     >
@@ -261,7 +261,7 @@
 
                         <!-- Связи, сети и файлы: одна строка, разворачивается на месте -->
                         <div v-if="$root.canManageStacks" class="links">
-                            <button class="summary" type="button" :aria-expanded="String(showLinks)" @click="showLinks = !showLinks">
+                            <button class="summary" type="button" :aria-expanded="showLinks" @click="showLinks = !showLinks">
                                 <font-awesome-icon :icon="showLinks ? 'chevron-circle-down' : 'chevron-circle-right'" />
                                 {{ $t("linksAndNetworks") }}: {{ linksSummary }}
                             </button>
@@ -295,6 +295,7 @@
                         <Compose
                             :key="stackName" ref="filesPanel" embedded
                             :stack-name="stackName" :endpoint-name="endpoint"
+                            :status-list="serviceStatusList" :stats-list="dockerStats"
                             @run-start="startRunClock" @run-end="stopRunClock"
                         />
                     </div>
@@ -339,6 +340,7 @@
 </template>
 
 <script>
+// @ts-check
 import StateChip from "../components/StateChip.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import { stackColor } from "../stack-color";
@@ -349,9 +351,12 @@ import StackSourcePanel from "../components/StackSourcePanel.vue";
 import StackJournal from "../components/StackJournal.vue";
 import StackTerminals from "../components/StackTerminals.vue";
 import StackProgress from "../components/StackProgress.vue";
-import Compose from "./Compose.vue";
+import { defineAsyncComponent, markRaw } from "vue";
+import { RequestTracker } from "../request-tracker";
+import { StackRun } from "../stack-run";
 import Uptime from "../components/Uptime.vue";
-import { ATTENTION, RUNNING, envsubstYAML, parseDockerPort } from "../../../common/util-common";
+import { ATTENTION, RUNNING, envsubstYAML } from "../../../common/util-common";
+import { describeServices, readDeclaredUrls } from "../stack-services";
 import { summariseRegistries } from "../../../common/image-source";
 import { formatDuration, formatPercent } from "../format";
 import { stackSourceDiffers, stackSourceState } from "../../../common/stack-source";
@@ -360,6 +365,10 @@ import { isUpStatus, parseDockerDuration } from "../../../common/docker-time";
 
 /** Как часто спрашивать состояние сервисов, пока инспектор открыт */
 const STATUS_INTERVAL_MS = 5000;
+
+// Команда стека идет столько, сколько идет docker compose: ее подтверждение ждут долго,
+// но не бесконечно - иначе потерянный ответ оставил бы экран заблокированным навсегда
+const RUN_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
 /** Ширина меню сервиса: то же число стоит в .service-menu > div */
 const MENU_WIDTH = 190;
@@ -387,7 +396,9 @@ export default {
         StackJournal,
         StackTerminals,
         StackProgress,
-        Compose,
+        // The editor is opened from the files tab, so CodeMirror is fetched when that
+        // tab is opened rather than with the page
+        Compose: defineAsyncComponent(() => import("./Compose.vue")),
         BModal,
         Uptime,
     },
@@ -397,66 +408,130 @@ export default {
     beforeRouteLeave(to, from, next) {
         this.confirmLeavingFiles(next);
     },
+    /** @this {{ requestServiceStatus : () => void }} */
     data() {
         return {
+            /**
+             * Стек, пока он не загружен - пустой. Смотрителю приходит укороченная
+             * сводка без файлов, поэтому поля объявлены необязательными
+             * @type {Partial<import("../../../common/types/stack").StackDTO>}
+             */
             stack: {},
             loadError: false,
             disposed: false,
             showDownDialog: false,
+            /** @type {import("../../../common/agent-events").ServiceStatusList} */
             serviceStatusList: {},
+            /** @type {import("../../../common/compose-status").StackStatusIssue[]} */
             serviceIssues: [],
             processing: true,
             showDeleteDialog: false,
             showLinks: false,
             showUsage: false,
             allIssues: false,
-            statusTimer: null,
-            ageTimer: null,
-            /** Разобранный compose с подставленными переменными окружения */
+            /** @type {ReturnType<typeof setTimeout> | undefined} */
+            statusTimer: undefined,
+            /** @type {ReturnType<typeof setInterval> | undefined} */
+            ageTimer: undefined,
+            /**
+             * Разобранный compose с подставленными переменными окружения
+             * @type {import("../../../common/compose-editor").ComposeModel}
+             */
             config: {},
-            /** Расход контейнеров: приходит отдельным событием, обновляется вместе с состоянием */
+            /**
+             * Расход контейнеров: приходит отдельным событием, обновляется вместе с состоянием
+             * @type {Record<string, import("../../../common/util-common").LooseObject>}
+             */
             dockerStats: {},
             /** Когда состояние сервисов было получено последний раз */
             statusReadAt: 0,
             /** Секунды с последнего замера, пересчитываются раз в секунду */
             statusAgeSeconds: 0,
-            /** Предпросмотр обновления: null пока его не просили */
+            /**
+             * Предпросмотр обновления: null пока его не просили
+             * @type {{
+             *     source : import("../../../common/stack-source").StackSource | null,
+             *     images : import("../../../common/image-source").ImageUpdate[],
+             *     builds : boolean,
+             * } | null}
+             */
             preview: null,
             previewLoading: false,
-            /** Имя выполняющейся команды, пусто когда ничего не идет */
-            running: "",
-            /** Сколько секунд идет команда */
-            runElapsed: 0,
-            /** Чем кончилась последняя команда: пусто, "ok" или "failed" */
-            runOutcome: "",
-            runTimer: null,
+            /**
+             * Идущая команда вместе со стеком, которому она принадлежит: часы,
+             * шаги и итог уходят с экрана вместе с выбором стека, а не переезжают
+             * на следующий. Сервер при этом продолжает работу
+             */
+            operation: new StackRun(() => this.requestServiceStatus()),
+            /**
+             * Чьи ответы сейчас на экране. Компонент остается тем же при смене стека,
+             * поэтому ответ запроса, отправленного для прежнего выбора, узнается по
+             * поколению и не занимает экран текущего стека
+             */
+            requests: markRaw(new RequestTracker()),
             /** Выбранное окно доступности в часах */
             windowHours: 24,
-            /** Доступность выбранного окна, приходит отдельным запросом */
+            /**
+             * Доступность выбранного окна, приходит отдельным запросом
+             * @type {import("../../../common/availability").Availability | null}
+             */
             availabilityData: null,
             /** Журнал остается живым после ухода на другую вкладку: иначе вывод начнется заново */
             logsMounted: false,
             /** Терминал тем более: размонтирование убивает открытые оболочки */
             terminalMounted: false,
-            /** Просьба открыть оболочку сервиса, читается вкладкой терминала */
-            shellRequest: null,
             /**
-             * Шаги идущей команды: пока compose работает, состояние сервиса
-             * читается по ним, а не по замеру docker - замер приходит раз в
-             * две секунды и все это время показывал бы вчерашний день
+             * Просьба открыть оболочку сервиса, читается вкладкой терминала
+             * @type {import("../stack-services").ShellRequest | null}
              */
-            runTasks: [],
-            /** Последняя команда что-то сказала: значит, ее вывод есть что открыть */
-            runHasOutput: false,
+            shellRequest: null,
         };
     },
     computed: {
+        /**
+         * Стек, открытый сейчас: страница остается той же при переходе к другому
+         * @returns {string} Имя стека
+         */
         stackName() {
-            return this.$route.params.stackName;
+            return String(this.$route.params.stackName ?? "");
         },
 
+        /** Имя выполняющейся команды, пусто когда ничего не идет */
+        running() {
+            return this.operation.event;
+        },
+
+        /** Сколько секунд идет команда */
+        runElapsed() {
+            return this.operation.elapsed;
+        },
+
+        /** Чем кончилась последняя команда: пусто, "ok", "failed" или "unknown" */
+        runOutcome() {
+            return this.operation.outcome;
+        },
+
+        /**
+         * Шаги идущей команды: пока compose работает, состояние сервиса
+         * читается по ним, а не по замеру docker - замер приходит раз в
+         * две секунды и все это время показывал бы вчерашний день
+         * @returns {import("../../../common/compose-progress").ComposeTask[]} Шаги команды
+         */
+        runTasks() {
+            return this.operation.tasks;
+        },
+
+        /** Последняя команда что-то сказала: значит, ее вывод есть что открыть */
+        runHasOutput() {
+            return this.operation.hasOutput;
+        },
+
+        /**
+         * Агент, на котором живет стек, пусто для своей панели
+         * @returns {string} Имя агента
+         */
         endpoint() {
-            return this.stack.endpoint || this.$route.params.endpoint || "";
+            return this.stack.endpoint || String(this.$route.params.endpoint ?? "");
         },
 
         endpointDisplay() {
@@ -476,9 +551,15 @@ export default {
             return this.endpointDisplay || this.endpoint;
         },
 
-        /** Каталог стека: он же отвечает на "куда лягут файлы" */
+        /**
+         * Каталог стека: он же отвечает на "куда лягут файлы".
+         * Смотрителю каталог не присылают, поэтому строки пути у него просто нет
+         * @returns {string} Каталог стека
+         */
         stackPath() {
-            return this.globalStack?.dir ?? "";
+            const stack = this.globalStack;
+
+            return stack && "dir" in stack ? stack.dir : "";
         },
 
         /** Реестры образов одной строкой: "ghcr.io ×2 · Docker Hub ×2" */
@@ -489,8 +570,23 @@ export default {
                 .join(" · ");
         },
 
+        /**
+         * Откуда взялись файлы стека, по тому же чтению, что и в списке.
+         * Смотрителю происхождение не присылают: тогда его нет
+         * @returns {import("../../../common/stack-source").StackSource | null} Происхождение каталога
+         */
         source() {
-            return this.globalStack?.source ?? null;
+            const stack = this.globalStack;
+
+            return stack && "source" in stack ? stack.source : null;
+        },
+
+        /**
+         * Чем именно расходится каталог: неперенесенными коммитами или правками на сервере
+         * @returns {string} Ключ каталога переводов
+         */
+        gitNoticeKey() {
+            return (this.source?.behind ?? 0) > 0 ? "familiarGitNotice" : "pagesLocalChanges";
         },
 
         /** Расходятся ли файлы стека с Git: правки на сервере или неперенесенные коммиты */
@@ -529,6 +625,14 @@ export default {
         /** Надпись кнопки обновления: отставание в Git называется прямо на кнопке */
         updateLabel() {
             return this.$t("familiarImagesUpdate");
+        },
+
+        /**
+         * Замечание, которое называет строка причины: из него же берется сервис
+         * @returns {import("../../../common/compose-status").StackStatusIssue | null} Первое замечание
+         */
+        firstIssue() {
+            return this.issues[0] ?? null;
         },
 
         /** Сервис, из-за которого стек требует внимания: к нему и ведут кнопки починки */
@@ -663,24 +767,15 @@ export default {
 
         /** Сервисы файла, дополненные тем, что о них знает Docker */
         services() {
-            const declared = this.config?.services ?? {};
-            const names = [ ...new Set([ ...Object.keys(declared), ...Object.keys(this.serviceStatusList), ...(this.globalStack?.services ?? []).map(service => service.name) ]) ];
+            return describeServices(this.config, this.serviceStatusList, this.globalStack?.services ?? [], this.hostname);
+        },
 
-            return names.map((name) => {
-                const service = declared[name] ?? {};
-                const instances = Array.isArray(this.serviceStatusList[name]) ? this.serviceStatusList[name] : [];
-
-                return {
-                    name,
-                    image: service.image ?? "",
-                    ports: (service.ports ?? []).map(port => this.parsePort(port)).filter(Boolean),
-                    isOneShot: this.globalStack?.services?.find(item => item.name === name)?.isOneShot ?? false,
-                    summaryState: this.globalStack?.services?.find(item => item.name === name)?.state ?? "unknown",
-                    instances,
-                    running: instances.some(instance => instance.state === "running"),
-                    attention: instances.some(instance => !!instance.issue),
-                };
-            });
+        /**
+         * Хост, по которому открывают порты: у агента свой, у своей панели - адрес страницы
+         * @returns {string} Имя хоста
+         */
+        hostname() {
+            return this.stack.endpoint ? (this.stack.primaryHostname ?? "") : (this.$root.info.primaryHostname || location.hostname);
         },
 
         /**
@@ -693,6 +788,7 @@ export default {
                 return {};
             }
 
+            /** @type {Record<string, import("../../../common/compose-progress").ComposeTask>} */
             const map = {};
 
             for (const service of this.services) {
@@ -708,25 +804,7 @@ export default {
 
         /** Адреса из x-dockge: то, по чему сервис открывают */
         urls() {
-            const declared = this.config?.["x-dockge"]?.urls;
-
-            if (!Array.isArray(declared)) {
-                return [];
-            }
-
-            return declared.flatMap((url) => {
-                try {
-                    const parsed = new URL(url);
-                    if (![ "http:", "https:" ].includes(parsed.protocol)) {
-                        return [];
-                    }
-                    const pathname = parsed.pathname === "/" ? "" : parsed.pathname;
-                    return { url,
-                        display: parsed.host + pathname + parsed.search };
-                } catch {
-                    return [];
-                }
-            });
+            return readDeclaredUrls(this.config);
         },
 
         networkNames() {
@@ -791,7 +869,11 @@ export default {
                 // Скрытый xterm не знает своего размера: показанная вкладка
                 // подгоняет консоль заново, иначе вывод остается в чужих колонках
                 this.$nextTick(() => {
-                    (value === "logs" ? this.$refs.journal : this.$refs.terminals)?.fitActive();
+                    const panel = /** @type {{ fitActive : () => void } | undefined} */ (
+                        value === "logs" ? this.$refs.journal : this.$refs.terminals
+                    );
+
+                    panel?.fitActive();
                 });
             },
         },
@@ -808,9 +890,11 @@ export default {
     },
     unmounted() {
         this.disposed = true;
+        // Ответы, которые еще придут, не относятся ни к какому экрану
+        this.requests.invalidate();
         clearTimeout(this.statusTimer);
         clearInterval(this.ageTimer);
-        clearInterval(this.runTimer);
+        this.operation.release();
         this.leaveLogs(this.stackName, this.endpoint);
     },
     methods: {
@@ -834,11 +918,11 @@ export default {
         /**
          * Уход со вкладки файлов спрашивает про несохраненные правки: редактор
          * больше не отдельная страница, но его вопрос никуда не делся
-         * @param {Function} next Продолжение перехода
+         * @param {import("vue-router").NavigationGuardNext} next Продолжение перехода
          * @returns {void}
          */
         confirmLeavingFiles(next) {
-            const files = this.$refs.filesPanel;
+            const files = /** @type {{ exitConfirm : (next : import("vue-router").NavigationGuardNext) => void } | undefined} */ (this.$refs.filesPanel);
 
             if (!files) {
                 next();
@@ -853,9 +937,36 @@ export default {
          * @returns {void}
          */
         requestAvailability() {
-            this.$root.emitAgent(this.endpoint, "stackAvailability", this.stackName, this.windowHours, (res) => {
+            const generation = this.requests.generation;
+            const stackName = this.stackName;
+            const windowHours = this.windowHours;
+
+            this.$root.emitAgentRequest(this.endpoint, "stackAvailability", [ stackName, windowHours ]).then((res) => {
+                // Ответ прежнего стека или прежнего окна описывает не то, что выбрано сейчас
+                if (!this.isCurrentRequest(generation) || stackName !== this.stackName || windowHours !== this.windowHours) {
+                    return;
+                }
+
                 this.availabilityData = res?.ok ? res.availability : null;
             });
+        },
+
+        /**
+         * Кому принадлежит операция: стек и агент, на котором она идет
+         * @returns {{endpoint: string, stack: string}} Владелец операции
+         */
+        runTarget() {
+            return { endpoint: this.endpoint,
+                stack: this.stackName };
+        },
+
+        /**
+         * Относится ли ответ к текущему выбору стека
+         * @param {number} generation Поколение, с которым запрос уходил
+         * @returns {boolean} Можно ли применять ответ
+         */
+        isCurrentRequest(generation) {
+            return !this.disposed && this.requests.isCurrent(generation);
         },
 
         /**
@@ -869,21 +980,39 @@ export default {
         },
 
         loadStack() {
+            // Новое поколение обесценивает все, что было запрошено для прежнего выбора
+            const generation = this.requests.next();
+            const stackName = this.stackName;
+            const endpoint = String(this.$route.params.endpoint ?? "");
+
             this.processing = true;
             this.loadError = false;
             this.allIssues = false;
             this.serviceStatusList = {};
+            this.serviceIssues = [];
+            this.availabilityData = null;
+            this.dockerStats = {};
+            this.preview = null;
+            this.statusReadAt = 0;
+            this.statusAgeSeconds = 0;
+            clearTimeout(this.statusTimer);
+
+            // Экран уходит на другой стек: часы, шаги и итог прежней команды
+            // уходят вместе с ним. Саму команду это не отменяет - она идет на
+            // сервере, и вернувшись на тот стек, ее снова видно
+            this.operation.release();
 
             if (!this.$root.canManageStacks) {
                 this.stack = this.globalStack ?? {};
                 this.config = {};
                 this.processing = false;
-                this.requestServiceStatus();
+                this.requestServiceStatus(generation);
                 this.requestAvailability();
                 return;
             }
-            this.$root.emitAgent(this.$route.params.endpoint || "", "getStack", this.stackName, (res) => {
-                if (this.disposed) {
+
+            this.$root.emitAgentRequest(endpoint, "getStack", [ stackName ]).then((res) => {
+                if (!this.isCurrentRequest(generation)) {
                     return;
                 }
                 this.processing = false;
@@ -895,7 +1024,7 @@ export default {
 
                 this.stack = res.stack;
                 this.parseConfig();
-                this.requestServiceStatus();
+                this.requestServiceStatus(generation);
                 this.requestAvailability();
             });
         },
@@ -916,14 +1045,32 @@ export default {
             }
         },
 
-        requestServiceStatus() {
-            if (this.disposed) {
+        /**
+         * Спросить состояние сервисов и запланировать следующий опрос.
+         *
+         * Один запрос за раз: пока ответа нет, повторная просьба - а она приходит и от
+         * таймера, и от часов идущей команды - ничего не добавляет, зато на медленном
+         * ответе накапливала бы очередь одинаковых запросов. Следующий опрос ставится
+         * после ответа, а не по расписанию, поэтому очередь не растет.
+         * @param {number} [generation] Поколение выбранного стека, по умолчанию текущее
+         * @returns {void}
+         */
+        requestServiceStatus(generation) {
+            const current = generation ?? this.requests.generation;
+
+            if (!this.isCurrentRequest(current)) {
                 return;
             }
-            this.$root.emitAgent(this.endpoint, "serviceStatusList", this.stackName, (res) => {
-                if (this.disposed) {
+
+            // Расход показывается рядом с состоянием, поэтому спрашивается вместе с ним
+            this.requestDockerStats(current);
+
+            this.requests.run("status", current, () => this.$root.emitAgentRequest(this.endpoint, "serviceStatusList", [ this.stackName ])).then((res) => {
+                // null: запрос не отправлялся или ответ относится к прежнему выбору
+                if (!res || !this.isCurrentRequest(current)) {
                     return;
                 }
+
                 if (res.ok) {
                     this.serviceStatusList = res.serviceStatusList;
                     this.serviceIssues = res.issues ?? [];
@@ -932,11 +1079,21 @@ export default {
                 }
 
                 clearTimeout(this.statusTimer);
-                this.statusTimer = setTimeout(this.requestServiceStatus, STATUS_INTERVAL_MS);
+                this.statusTimer = setTimeout(() => this.requestServiceStatus(current), STATUS_INTERVAL_MS);
             });
+        },
 
-            // Расход показывается рядом с состоянием, поэтому спрашивается вместе с ним
-            this.$root.emitAgent(this.endpoint, "dockerStats", (res) => {
+        /**
+         * Спросить расход контейнеров, тоже по одному запросу за раз
+         * @param {number} generation Поколение выбранного стека
+         * @returns {void}
+         */
+        requestDockerStats(generation) {
+            this.requests.run("stats", generation, () => this.$root.emitAgentRequest(this.endpoint, "dockerStats", [])).then((res) => {
+                if (!res || !this.isCurrentRequest(generation)) {
+                    return;
+                }
+
                 if (res.ok) {
                     this.dockerStats = res.dockerStats;
                 }
@@ -951,7 +1108,13 @@ export default {
             this.previewLoading = true;
             this.preview = null;
 
-            this.$root.emitAgent(this.endpoint, "stackUpdatePreview", this.stackName, (res) => {
+            const generation = this.requests.generation;
+
+            this.$root.emitAgentRequest(this.endpoint, "stackUpdatePreview", [ this.stackName ]).then((res) => {
+                if (!this.isCurrentRequest(generation)) {
+                    return;
+                }
+
                 this.previewLoading = false;
 
                 if (!res?.ok) {
@@ -960,7 +1123,8 @@ export default {
                 }
 
                 this.preview = { source: res.source,
-                    images: res.images ?? [] };
+                    images: res.images ?? [],
+                    builds: res.builds === true };
             });
         },
 
@@ -978,14 +1142,14 @@ export default {
          * @returns {void}
          */
         abort() {
-            this.$root.emitAgent(this.endpoint, "abortCompose", this.stackName, (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "abortCompose", [ this.stackName ]).then((res) => {
                 this.$root.toastRes(res);
             });
         },
 
         /**
          * Что известно про один образ: новее, актуален или ответа нет
-         * @param {object} item Ответ предпросмотра по образу
+         * @param {import("../../../common/image-source").ImageUpdate} item Ответ предпросмотра по образу
          * @returns {string} Вывод словами
          */
         imageVerdict(item) {
@@ -1004,18 +1168,30 @@ export default {
 
         /**
          * Действие над стеком одним событием агента
-         * @param {string} event Имя события
+         * @param {"startStack" | "stopStack" | "restartStack" | "updateStack" | "downStack"} event Имя события
          * @returns {void}
          */
         run(event) {
-            this.processing = true;
-            this.startRunClock(event);
+            const generation = this.requests.generation;
+            const target = this.runTarget();
 
-            this.$root.emitAgent(this.endpoint, event, this.stackName, (res) => {
+            this.processing = true;
+            this.operation.start(target, event);
+
+            this.$root.emitAgentRequest(target.endpoint, event, [ target.stack ], { timeoutMs: RUN_REQUEST_TIMEOUT_MS }).then((res) => {
+                // Потерянный ответ не значит отказ: команда могла выполниться, поэтому
+                // итог называется неизвестным, а состояние перечитывается
+                const outcome = res.ok ? "ok" : (res.unknown ? "unknown" : "failed");
+
+                // Ответ чужого стека не занимает этот экран: его часы и шаги
+                // отпущены при смене выбора, а итог относится к другому стеку
+                if (!this.operation.finish(target, outcome) || !this.isCurrentRequest(generation)) {
+                    return;
+                }
+
                 this.processing = false;
-                this.stopRunClock(res?.ok ? "ok" : "failed");
                 this.$root.toastRes(res);
-                this.requestServiceStatus();
+                this.requestServiceStatus(generation);
             });
         },
 
@@ -1026,52 +1202,47 @@ export default {
          * @returns {void}
          */
         startRunClock(event) {
-            this.running = event;
-            this.runElapsed = 0;
-            this.runOutcome = "";
-            clearInterval(this.runTimer);
-            const startedAt = Date.now();
-
-            this.runTimer = setInterval(() => {
-                this.runElapsed = Math.floor((Date.now() - startedAt) / 1000);
-                this.requestServiceStatus();
-            }, 2000);
+            this.operation.start(this.runTarget(), event);
         },
 
         /**
          * Команда кончилась: секунды замирают на последнем значении, а итог
          * читается в панели хода - она не исчезает сама, потому что последние
          * строки вывода нужны и после удачи
-         * @param {string} outcome "ok" или "failed"
-         * @returns {void}
+         * @param {import("../stack-run").StackRunOutcome} outcome Чем кончилась команда
+         * @returns {boolean} Относился ли итог к открытому стеку
          */
         stopRunClock(outcome = "") {
-            this.running = "";
-            this.runOutcome = outcome;
-            clearInterval(this.runTimer);
-            this.runTimer = null;
+            return this.operation.finish(this.runTarget(), outcome);
         },
 
         /**
          * Строка хода рассказала, что делает compose: те же шаги читает таблица
          * сервисов, поэтому состояние в ней меняется сразу, а не через замер
-         * @param {object} progress Шаги и признак вывода
+         * @param {{
+         *     endpoint : string,
+         *     stackName : string,
+         *     tasks : import("../../../common/compose-progress").ComposeTask[],
+         *     hasOutput : boolean,
+         * }} progress Шаги и признак вывода
          * @returns {void}
          */
         onProgress(progress) {
-            this.runTasks = progress.tasks;
-            this.runHasOutput = progress.hasOutput;
+            this.operation.setProgress({ endpoint: progress.endpoint,
+                stack: progress.stackName }, progress);
         },
 
         /** Полный вывод последней команды: он живет в строке хода */
         openRunLog() {
-            this.$refs.progress?.openLog();
+            const progress = /** @type {{ openLog : () => void } | undefined} */ (this.$refs.progress);
+
+            progress?.openLog();
         },
 
         /**
          * Шаг команды, который достался этому сервису
-         * @param {object} service Сервис с его контейнерами
-         * @returns {object|null} Шаг или null, если команда его не касалась
+         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
+         * @returns {import("../../../common/compose-progress").ComposeTask | null} Шаг или null, если команда его не касалась
          */
         matchRunTask(service) {
             const names = new Set(service.instances.map((instance) => instance.name).filter(Boolean));
@@ -1083,7 +1254,9 @@ export default {
 
             // Так compose называет контейнер сам: имя стека, имя сервиса и номер копии
             const generated = new RegExp(`^${escapeRegExp(this.stackName)}[-_]${escapeRegExp(service.name)}([-_]\\d+)?$`, "i");
+            /** @type {import("../../../common/compose-progress").ComposeTask | null} */
             let container = null;
+            /** @type {import("../../../common/compose-progress").ComposeTask | null} */
             let image = null;
 
             for (const task of this.runTasks) {
@@ -1100,19 +1273,27 @@ export default {
 
         /**
          * Действие над одним сервисом
-         * @param {string} event Имя события
+         * @param {"startService" | "stopService" | "restartService"} event Имя события
          * @param {string} serviceName Сервис
          * @returns {void}
          */
         runService(event, serviceName) {
-            this.processing = true;
-            this.startRunClock(event);
+            const generation = this.requests.generation;
+            const target = this.runTarget();
 
-            this.$root.emitAgent(this.endpoint, event, this.stackName, serviceName, (res) => {
+            this.processing = true;
+            this.operation.start(target, event);
+
+            this.$root.emitAgentRequest(target.endpoint, event, [ target.stack, serviceName ], { timeoutMs: RUN_REQUEST_TIMEOUT_MS }).then((res) => {
+                const outcome = res.ok ? "ok" : (res.unknown ? "unknown" : "failed");
+
+                if (!this.operation.finish(target, outcome) || !this.isCurrentRequest(generation)) {
+                    return;
+                }
+
                 this.processing = false;
-                this.stopRunClock(res?.ok ? "ok" : "failed");
                 this.$root.toastRes(res);
-                this.requestServiceStatus();
+                this.requestServiceStatus(generation);
             });
         },
 
@@ -1137,11 +1318,11 @@ export default {
          * @returns {void}
          */
         placeServiceMenu(event) {
-            const details = event.target;
-            const menu = details.querySelector("div");
-            const trigger = details.querySelector("summary");
+            const details = event.target instanceof HTMLDetailsElement ? event.target : null;
+            const menu = details?.querySelector("div");
+            const trigger = details?.querySelector("summary");
 
-            if (!details.open || !menu || !trigger) {
+            if (!details?.open || !menu || !trigger) {
                 return;
             }
 
@@ -1162,7 +1343,9 @@ export default {
          * @returns {void}
          */
         closeServiceMenu(event) {
-            event.target.closest("details")?.removeAttribute("open");
+            const target = event.target instanceof Element ? event.target : null;
+
+            target?.closest("details")?.removeAttribute("open");
         },
 
         /**
@@ -1178,24 +1361,10 @@ export default {
             this.$router.push(this.terminalUrl);
         },
 
-        parsePort(port) {
-            if (port && typeof port === "object") {
-                if (port.target === undefined) {
-                    return null;
-                }
-                port = `${port.published === undefined ? "" : `${port.host_ip ? `${port.host_ip}:` : ""}${port.published}:`}${port.target}/${port.protocol || "tcp"}`;
-            }
-            if (typeof port !== "string" && typeof port !== "number") {
-                return null;
-            }
-            const hostname = this.stack.endpoint ? this.stack.primaryHostname : (this.$root.info.primaryHostname || location.hostname);
-            return parseDockerPort(String(port), hostname);
-        },
-
         /**
          * Расход и аптайм сервиса: память из docker stats, время работы из строки
          * состояния докера. Ничего не выдумывается: нет данных - нет подписи.
-         * @param {object} service Сервис с его контейнерами
+         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
          * @returns {string} Память и аптайм через точку
          */
         usageLabel(service) {
@@ -1225,6 +1394,11 @@ export default {
             return [ memory, uptime ].filter((part) => !!part).join(" · ");
         },
 
+        /**
+         * Состояние сервиса словами: пока команда идет, его называет compose
+         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
+         * @returns {string} Состояние словами
+         */
         stateLabel(service) {
             const task = this.runTaskByService[service.name];
 
@@ -1246,12 +1420,14 @@ export default {
                 return this.$t(instance.state || "unknown");
             }));
 
-            return labels.size === 1 ? [ ...labels ][0] : this.$t("mixedState");
+            const [ single ] = labels;
+
+            return labels.size === 1 && single !== undefined ? single : this.$t("mixedState");
         },
 
         /**
          * Состояние сервиса именем системы: вид чипа один на весь интерфейс
-         * @param {object} service Сервис с его контейнерами
+         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
          * @returns {string} Имя состояния
          */
         serviceState(service) {
@@ -1277,13 +1453,18 @@ export default {
 
         /**
          * Над сервисом прямо сейчас работают: точка чипа дышит, пока шаг не готов
-         * @param {object} service Сервис с его контейнерами
+         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
          * @returns {boolean} Идет ли работа
          */
         isServiceBusy(service) {
             return this.runTaskByService[service.name]?.state === "working";
         },
 
+        /**
+         * Замечание о сервисе одной строкой
+         * @param {import("../../../common/compose-status").StackStatusIssue} issue Замечание
+         * @returns {string} Строка для списка
+         */
         issueText(issue) {
             const detail = issue.detail ? ` (${issue.detail})` : "";
             const name = issue.name ? ` / ${issue.name}` : "";
