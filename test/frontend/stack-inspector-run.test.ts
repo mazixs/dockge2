@@ -233,3 +233,51 @@ test("the progress of the stack that was left is not shown under the new one", (
     assert.deepEqual(ctx.operation.tasks, [], "the steps of another stack must not describe this one");
     assert.equal(ctx.operation.event, "startStack");
 });
+
+for (const [ outcome, reply ] of [
+    [ "ok", { ok: true }],
+    [ "failed", { ok: false,
+        msg: "Compose failed" }],
+    [ "unknown", { ok: false,
+        unknown: true }],
+] as const) {
+    test(`deletion reports ${outcome} through command progress and only leaves on success`, async (t) => {
+        const sent : Answer[] = [];
+        const ctx = makeContext(sent, [], { count: 0 });
+        const routes : string[] = [];
+        ctx.$router = { push: (route : string) => routes.push(route) };
+        t.after(() => ctx.operation.release());
+
+        (ctx.deleteStack as () => void)();
+        assert.equal(ctx.operation.event, "deleteStack");
+        assert.equal(ctx.processing, true);
+        (ctx.deleteStack as () => void)();
+        assert.equal(sent.length, 1, "a second click must not repeat deletion");
+
+        sent[0]!.reply(reply);
+        await sent[0]!.promise;
+        await Promise.resolve();
+
+        assert.equal(ctx.operation.outcome, outcome);
+        assert.equal(ctx.processing, false);
+        assert.deepEqual(routes, outcome === "ok" ? [ "/" ] : []);
+    });
+}
+
+test("a deletion completed after navigation does not redirect away from the new stack", async (t) => {
+    const sent : Answer[] = [];
+    const ctx = makeContext(sent, [], { count: 0 });
+    const routes : string[] = [];
+    ctx.$router = { push: (route : string) => routes.push(route) };
+    t.after(() => ctx.operation.release());
+
+    (ctx.deleteStack as () => void)();
+    ctx.stackName = "beta";
+    ctx.loadStack();
+    sent[0]!.reply({ ok: true });
+    await sent[0]!.promise;
+    await Promise.resolve();
+
+    assert.deepEqual(routes, []);
+    assert.equal(ctx.operation.outcome, "");
+});

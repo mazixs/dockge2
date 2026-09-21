@@ -646,7 +646,7 @@ export class DockgeServer {
             // database below it is closed after that round is really over
             this.resources.add("stack observation", () => observation.stop());
 
-            runInBackground("version check", () => checkVersion.startInterval());
+            runInBackground("version check", () => checkVersion.startInterval(() => this.sendInfoToAll()));
             this.resources.add("version check", () => checkVersion.stopInterval());
         });
 

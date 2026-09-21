@@ -65,6 +65,26 @@ export class MainSocketHandler extends SocketHandler {
             }
         });
 
+        socket.on("checkForUpdates", async (callback) => {
+            try {
+                checkLogin(socket);
+                if (socket.userRole !== "admin") {
+                    throw new ValidationError("authPermissionDenied");
+                }
+                const result = await checkVersion.check(true);
+                callbackResult(result?.ok ? result : {
+                    ok: false,
+                    msg: "updateCheckFailed",
+                    msgi18n: true,
+                }, callback);
+                if (result?.ok) {
+                    runInBackground("server info", () => server.sendInfoToAll());
+                }
+            } catch (error) {
+                callbackError(error, callback);
+            }
+        });
+
         socket.on("setSettings", async (data, currentPassword, callback) => {
             try {
                 checkLogin(socket);

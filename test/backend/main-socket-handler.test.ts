@@ -234,7 +234,8 @@ test("turning the update check on answers on the screen that turned it on", { ti
         const asked : string[] = [];
         context.mock.method(globalThis, "fetch", async (url : unknown) => {
             asked.push(String(url));
-            return { json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
+            return { ok: true,
+                json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
         });
 
         let informed : () => void = () => undefined;
@@ -294,6 +295,33 @@ test("saving the settings tells every open browser, not only the tab that change
         }
 
         assert.equal(broadcasts, 1, "the other sessions were never told about the change");
+        checkVersion.latestVersion = undefined;
+    });
+});
+
+test("only the owner can manually check updates, without changing the automatic setting", async (context) => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = Object.assign(new TestSocket(cookie), { userID: "owner",
+            userRole: "operator" });
+        let requests = 0;
+        context.mock.method(globalThis, "fetch", async () => {
+            requests++;
+            return Response.json([{ tag_name: "v9999.0.0" }]);
+        });
+        const server = Object.assign(createServer(stacksDir), { sendInfoToAll: async () => {} });
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, server);
+        checkVersion.resume();
+        const denied = await emitWithCallback(socket, "checkForUpdates");
+        assert.equal(denied.ok, false);
+        assert.equal(requests, 0);
+
+        socket.userRole = "admin";
+        const result = await emitWithCallback(socket, "checkForUpdates");
+        assert.equal(result.ok, true);
+        assert.equal(result.latestVersion, "9999.0.0");
+        assert.equal(result.updateAvailable, true);
+        assert.notEqual(await Settings.get("checkUpdate"), true);
         checkVersion.latestVersion = undefined;
     });
 });

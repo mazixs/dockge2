@@ -28,10 +28,10 @@
                     <BDropdownItem :disabled="processing" @click="openUpdatePreview">
                         <InterfaceIcon name="refresh" />{{ updateLabel }}
                     </BDropdownItem>
-                    <BDropdownItem @click="showDownDialog = true">
+                    <BDropdownItem :disabled="processing" @click="showDownDialog = true">
                         <font-awesome-icon icon="stop" />{{ $t("downStack") }}
                     </BDropdownItem>
-                    <BDropdownItem @click="showDeleteDialog = true">
+                    <BDropdownItem :disabled="processing" @click="showDeleteDialog = true">
                         <font-awesome-icon icon="trash" />{{ $t("deleteStack") }}
                     </BDropdownItem>
                     <!-- Вывод последней команды не исчезает вместе со строкой хода:
@@ -1180,10 +1180,13 @@ export default {
 
         /**
          * Действие над стеком одним событием агента
-         * @param {"startStack" | "stopStack" | "restartStack" | "updateStack" | "downStack"} event Имя события
+         * @param {"startStack" | "stopStack" | "restartStack" | "updateStack" | "downStack" | "deleteStack"} event Имя события
          * @returns {void}
          */
         run(event) {
+            if (this.operation.running) {
+                return;
+            }
             const generation = this.requests.generation;
             const target = this.runTarget();
 
@@ -1203,6 +1206,10 @@ export default {
 
                 this.processing = false;
                 this.$root.toastRes(res);
+                if (event === "deleteStack" && res.ok) {
+                    this.$router.push("/");
+                    return;
+                }
                 this.requestServiceStatus(generation);
             });
         },
@@ -1310,12 +1317,7 @@ export default {
         },
 
         deleteStack() {
-            this.$root.emitAgent(this.endpoint, "deleteStack", this.stackName, (res) => {
-                this.$root.toastRes(res);
-                if (res.ok) {
-                    this.$router.push("/");
-                }
-            });
+            this.run("deleteStack");
         },
 
         /** Вывод стека живет во вкладке журнала этой же страницы */

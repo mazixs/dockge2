@@ -15,6 +15,7 @@ export const COMMAND_KEYS : Record<string, string> = {
     restartStack: "progressRunRestart",
     updateStack: "progressRunUpdate",
     downStack: "progressRunDown",
+    deleteStack: "progressRunDelete",
     deployStack: "progressRunDeploy",
     startService: "progressRunStart",
     stopService: "progressRunStop",

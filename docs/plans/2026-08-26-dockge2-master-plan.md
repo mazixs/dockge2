@@ -1457,3 +1457,18 @@ the selected period"; экраны ведут себя как прежде, ус
 - The service menu dismisses on outside pointer interaction and Escape, and offers an image update for that service.
 - File editor selection is visible in both themes. Settings categories switch without an entrance animation.
 - Managed container names in the global overview link to their stack inspector, preserving the agent endpoint.
+
+
+## 2026-09-21: update settings
+
+- Separate automatic update checks, beta-release inclusion, an explicit manual check, and a quiet repository link.
+- A manual check works with automatic checks disabled and does not change that preference.
+- Report fresh success or failure, prevent duplicate in-flight requests, and broadcast successful scheduled checks to connected browsers.
+
+
+## 2026-09-21: deletion of broken stacks
+
+- Deletion no longer requires fixing YAML, project names or missing env files first.
+- When Compose validation fails, recover containers using their recorded working-directory labels and immutable IDs, including stopped containers. Never infer ownership from a project name alone.
+- Recovery stops and removes containers without deleting Docker volumes. It leaves networks because their labels do not prove directory ownership. The stack directory is removed as stated in the existing confirmation.
+- A failed Docker query, stop or removal keeps the stack files. Deletion uses the shared operation progress and preserves failed/unknown outcomes on the current screen.

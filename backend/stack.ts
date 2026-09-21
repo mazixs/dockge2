@@ -45,6 +45,7 @@ import { InteractiveTerminal, Terminal } from "./terminal";
 import { spawn } from "./child-process";
 import { readStackSource, type StackSource } from "./stack-source";
 import { composeArgs } from "./compose-args";
+import { removeStackContainers } from "./stack-delete";
 import { readAvailability } from "./observations";
 import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
@@ -743,22 +744,36 @@ export class Stack {
         return this.control("deploy", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
+    /** Delete even an unconfigured stack, without asking broken Compose files to clean it up. */
     async delete(socket: DockgeSocket) : Promise<number> {
-        const terminalName = getComposeTerminalName(socket.endpoint, this.name);
-        let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("down", "--remove-orphans"), this.path);
-        if (exitCode !== 0) {
-            throw new Error("Failed to delete, please check the terminal output for more information.");
-        }
+        return withStackLock(this.path, async () => {
+            await Stack.assertNotSymlink(this.path);
+            const terminalName = getComposeTerminalName(socket.endpoint, this.name);
+            if (Terminal.getTerminal(terminalName)) {
+                throw new ValidationError("Another operation is already running, please try again later.");
+            }
+            const execute = (args : string[]) => Terminal.exec(this.server, socket, terminalName, "docker", args, this.path);
+            let valid = true;
+            try {
+                await this.validateComposeConfig();
+            } catch (e) {
+                if (!(e instanceof ValidationError)) {
+                    throw e;
+                }
+                valid = false;
+            }
 
-        // Remove the stack folder
-        await fsAsync.rm(this.path, {
-            recursive: true,
-            force: true
+            if (valid && await execute(this.getComposeOptions("down", "--remove-orphans")) !== 0) {
+                throw new Error("stackDeleteContainersFailed");
+            }
+            // Also catches containers deployed before a later edit changed the project name.
+            await removeStackContainers(this.path, execute);
+
+            await fsAsync.rm(this.path, { recursive: true,
+                force: true });
+            await StackConfig.removeQuiet(this.name);
+            return 0;
         });
-
-        await StackConfig.removeQuiet(this.name);
-
-        return exitCode;
     }
 
     async updateStatus() {

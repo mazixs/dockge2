@@ -76,6 +76,9 @@ test("viewer cannot request raw files, logs, Docker actions, agent management or
     }
     assert.equal(roleAllowsEvent("viewer", "usersCreate"), false);
     assert.equal(roleAllowsEvent("operator", "setSettings"), false);
+    assert.equal(roleAllowsEvent("operator", "checkForUpdates"), false);
+    assert.equal(roleAllowsEvent("viewer", "checkForUpdates"), false);
+    assert.equal(roleAllowsEvent("admin", "checkForUpdates"), true);
     assert.equal(roleAllowsEvent("operator", "usersUpdate"), false);
     assert.equal(roleAllowsEvent("operator", "startStack", true), true);
     assert.equal(roleAllowsEvent("viewer", "stabilityOverview", true), true);

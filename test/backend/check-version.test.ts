@@ -35,7 +35,8 @@ test("nothing is asked of GitHub until the owner turns the check on", async (con
         const asked : string[] = [];
         context.mock.method(globalThis, "fetch", async (url : unknown) => {
             asked.push(String(url));
-            return { json: async () => [{ tag_name: "v0.4.0" }] } as Response;
+            return { ok: true,
+                json: async () => [{ tag_name: "v0.4.0" }] } as Response;
         });
 
         // The default is off: an installation says nothing about itself to anybody
@@ -58,11 +59,12 @@ test("nothing is asked of GitHub until the owner turns the check on", async (con
 
 test("a beta is only offered to someone who asked for betas", async (context) => {
     await withDatabase(async () => {
-        context.mock.method(globalThis, "fetch", async () => ({ json: async () => [
-            { tag_name: "v0.4.0" },
-            { tag_name: "v0.5.0-beta.1",
-                prerelease: true },
-        ] } as Response));
+        context.mock.method(globalThis, "fetch", async () => ({ ok: true,
+            json: async () => [
+                { tag_name: "v0.4.0" },
+                { tag_name: "v0.5.0-beta.1",
+                    prerelease: true },
+            ] } as Response));
         await Settings.set("checkUpdate", true, "general");
 
         checkVersion.resume();
@@ -128,7 +130,8 @@ test("turning the check on asks the registry at once, not in two days", async (c
         const asked : string[] = [];
         context.mock.method(globalThis, "fetch", async (url : unknown) => {
             asked.push(String(url));
-            return { json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
+            return { ok: true,
+                json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
         });
 
         // `check` is what the settings handler calls the moment the switch is saved. The
@@ -170,7 +173,8 @@ test("a check still in flight when the panel stops leaves neither a timer nor a 
             signal = init.signal ?? undefined;
             reached();
             await held;
-            return { json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
+            return { ok: true,
+                json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
         });
 
         checkVersion.resume();
@@ -220,7 +224,8 @@ test("a stop during the settings read leaves the registry unasked", async (conte
         const asked : string[] = [];
         context.mock.method(globalThis, "fetch", async (url : unknown) => {
             asked.push(String(url));
-            return { json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
+            return { ok: true,
+                json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
         });
 
         checkVersion.resume();
@@ -232,5 +237,112 @@ test("a stop during the settings read leaves the registry unasked", async (conte
         await checking;
 
         assert.deepEqual(asked, [], "a stopped checker asked the registry anyway");
+    });
+});
+
+test("manual checks use the selected channel without enabling automatic requests", async (context) => {
+    await withDatabase(async () => {
+        context.mock.method(globalThis, "fetch", async () => Response.json([
+            { tag_name: "v9998.0.0" },
+            { tag_name: "v9999.0.0-beta.1",
+                prerelease: true },
+        ]));
+        checkVersion.resume();
+        assert.equal(await checkVersion.check(), undefined);
+        assert.deepEqual(await checkVersion.check(true), {
+            ok: true,
+            latestVersion: "9998.0.0",
+            updateAvailable: true,
+        });
+        await Settings.set("checkBeta", true, "general");
+        assert.deepEqual(await checkVersion.check(true), {
+            ok: true,
+            latestVersion: "9999.0.0-beta.1",
+            updateAvailable: true,
+        });
+        assert.notEqual(await Settings.get("checkUpdate"), true);
+        checkVersion.latestVersion = undefined;
+    });
+});
+
+test("HTTP errors, malformed answers and empty releases never report a successful check", async (context) => {
+    await withDatabase(async () => {
+        checkVersion.resume();
+        checkVersion.latestVersion = "0.0.1";
+        for (const response of [
+            Response.json({ message: "rate limit exceeded" }, { status: 403 }),
+            Response.json({ message: "unexpected payload" }),
+            Response.json([]),
+            new Response("invalid JSON"),
+        ]) {
+            const mock = context.mock.method(globalThis, "fetch", async () => response);
+            assert.deepEqual(await checkVersion.check(true), { ok: false });
+            assert.equal(checkVersion.latestVersion, "0.0.1");
+            mock.mock.restore();
+        }
+        checkVersion.latestVersion = undefined;
+    });
+});
+
+test("concurrent manual checks share a request and publish scheduled results to browsers", async (context) => {
+    await withDatabase(async () => {
+        let release = () => {};
+        const held = new Promise<void>(resolve => {
+            release = resolve;
+        });
+        let requests = 0;
+        context.mock.method(globalThis, "fetch", async () => {
+            requests++;
+            await held;
+            return Response.json([{ tag_name: "v9999.0.0" }]);
+        });
+        checkVersion.resume();
+        const first = checkVersion.check(true);
+        const second = checkVersion.check(true);
+        release();
+        assert.deepEqual(await first, await second);
+        assert.equal(requests, 1);
+
+        await Settings.set("checkUpdate", true, "general");
+        context.mock.timers.enable({ apis: [ "setInterval" ] });
+        let notifications = 0;
+        let informed = () => {};
+        const broadcast = new Promise<void>(resolve => {
+            informed = resolve;
+        });
+        try {
+            await checkVersion.startInterval(async () => {
+                notifications++;
+                if (notifications === 2) {
+                    informed();
+                }
+            });
+            assert.equal(notifications, 1);
+            context.mock.timers.tick(48 * 60 * 60 * 1000);
+            await broadcast;
+            assert.equal(notifications, 2);
+            assert.equal(requests, 3);
+        } finally {
+            checkVersion.stopInterval();
+            context.mock.timers.reset();
+            checkVersion.latestVersion = undefined;
+        }
+    });
+});
+
+test("a failed initial broadcast does not disable future update checks", async (context) => {
+    await withDatabase(async () => {
+        context.mock.method(globalThis, "fetch", async () => Response.json([{ tag_name: "v9999.0.0" }]));
+        await Settings.set("checkUpdate", true, "general");
+        checkVersion.resume();
+        try {
+            await checkVersion.startInterval(async () => {
+                throw new Error("A browser disconnected");
+            });
+            assert.ok(checkVersion.interval);
+        } finally {
+            checkVersion.stopInterval();
+            checkVersion.latestVersion = undefined;
+        }
     });
 });

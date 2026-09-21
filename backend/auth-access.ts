@@ -165,7 +165,7 @@ export const OPERATOR_EVENTS = new Set([
     "terminalJoin", "terminalLeave", "joinCombinedTerminal", "leaveCombinedTerminal", "terminalResize",
 ]);
 const ACCOUNT_EVENTS = new Set([ "getSettings", "disconnectOtherSocketClients" ]);
-const ADMIN_EVENTS = new Set([ "setSettings", "addAgent", "removeAgent", "updateAgent", "usersList", "usersCreate", "usersUpdate", "usersResetPassword", "usersDelete" ]);
+const ADMIN_EVENTS = new Set([ "checkForUpdates", "setSettings", "addAgent", "removeAgent", "updateAgent", "usersList", "usersCreate", "usersUpdate", "usersResetPassword", "usersDelete" ]);
 
 /** Explicit allowlists cover both direct and forwarded agent operations. */
 export function roleAllowsEvent(role : UserRole, event : string, agent = false) : boolean {

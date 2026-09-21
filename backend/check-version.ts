@@ -1,4 +1,5 @@
 import { log } from "./log";
+import { runInBackground } from "./background";
 import compareVersions from "compare-versions";
 import packageJSON from "../package.json";
 import { Settings } from "./settings";
@@ -23,6 +24,8 @@ interface Release {
     prerelease? : unknown;
 }
 
+export type UpdateCheckResult = { ok: true; latestVersion: string; updateAvailable: boolean } | { ok: false };
+
 class CheckVersion {
     version = packageJSON.version;
 
@@ -30,6 +33,7 @@ class CheckVersion {
     // difference is what lets "the registry was never asked" be written back
     latestVersion : string | undefined;
     interval : NodeJS.Timeout | undefined;
+    private inFlight : Promise<UpdateCheckResult | undefined> | undefined;
 
     /**
      * Whether this checker is allowed to own anything at the moment.
@@ -95,28 +99,32 @@ class CheckVersion {
     }
 
     /**
-     * Ask the registry once for the releases it has.
-     *
-     * Separate from the interval so that turning the check on can answer immediately:
-     * the interval is two days long, and a switch that shows nothing until the next
-     * restart reads as a switch that does not work.
-     * @returns {Promise<void>}
+     * Check once. An explicit owner request does not enable future background requests.
+     * Concurrent callers share one request to avoid multiplying GitHub API traffic.
+     * @param manual Whether the owner explicitly requested this check
+     * @returns A fresh result, or no result when background checking is disabled or stopped
      */
-    async check() : Promise<void> {
-        // Проверка обновлений - исходящий запрос к третьей стороне, поэтому
-        // она делается только по явному согласию владельца
-        if (this.stopped || await Settings.get("checkUpdate") !== true) {
+    async check(manual = false) : Promise<UpdateCheckResult | undefined> {
+        if (this.stopped || (!manual && await Settings.get("checkUpdate") !== true)) {
             return;
         }
-
-        // The state is read again, because reading the setting is itself a wait. A stop
-        // landing inside it found no controller to abort - it did not exist yet - and the
-        // request left afterwards, from a panel that had already reported the network
-        // released. The first check stays: it keeps the settings read out of a stopped panel
+        // Shutdown can happen while the preference is being read.
         if (this.stopped) {
             return;
         }
+        if (this.inFlight) {
+            return this.inFlight;
+        }
+        this.inFlight = this.fetchRelease();
+        try {
+            return await this.inFlight;
+        } finally {
+            this.inFlight = undefined;
+        }
+    }
 
+    /** Fetch and validate a fresh release list without changing stored preferences. */
+    private async fetchRelease() : Promise<UpdateCheckResult | undefined> {
         log.debug("update-checker", "Retrieving latest versions");
 
         const controller = new AbortController();
@@ -129,6 +137,9 @@ class CheckVersion {
         try {
             const res = await fetch(CHECK_URL, { headers: { "accept": "application/vnd.github+json" },
                 signal: controller.signal });
+            if (!res.ok) {
+                throw new Error("Release registry request failed");
+            }
             const { stable, beta } = this.parseReleases(await res.json());
 
             // The answer can arrive just as the panel stops, and what follows reads a
@@ -140,17 +151,22 @@ class CheckVersion {
             // For debug
             const slow = process.env.TEST_CHECK_VERSION === "1" ? "1000.0.0" : stable;
 
-            if (await Settings.get("checkBeta") && beta && (!slow || compareVersions.compare(beta, slow, ">"))) {
-                this.latestVersion = beta;
+            const includeBeta = await Settings.get("checkBeta") === true;
+            if (this.stopped) {
                 return;
             }
-
-            if (slow) {
-                this.latestVersion = slow;
+            const latest = includeBeta && beta && (!slow || compareVersions.compare(beta, slow, ">")) ? beta : slow;
+            if (!latest) {
+                throw new Error("Release registry returned no matching releases");
             }
+            this.latestVersion = latest;
+            return { ok: true,
+                latestVersion: latest,
+                updateAvailable: this.updateAvailable };
 
         } catch {
             log.info("update-checker", "Failed to check for new versions");
+            return { ok: false };
         } finally {
             clearTimeout(deadline);
 
@@ -166,21 +182,33 @@ class CheckVersion {
      * The first request is awaited, so the state after a stop is checked again before the
      * timer is created: a checker that was stopped during that request owns nothing
      * afterwards.
+     * @param onChecked Notify connected browsers after a successful check
      * @returns {Promise<void>}
      */
-    async startInterval() : Promise<void> {
+    async startInterval(onChecked : () => Promise<void> = async () => {}) : Promise<void> {
         if (this.stopped) {
             return;
         }
 
-        await this.check();
+        const result = await this.check();
 
         if (this.stopped) {
             return;
         }
 
+        if (result?.ok) {
+            await onChecked().catch(error => log.error("update-checker", error));
+        }
+        if (this.stopped) {
+            return;
+        }
         this.interval = setInterval(() => {
-            void this.check();
+            runInBackground("version check", async () => {
+                const next = await this.check();
+                if (next?.ok && !this.stopped) {
+                    await onChecked();
+                }
+            });
         }, UPDATE_CHECKER_INTERVAL_MS);
     }
 
