@@ -149,7 +149,7 @@ export class StackMetadataWriteError extends ValidationError {
 /**
  * A failed write could not be undone, so the files are left as they are and the journal stays.
  */
-export class StackWriteRecoveryError extends Error {
+class StackWriteRecoveryError extends Error {
     readonly values : Record<string, string>;
 
     /**
@@ -178,7 +178,7 @@ export function hashStackFileContent(content : string) : string {
  * @returns Current state, with null bytes when the file does not exist
  * @throws {ValidationError} If the name or the path cannot be used
  */
-export async function readStackFileState(dir : string, fileName : string) : Promise<StackFileState> {
+async function readStackFileState(dir : string, fileName : string) : Promise<StackFileState> {
     const file = await resolveStackFilePath(dir, fileName);
     const absent : StackFileState = { hash: null,
         bytes: null,
@@ -296,6 +296,141 @@ async function revertMetadata(metadata : StackWriteMetadata) : Promise<boolean> 
         : StackConfig.setQuiet(metadata.stack, metadata.before);
 }
 
+/** One file of a write that is actually going to change something */
+interface PendingWrite {
+    target : StackFileTarget;
+    state : StackFileState;
+    afterHash : string;
+}
+
+/** What the transaction has done so far, read by the compensation when it fails */
+interface WriteProgress {
+    /** Files already replaced, in the order they were replaced */
+    written : string[];
+    /** Whether the selection of these files was already stored */
+    metadataApplied : boolean;
+}
+
+/**
+ * Phase one: read what is on disk, compare it with what the caller started from.
+ *
+ * Nothing is written here, so a conflict found in this phase costs no rollback: the
+ * files are still exactly as the caller found them.
+ * @param dir Stack directory
+ * @param targets Files and what they have to contain
+ * @returns The hashes the files will have and the subset that has to be written
+ * @throws {StackWriteConflictError} If a file no longer holds what the caller expected
+ */
+async function planWrite(dir : string, targets : StackFileTarget[]) : Promise<{ hashes : Record<string, string>, pending : PendingWrite[] }> {
+    const hashes : Record<string, string> = {};
+    const pending : PendingWrite[] = [];
+
+    for (const target of targets) {
+        const state = await readStackFileState(dir, target.name);
+
+        if (target.expectedHash !== undefined && target.expectedHash !== state.hash) {
+            throw new StackWriteConflictError(target.name);
+        }
+
+        if (target.mode !== undefined && state.mode === null) {
+            state.mode = target.mode;
+        }
+
+        const afterHash = hashStackFileContent(target.content);
+        hashes[target.name] = afterHash;
+
+        if (afterHash !== state.hash) {
+            pending.push({ target,
+                state,
+                afterHash });
+        }
+    }
+
+    return { hashes,
+        pending };
+}
+
+/**
+ * Phase two: put both versions of every file on disk before any of them is replaced.
+ *
+ * The journal is what makes the write survive a crash, so it is complete before the
+ * first file is touched: a process that dies here has changed nothing.
+ * @param dir Stack directory
+ * @param pending Files that are going to change
+ * @param options Journal location and the dependent selection
+ * @returns The journal directory and the plan stored in it
+ */
+async function openJournal(dir : string, pending : PendingWrite[], options : StackWriteOptions) : Promise<{ journal : string, manifest : JournalManifest }> {
+    const journal = path.join(options.journalRoot, STACK_WRITE_JOURNAL_DIR, randomUUID());
+    const manifest : JournalManifest = { dir: path.resolve(dir),
+        createdAt: Date.now(),
+        files: pending.map(({ target, state, afterHash }) => ({ name: target.name,
+            beforeHash: state.hash,
+            afterHash,
+            mode: state.mode ?? DEFAULT_FILE_MODE })),
+        ...(options.metadata ? { metadata: options.metadata } : {}) };
+
+    await fs.mkdir(path.join(journal, "before"), { recursive: true,
+        mode: 0o700 });
+    await fs.mkdir(path.join(journal, "after"), { mode: 0o700 });
+
+    for (const { target, state } of pending) {
+        if (state.bytes) {
+            await fs.writeFile(path.join(journal, "before", target.name), state.bytes, { mode: 0o600 });
+        }
+        await fs.writeFile(path.join(journal, "after", target.name), target.content, { mode: 0o600 });
+    }
+    await fs.writeFile(path.join(journal, "manifest.json"), JSON.stringify(manifest), { mode: 0o600 });
+
+    return { journal,
+        manifest };
+}
+
+/**
+ * Phase three: replace the files, store the selection, mark the write committed.
+ *
+ * What has been done is written into `progress` as it happens rather than returned at
+ * the end, because the caller needs it precisely when this throws: the compensation can
+ * only put back what was actually changed.
+ * @param dir Stack directory
+ * @param pending Files that are going to change
+ * @param journal Journal directory of this write
+ * @param options Dependent selection and test injections
+ * @param progress Filled in as the transaction proceeds
+ * @throws {StackWriteConflictError} If a file changed after the journal was written
+ * @throws {StackMetadataWriteError} If the selection of these files could not be stored
+ */
+async function commitWrite(dir : string, pending : PendingWrite[], journal : string, options : StackWriteOptions, progress : WriteProgress) : Promise<void> {
+    for (const { target, state, afterHash } of pending) {
+        await options.beforeWrite?.(target.name);
+
+        // The file is read once more under the lock: a process outside the panel
+        // could have replaced it while the journal was being written
+        const current = await readStackFileState(dir, target.name);
+        if (current.hash !== state.hash) {
+            throw new StackWriteConflictError(target.name);
+        }
+
+        await replaceFile(dir, target.name, target.content, state);
+        progress.written.push(target.name);
+
+        const verified = await readStackFileState(dir, target.name);
+        if (verified.hash !== afterHash) {
+            throw new StackWriteConflictError(target.name);
+        }
+    }
+
+    await options.beforeCommit?.();
+
+    // The selection goes in while the files can still be put back: from the commit
+    // marker on, both belong to the saved state and recovery rolls them forward
+    if (options.metadata) {
+        await applyMetadata(options.metadata);
+        progress.metadataApplied = true;
+    }
+    await fs.writeFile(path.join(journal, "committed"), "", { mode: 0o600 });
+}
+
 /**
  * Write a set of stack files so that a failure leaves either all of them or none.
  *
@@ -328,31 +463,7 @@ export async function writeStackFiles(dir : string, targets : StackFileTarget[],
     }
 
     return withStackLock(dir, async () => {
-        const states = new Map<string, StackFileState>();
-        const hashes : Record<string, string> = {};
-        const pending : { target : StackFileTarget, state : StackFileState, afterHash : string }[] = [];
-
-        for (const target of targets) {
-            const state = await readStackFileState(dir, target.name);
-            states.set(target.name, state);
-
-            if (target.expectedHash !== undefined && target.expectedHash !== state.hash) {
-                throw new StackWriteConflictError(target.name);
-            }
-
-            if (target.mode !== undefined && state.mode === null) {
-                state.mode = target.mode;
-            }
-
-            const afterHash = hashStackFileContent(target.content);
-            hashes[target.name] = afterHash;
-
-            if (afterHash !== state.hash) {
-                pending.push({ target,
-                    state,
-                    afterHash });
-            }
-        }
+        const { hashes, pending } = await planWrite(dir, targets);
 
         if (pending.length === 0) {
             // Nothing to undo, so the selection is the whole write and stands on its own
@@ -363,64 +474,21 @@ export async function writeStackFiles(dir : string, targets : StackFileTarget[],
                 changed: [] };
         }
 
-        const journal = path.join(options.journalRoot, STACK_WRITE_JOURNAL_DIR, randomUUID());
-        const manifest : JournalManifest = { dir: path.resolve(dir),
-            createdAt: Date.now(),
-            files: pending.map(({ target, state, afterHash }) => ({ name: target.name,
-                beforeHash: state.hash,
-                afterHash,
-                mode: state.mode ?? DEFAULT_FILE_MODE })),
-            ...(options.metadata ? { metadata: options.metadata } : {}) };
+        const { journal, manifest } = await openJournal(dir, pending, options);
+        const progress : WriteProgress = { written: [],
+            metadataApplied: false };
 
-        await fs.mkdir(path.join(journal, "before"), { recursive: true,
-            mode: 0o700 });
-        await fs.mkdir(path.join(journal, "after"), { mode: 0o700 });
-
-        for (const { target, state } of pending) {
-            if (state.bytes) {
-                await fs.writeFile(path.join(journal, "before", target.name), state.bytes, { mode: 0o600 });
-            }
-            await fs.writeFile(path.join(journal, "after", target.name), target.content, { mode: 0o600 });
-        }
-        await fs.writeFile(path.join(journal, "manifest.json"), JSON.stringify(manifest), { mode: 0o600 });
-
-        const written : string[] = [];
-        let metadataApplied = false;
         try {
-            for (const { target, state, afterHash } of pending) {
-                await options.beforeWrite?.(target.name);
-
-                // The file is read once more under the lock: a process outside the panel
-                // could have replaced it while the journal was being written
-                const current = await readStackFileState(dir, target.name);
-                if (current.hash !== state.hash) {
-                    throw new StackWriteConflictError(target.name);
-                }
-
-                await replaceFile(dir, target.name, target.content, state);
-                written.push(target.name);
-
-                const verified = await readStackFileState(dir, target.name);
-                if (verified.hash !== afterHash) {
-                    throw new StackWriteConflictError(target.name);
-                }
-            }
-
-            await options.beforeCommit?.();
-
-            // The selection goes in while the files can still be put back: from the commit
-            // marker on, both belong to the saved state and recovery rolls them forward
-            if (options.metadata) {
-                await applyMetadata(options.metadata);
-                metadataApplied = true;
-            }
-            await fs.writeFile(path.join(journal, "committed"), "", { mode: 0o600 });
+            await commitWrite(dir, pending, journal, options, progress);
         } catch (error) {
-            if (metadataApplied && options.metadata && !await revertMetadata(options.metadata)) {
+            // The selection is put back first: it is the one part of this write that
+            // another process can read without opening a file, so it must not outlive
+            // the files it describes
+            if (progress.metadataApplied && options.metadata && !await revertMetadata(options.metadata)) {
                 log.error("stack-write", `Could not put back the file selection of ${options.metadata.stack} after a failed save`);
                 throw new StackWriteRecoveryError(path.basename(journal), error);
             }
-            await undoWrite(dir, journal, manifest, written, error);
+            await undoWrite(dir, journal, manifest, progress.written, error);
             throw error;
         }
 
@@ -475,6 +543,137 @@ async function undoWrite(dir : string, journal : string, manifest : JournalManif
         force: true });
 }
 
+/** What became of one journal found at startup */
+type JournalOutcome = "finished" | "undone" | "unresolved";
+
+/**
+ * Read the plan of an interrupted write.
+ * @param journal Journal directory
+ * @returns The plan, or null when it cannot be read and only the user can decide
+ */
+async function readJournalManifest(journal : string) : Promise<JournalManifest | null> {
+    try {
+        return JSON.parse(await fs.readFile(path.join(journal, "manifest.json"), "utf-8")) as JournalManifest;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Bring the files of an interrupted write to the version the journal says they hold.
+ *
+ * A file that holds neither version is left alone: it was edited after the crash, and
+ * both the saved text and the edit are somebody's work.
+ * @param journal Journal directory
+ * @param manifest Plan of the interrupted write
+ * @param committed Whether the write had reached its commit marker
+ * @returns Whether some file was left for the user to decide about
+ */
+async function restoreJournalFiles(journal : string, manifest : JournalManifest, committed : boolean) : Promise<boolean> {
+    let unresolved = false;
+
+    for (const file of manifest.files) {
+        const wanted = committed ? file.afterHash : file.beforeHash;
+        const other = committed ? file.beforeHash : file.afterHash;
+
+        let current;
+        try {
+            current = await readStackFileState(manifest.dir, file.name);
+        } catch {
+            unresolved = true;
+            continue;
+        }
+
+        if (current.hash === wanted) {
+            continue;
+        }
+
+        if (current.hash !== other) {
+            // The file holds a third text: someone edited it after the crash
+            unresolved = true;
+            continue;
+        }
+
+        try {
+            if (wanted === null) {
+                await removeFile(manifest.dir, file.name);
+            } else {
+                const content = await fs.readFile(path.join(journal, committed ? "after" : "before", file.name), "utf-8");
+                await replaceFile(manifest.dir, file.name, content, { hash: current.hash,
+                    bytes: null,
+                    mode: file.mode,
+                    uid: current.uid,
+                    gid: current.gid });
+            }
+            log.info("stack-write", `${committed ? "Finished" : "Undid"} the interrupted save of ${file.name} in ${manifest.dir}`);
+        } catch {
+            unresolved = true;
+        }
+    }
+
+    return unresolved;
+}
+
+/**
+ * Put the file selection of an interrupted write where the files ended up.
+ *
+ * The selection follows the files: a committed write keeps the one it was saved with, an
+ * uncommitted one goes back to what was stored before it started.
+ * @param metadata Selection of the interrupted write
+ * @param committed Whether the write had reached its commit marker
+ * @returns Whether the selection is now the right one
+ */
+async function restoreJournalMetadata(metadata : StackWriteMetadata, committed : boolean) : Promise<boolean> {
+    const wanted = committed ? metadata.after : metadata.before;
+    const stored = wanted === null
+        ? await StackConfig.removeQuiet(metadata.stack)
+        : await StackConfig.setQuiet(metadata.stack, wanted);
+
+    if (stored) {
+        log.info("stack-write", `${committed ? "Finished" : "Undid"} the interrupted file selection of ${metadata.stack}`);
+    }
+
+    return stored;
+}
+
+/**
+ * Finish or undo one interrupted write.
+ *
+ * Files first, then the selection that belongs to them, and a journal that could not be
+ * resolved is kept under its own name instead of being deleted: it holds the only copy
+ * of the text nobody chose.
+ * @param root Directory holding the journals
+ * @param name Name of this journal inside it
+ * @returns What became of this write
+ */
+async function recoverJournal(root : string, name : string) : Promise<JournalOutcome> {
+    const journal = path.join(root, name);
+    const manifest = await readJournalManifest(journal);
+
+    if (!manifest) {
+        log.warn("stack-write", `Unreadable save journal ${name}, leaving it in place`);
+        return "unresolved";
+    }
+
+    const committed = await fs.access(path.join(journal, "committed")).then(() => true, () => false);
+    let unresolved = await restoreJournalFiles(journal, manifest, committed);
+
+    if (!unresolved && manifest.metadata) {
+        unresolved = !await restoreJournalMetadata(manifest.metadata, committed);
+    }
+
+    if (unresolved) {
+        await fs.rename(journal, path.join(root, `unresolved-${name}`));
+        log.warn("stack-write", `An interrupted save of ${manifest.dir} needs a decision, the original files are kept in unresolved-${name}`);
+        return "unresolved";
+    }
+
+    await fs.rm(journal, { recursive: true,
+        force: true });
+
+    return committed ? "finished" : "undone";
+}
+
 /**
  * Finish or undo the writes an interrupted process left behind.
  *
@@ -502,91 +701,13 @@ export async function recoverStackWrites(journalRoot : string) : Promise<{ finis
     }
 
     for (const entry of entries) {
+        // A journal that already needed a decision is not tried again: it is kept for
+        // the user, and retrying it would only move it to a second name
         if (!entry.isDirectory() || entry.name.startsWith("unresolved-")) {
             continue;
         }
 
-        const journal = path.join(root, entry.name);
-        let manifest : JournalManifest;
-        try {
-            manifest = JSON.parse(await fs.readFile(path.join(journal, "manifest.json"), "utf-8")) as JournalManifest;
-        } catch (error) {
-            log.warn("stack-write", `Unreadable save journal ${entry.name}, leaving it in place`);
-            result.unresolved += 1;
-            continue;
-        }
-
-        const committed = await fs.access(path.join(journal, "committed")).then(() => true, () => false);
-        let unresolved = false;
-
-        for (const file of manifest.files) {
-            const wanted = committed ? file.afterHash : file.beforeHash;
-            const other = committed ? file.beforeHash : file.afterHash;
-
-            let current;
-            try {
-                current = await readStackFileState(manifest.dir, file.name);
-            } catch (error) {
-                unresolved = true;
-                continue;
-            }
-
-            if (current.hash === wanted) {
-                continue;
-            }
-
-            if (current.hash !== other) {
-                // The file holds a third text: someone edited it after the crash
-                unresolved = true;
-                continue;
-            }
-
-            try {
-                if (wanted === null) {
-                    await removeFile(manifest.dir, file.name);
-                } else {
-                    const content = await fs.readFile(path.join(journal, committed ? "after" : "before", file.name), "utf-8");
-                    await replaceFile(manifest.dir, file.name, content, { hash: current.hash,
-                        bytes: null,
-                        mode: file.mode,
-                        uid: current.uid,
-                        gid: current.gid });
-                }
-                log.info("stack-write", `${committed ? "Finished" : "Undid"} the interrupted save of ${file.name} in ${manifest.dir}`);
-            } catch (error) {
-                unresolved = true;
-            }
-        }
-
-        // The selection follows the files: a committed write keeps the one it was saved
-        // with, an uncommitted one goes back to what was stored before it started
-        if (!unresolved && manifest.metadata) {
-            const wanted = committed ? manifest.metadata.after : manifest.metadata.before;
-            const stored = wanted === null
-                ? await StackConfig.removeQuiet(manifest.metadata.stack)
-                : await StackConfig.setQuiet(manifest.metadata.stack, wanted);
-
-            if (stored) {
-                log.info("stack-write", `${committed ? "Finished" : "Undid"} the interrupted file selection of ${manifest.metadata.stack}`);
-            } else {
-                unresolved = true;
-            }
-        }
-
-        if (unresolved) {
-            result.unresolved += 1;
-            await fs.rename(journal, path.join(root, `unresolved-${entry.name}`));
-            log.warn("stack-write", `An interrupted save of ${manifest.dir} needs a decision, the original files are kept in unresolved-${entry.name}`);
-            continue;
-        }
-
-        if (committed) {
-            result.finished += 1;
-        } else {
-            result.undone += 1;
-        }
-        await fs.rm(journal, { recursive: true,
-            force: true });
+        result[await recoverJournal(root, entry.name)] += 1;
     }
 
     return result;

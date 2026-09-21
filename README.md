@@ -256,6 +256,11 @@ rather than configuring it, so it is the last resort, not the first.
 
 ## How to Update
 
+The panel can say when there is something to update to. Switch "Show update if available" on in
+Settings -> About: the newer release is then named on that screen and marked on the account button.
+Until then nothing is asked of anybody - the check is off by default, and all it ever does is read
+the list of releases. Installing is the command below, run on the server by you.
+
 The deployment is a Git checkout, so updating fast-forwards it and then puts the new image in
 place - downloaded when there is one published, built when there is not. The installer does exactly
 that and needs nothing else on the host:

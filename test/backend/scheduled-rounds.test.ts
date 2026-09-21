@@ -163,3 +163,68 @@ test("a stop that arrives between two rounds does not wait for anything", async 
 
     assert.ok(Date.now() - startedAt < 500, "there is nothing running, so there is nothing to wait for");
 });
+
+test("a round that outlives its budget is told to stop before its dependencies go", async () => {
+    const owner = new ResourceOwner();
+    const started = gate();
+    const docker = gate();
+    let databaseOpen = true;
+    let wroteAfterClose = false;
+
+    owner.add("database", () => {
+        databaseOpen = false;
+    });
+
+    // The shape of the real round: Docker answers late, and what follows would be
+    // written into the database. The signal is what lets the round drop that work
+    const rounds = new ScheduledRounds("stack observation", EVERY_SECOND, async (signal) => {
+        started.open();
+        await docker.promise;
+
+        if (signal.aborted) {
+            return;
+        }
+        if (!databaseOpen) {
+            wroteAfterClose = true;
+        }
+    });
+    owner.add("stack observation", () => rounds.stop());
+    rounds.start();
+
+    try {
+        await started.promise;
+
+        // The budget runs out while Docker is still answering, so the owner moves on and
+        // releases the database with the round still in the air
+        const report = await owner.stop(600);
+        assert.deepEqual(report.timedOut, [ "stack observation" ]);
+        assert.equal(databaseOpen, false);
+
+        // Only now does the slow call come back
+        docker.open();
+        await pause(50);
+
+        assert.equal(wroteAfterClose, false, "an abandoned round must not write into a released database");
+    } finally {
+        docker.open();
+        await owner.stop(1000);
+    }
+});
+
+test("the shutdown keeps the budget it was given", async () => {
+    const owner = new ResourceOwner();
+    const stuck = gate();
+
+    // One resource that never finishes: the floor per resource used to be larger than
+    // the whole budget, so a shutdown asked for 100ms took five times that
+    owner.add("stuck", () => stuck.promise);
+
+    const startedAt = Date.now();
+    const report = await owner.stop(100);
+    const spent = Date.now() - startedAt;
+
+    assert.deepEqual(report.timedOut, [ "stuck" ]);
+    assert.ok(spent < 300, `the shutdown took ${spent}ms of a 100ms budget`);
+
+    stuck.open();
+});

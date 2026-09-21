@@ -58,6 +58,8 @@ export interface SocketInfo {
     version?: string;
     /** Newest release this panel knows about, absent until it was asked */
     latestVersion?: string;
+    /** Whether that release is newer than the one running, so there is news to show */
+    updateAvailable?: boolean;
     /** Agent protocol this panel speaks, absent before sign-in */
     agentProtocol?: number;
     /** Whether the panel itself runs in a container */

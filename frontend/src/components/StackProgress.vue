@@ -117,7 +117,7 @@ import Terminal from "./Terminal.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { getComposeTerminalName, PROGRESS_TERMINAL_ROWS } from "../../../common/util-common";
 import { parseComposeProgress } from "../../../common/compose-progress";
-import { COMMAND_KEYS, KIND_ICONS, KIND_KEYS, VERB_KEYS } from "../progress-labels";
+import { COMMAND_KEYS, KIND_ICONS, KIND_KEYS, VERB_KEYS, VERB_KIND_KEYS } from "../progress-labels";
 
 /** Вывод разбирается не чаще этого, иначе шаги дергались бы на каждый байт */
 const SAMPLE_DELAY = 120;
@@ -451,7 +451,17 @@ export default {
          */
         verbLabel(task) {
             const key = VERB_KEYS[task.verb];
-            return key ? this.$t(key) : task.verb;
+
+            if (!key) {
+                return task.verb;
+            }
+
+            // The line reads "Network app_default created", so the verb belongs to the
+            // kind in front of it. A language that inflects has a different word there,
+            // and the catalogue is where that difference is allowed to live
+            const byKind = VERB_KIND_KEYS[task.kind]?.[task.verb];
+
+            return byKind && this.$te(byKind) ? this.$t(byKind) : this.$t(key);
         },
 
         /**

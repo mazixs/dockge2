@@ -146,6 +146,14 @@ function groupByStack(containers : readonly StoredContainer[], changes : Readonl
     return stacks;
 }
 
+/**
+ * Raised inside the write when a shutdown asks the round to give up.
+ *
+ * It is not a failure of Docker: nothing was learned about the containers, so the
+ * collector keeps what it knew instead of reporting the state as unavailable.
+ */
+class ObservationCancelled extends Error {}
+
 /** Persist bounded container observations independently of whether a dashboard is open. */
 export class StabilityCollector {
     private previous = new Map<string, LastObservation>();
@@ -161,8 +169,9 @@ export class StabilityCollector {
      * @param stacks The stacks known to the panel, used to tell managed from standalone
      * @param now Current time, injectable for tests
      * @param ownProject Compose project the panel itself runs as; its containers are skipped
+     * @param signal Abort of the round, checked after the Docker read and before every write
      */
-    async observe(stacks : ReadonlyMap<string, StackIdentity>, now = Date.now(), ownProject = "") : Promise<void> {
+    async observe(stacks : ReadonlyMap<string, StackIdentity>, now = Date.now(), ownProject = "", signal? : AbortSignal) : Promise<void> {
         if (this.inFlight || now - this.lastAttemptAt < STABILITY_SCAN_INTERVAL_MS) {
             return;
         }
@@ -170,6 +179,15 @@ export class StabilityCollector {
         this.inFlight = true;
         try {
             const runtime = await this.readRuntime();
+
+            // Docker is what takes the time in a round, and a shutdown can start inside
+            // that wait. What comes back then belongs to a panel whose database is
+            // already being released, so it is dropped before the first query rather
+            // than written into a connection that is about to close
+            if (signal?.aborted) {
+                return;
+            }
+
             // The panel does not record itself. Availability here is measured from
             // observations the panel takes, so the one thing it can never observe is
             // its own downtime: while it is down nobody is sampling, and the gap
@@ -185,37 +203,17 @@ export class StabilityCollector {
                     stackName: managed?.name ?? container.project,
                     managed: managed?.isManagedByDockge ?? false };
             });
-            const next = new Map<string, LastObservation>();
-            await Database.getKnex().transaction(async (trx) => {
-                for (const container of containers) {
-                    const status = runtimeStatus(container.state, container.health);
-                    const last = this.previous.get(container.id);
-                    if (last && now >= last.at && now - last.at <= STABILITY_STALE_MS) {
-                        const updated = await trx("container_observation").where({ id: last.id }).update({ observed_until: now });
-                        if (updated && last.status === status) {
-                            next.set(container.id, { ...last,
-                                at: now });
-                            continue;
-                        }
-                    }
-                    const [ id ] = await trx("container_observation").insert({ container_id: container.id,
-                        status,
-                        observed_at: now,
-                        observed_until: now });
-                    next.set(container.id, { id: Number(id),
-                        status,
-                        at: now });
-                }
-                await trx("stability_snapshot").insert({ id: 1,
-                    observed_at: now,
-                    containers: JSON.stringify(containers) })
-                    .onConflict("id").merge();
-                await trx("container_observation").where("observed_until", "<", now - RETENTION_MS).delete();
-            });
-            this.previous = next;
+            this.previous = await this.writeObservations(containers, now, signal);
             this.liveObservation = true;
             this.failed = false;
         } catch (e) {
+            if (e instanceof ObservationCancelled) {
+                // The round was asked back in the middle of the write. Nothing is known
+                // about Docker that was not known before, so the collector keeps its
+                // state instead of turning a shutdown into a reported failure
+                return;
+            }
+
             // Do not expose Docker stderr: it can include user-controlled diagnostics.
             this.failed = true;
             this.previous.clear();
@@ -223,6 +221,54 @@ export class StabilityCollector {
         } finally {
             this.inFlight = false;
         }
+    }
+
+    /**
+     * Write one sample of every container inside a single transaction.
+     *
+     * The signal is checked in front of each container, because the writes are awaited
+     * one after another and a shutdown can land between two of them. Giving up throws,
+     * so the transaction is rolled back rather than left half applied.
+     * @param containers What Docker reported, already named and matched to stacks
+     * @param now Time of this sample
+     * @param signal Abort of the round
+     * @returns The interval each container is in after this sample
+     */
+    private async writeObservations(containers : StoredContainer[], now : number, signal? : AbortSignal) : Promise<Map<string, LastObservation>> {
+        const next = new Map<string, LastObservation>();
+
+        await Database.getKnex().transaction(async (trx) => {
+            for (const container of containers) {
+                if (signal?.aborted) {
+                    throw new ObservationCancelled("the observation was cancelled");
+                }
+
+                const status = runtimeStatus(container.state, container.health);
+                const last = this.previous.get(container.id);
+                if (last && now >= last.at && now - last.at <= STABILITY_STALE_MS) {
+                    const updated = await trx("container_observation").where({ id: last.id }).update({ observed_until: now });
+                    if (updated && last.status === status) {
+                        next.set(container.id, { ...last,
+                            at: now });
+                        continue;
+                    }
+                }
+                const [ id ] = await trx("container_observation").insert({ container_id: container.id,
+                    status,
+                    observed_at: now,
+                    observed_until: now });
+                next.set(container.id, { id: Number(id),
+                    status,
+                    at: now });
+            }
+            await trx("stability_snapshot").insert({ id: 1,
+                observed_at: now,
+                containers: JSON.stringify(containers) })
+                .onConflict("id").merge();
+            await trx("container_observation").where("observed_until", "<", now - RETENTION_MS).delete();
+        });
+
+        return next;
     }
 
     /** Read saved observations without causing Docker inspection for every connected viewer. */
@@ -257,7 +303,8 @@ export const stabilityCollector = new StabilityCollector();
  * Hook for the existing background stack scan.
  * @param stacks The stacks known to the panel
  * @param ownProject Compose project the panel itself runs as
+ * @param signal Abort of the round, so a shutdown reaches the collector as well
  */
-export async function observeContainerStability(stacks : ReadonlyMap<string, StackIdentity>, ownProject = "") : Promise<void> {
-    await stabilityCollector.observe(stacks, Date.now(), ownProject);
+export async function observeContainerStability(stacks : ReadonlyMap<string, StackIdentity>, ownProject = "", signal? : AbortSignal) : Promise<void> {
+    await stabilityCollector.observe(stacks, Date.now(), ownProject, signal);
 }

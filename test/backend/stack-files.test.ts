@@ -430,3 +430,79 @@ test("a file swapped for a symlink is not read or written", async () => {
         }
     });
 });
+
+test("a selection changed during a save is not put back by that save", async () => {
+    await withDatabase(async () => {
+        const { stacksDir, stackDir } = await makeStack({
+            "compose.yaml": composeYAML,
+            "staging.yml": composeYAML,
+        });
+
+        try {
+            const server = { stacksDir,
+                config: { dataDir: stacksDir },
+                sendStackList: () => undefined } as never;
+
+            // The save reads the stored selection, then writes its own back together with
+            // the files. Whoever changes the selection in between has been answered
+            // "saved" already, so their decision is the later one and has to stand
+            const saving = new Stack(server, "files-stack", "services:\n  app:\n    image: nginx:1.27\n", "STAGE=dev\n", false);
+
+            let reached : () => void = () => undefined;
+            const reading = new Promise<void>((resolve) => {
+                reached = resolve;
+            });
+            let release : () => void = () => undefined;
+            const held = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+
+            const inner = saving as unknown as { loadFileConfig : () => Promise<unknown> };
+            const original = inner.loadFileConfig.bind(saving);
+            inner.loadFileConfig = async () => {
+                const result = await original();
+                reached();
+                await held;
+                return result;
+            };
+
+            const save = saving.save(false);
+            await reading;
+
+            const switching = await Stack.getStack(server, "files-stack");
+            let switched = false;
+            const change = switching.setFileConfig({
+                composeFileName: "staging.yml",
+                envFileNames: [],
+                activeEnvFileName: "",
+                secretBindings: [],
+            }).then((result) => {
+                switched = true;
+                return result;
+            });
+
+            // Both operations take the same lock, so the change waits instead of landing
+            // in the middle of the save
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            assert.equal(switched, false, "the selection changed while a save was running");
+
+            release();
+            await save;
+            await change;
+
+            // The confirmed change is the state of the stack afterwards
+            const stored = await StackConfig.get("files-stack");
+            assert.equal(stored?.composeFileName, "staging.yml");
+
+            const reloaded = await Stack.getStack(server, "files-stack");
+            assert.equal(reloaded.composeFileName, "staging.yml");
+
+            // And the save wrote the file it had read, not the one chosen afterwards
+            assert.equal(await readFile(path.join(stackDir, "compose.yaml"), "utf8"), "services:\n  app:\n    image: nginx:1.27\n");
+            assert.equal(await readFile(path.join(stackDir, "staging.yml"), "utf8"), composeYAML);
+        } finally {
+            await rm(stacksDir, { recursive: true,
+                force: true });
+        }
+    });
+});

@@ -12,6 +12,7 @@ import {
     doubleCheckPassword,
     ValidationError
 } from "../util-server";
+import checkVersion from "../check-version";
 import { Settings } from "../settings";
 import fs, { promises as fsAsync } from "fs";
 import path from "path";
@@ -96,7 +97,14 @@ export class MainSocketHandler extends SocketHandler {
                     msgi18n: true,
                 }, callback);
 
-                runInBackground("server info", () => server.sendInfo(socket));
+                // The check is asked for here rather than left to the interval, which is
+                // two days long: whoever just turned it on is looking at the screen now.
+                // Every open browser is told, because the setting belongs to the panel
+                // and not to the tab that changed it
+                runInBackground("server info", async () => {
+                    await checkVersion.check();
+                    await server.sendInfoToAll();
+                });
 
             } catch (e) {
                 callbackError(e, callback);

@@ -31,7 +31,7 @@
                 :to="filterLink(state)"
                 :class="[ `count-${state}`, { zero: counts[state] === 0, on: activeFilter === state } ]"
                 :aria-pressed="String(activeFilter === state)"
-                :title="$t('stabilityCountLink', { state: $t(`stabilityState_${state}`) })"
+                :title="$t(`stabilityCountLink_${state}`)"
             >
                 <strong>{{ counts[state] }}</strong> {{ $t(`stabilityState_${state}`) }}
             </router-link>
@@ -636,17 +636,18 @@ export default defineComponent({
 
 // Ноль не сообщает ничего, и полный цвет состояния на нем тянет взгляд туда,
 // где все в порядке: оранжевое "0 Требуют внимания" читалось как предупреждение.
-// Цвет остается - он же легенда полос истории ниже, - но приглушен: любая замена
-// на серый оказывалась в одной из тем заметнее живого "Остановлены"
-.counts > a.zero {
-    opacity: 0.5;
-}
+// Цвет остается - он же легенда полос истории ниже, - но теряет насыщенность.
+// Прозрачность для этого не годится: она гасит и текст, а ссылка работает и при
+// нуле, поэтому ее подпись обязана держать те же 4.5:1, что и остальные
+.counts > a.zero.count-running { color: var(--state-running-quiet); }
+.counts > a.zero.count-attention { color: var(--state-attention-quiet); }
+.counts > a.zero.count-stopped { color: var(--state-stopped-quiet); }
+.counts > a.zero.count-unknown { color: var(--state-unknown-quiet); }
 
 // Нажатый счет - это включенный фильтр списка слева, и нажать его еще раз
 // значит снять фильтр. Подложка говорит, что кнопка сейчас удерживается
 .counts > a.on {
     background: var(--accent-soft);
-    opacity: 1;
 }
 
 .count-running { color: var(--state-running); }

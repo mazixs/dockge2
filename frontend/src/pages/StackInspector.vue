@@ -361,6 +361,7 @@ import { summariseRegistries } from "../../../common/image-source";
 import { formatDuration, formatPercent } from "../format";
 import { stackSourceDiffers, stackSourceState } from "../../../common/stack-source";
 import { VERB_KEYS } from "../progress-labels";
+import { placeMenu } from "../menu-placement";
 import { isUpStatus, parseDockerDuration } from "../../../common/docker-time";
 
 /** Как часто спрашивать состояние сервисов, пока инспектор открыт */
@@ -1312,8 +1313,12 @@ export default {
         },
 
         /**
-         * Поставить раскрытое меню сервиса под его кнопкой и закрыть его при прокрутке:
-         * меню лежит вне потока, поэтому уехавшая страница оставила бы его висеть
+         * Поставить раскрытое меню сервиса у его кнопки и закрыть его при прокрутке страницы.
+         *
+         * Меню лежит вне потока, поэтому уехавшая страница оставила бы его висеть. По той
+         * же причине его нельзя доскроллить: у последней строки таблицы меню уходило за
+         * нижний край окна, и часть действий была недоступна вовсе. Сторона выбирается по
+         * свободному месту, а если его мало с обеих сторон - меню прокручивается внутри себя.
          * @param {Event} event Раскрытие или закрытие details
          * @returns {void}
          */
@@ -1327,11 +1332,40 @@ export default {
             }
 
             const rect = trigger.getBoundingClientRect();
-            const left = Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8);
-            menu.style.top = `${rect.bottom + 4}px`;
-            menu.style.left = `${Math.max(8, left)}px`;
 
-            const dismiss = () => details.removeAttribute("open");
+            // Высота известна только у раскрытого меню, и мерить ее надо без прошлого
+            // ограничения: иначе каждое следующее раскрытие было бы не выше предыдущего
+            menu.style.maxHeight = "";
+            menu.style.top = "0px";
+
+            const placement = placeMenu({ anchor: { top: rect.top,
+                bottom: rect.bottom,
+                right: rect.right },
+            width: MENU_WIDTH,
+            height: menu.offsetHeight,
+            viewport: { width: window.innerWidth,
+                height: window.innerHeight } });
+
+            menu.style.top = `${placement.top}px`;
+            menu.style.left = `${placement.left}px`;
+            menu.style.maxHeight = placement.maxHeight === null ? "" : `${placement.maxHeight}px`;
+
+            /**
+             * Убрать меню, когда страница уехала из-под него
+             * @param {Event} moved Прокрутка любой области страницы
+             * @returns {void}
+             */
+            const dismiss = (moved) => {
+                // Прокрутка внутри самого меню - это чтение его же пунктов, а не уехавшая
+                // страница: закрывать меню на ней значило бы отнимать нижние действия
+                if (moved?.type === "scroll" && moved.target instanceof Node && menu.contains(moved.target)) {
+                    window.addEventListener("scroll", dismiss, { capture: true,
+                        once: true });
+                    return;
+                }
+                details.removeAttribute("open");
+            };
+
             window.addEventListener("scroll", dismiss, { capture: true,
                 once: true });
             window.addEventListener("resize", dismiss, { once: true });
@@ -1965,7 +1999,7 @@ summary:focus-visible, .usage-toggle:focus-visible { outline: var(--focus-ring);
 /* Меню всплывает над страницей: раскрытие внутри ячейки раздвигало таблицу, а
    прокручиваемая область таблицы обрезала нижние пункты. Координаты ставит
    placeServiceMenu, поэтому положение не зависит от прокрутки таблицы */
-.service-menu > div { position: fixed; z-index: var(--layer-dock); display: flex; flex-direction: column; width: 190px; padding: var(--gap-xs); background: var(--surface-panel); border: 1px solid var(--line-hair); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); }
+.service-menu > div { position: fixed; z-index: var(--layer-dock); display: flex; flex-direction: column; width: 190px; overflow-y: auto; overscroll-behavior: contain; padding: var(--gap-xs); background: var(--surface-panel); border: 1px solid var(--line-hair); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); }
 .menu-action { display: flex; align-items: center; gap: var(--gap-sm); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); border: 0; border-radius: var(--radius-control); background: none; color: var(--text-strong); font-size: var(--text-sm); text-align: left; transition: background var(--motion-fast) var(--motion-ease); }
 .menu-action:hover:not(:disabled) { background: var(--surface-raised); }
 .menu-action:disabled { color: var(--text-faint); }

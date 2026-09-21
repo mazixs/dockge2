@@ -538,6 +538,9 @@ window.fetch = ((input : RequestInfo | URL, init? : RequestInit) => {
     return originalFetch(input as RequestInfo, init);
 }) as typeof window.fetch;
 
+/** Whether this shot wants the panel to have found a newer release */
+const updateScene = new URLSearchParams(window.location.search).get("update") === "available";
+
 function socketAnswer(event : string) : object {
     if (event === "getSettings") {
         return { ok: true,
@@ -601,7 +604,12 @@ const scene = createApp({
             // Версия берется из манифеста: вписанная руками она осталась на 1.5.0
             // и экран "О программе" показывал версию, которой у форка никогда не было
             info: { primaryHostname: "localhost",
-                version: pkg.version },
+                version: pkg.version,
+                // The panel's own update is news on one screen only, and the address
+                // says which shot wants it: handing it to every screen would put the
+                // badge in the header of every reference shot there is
+                latestVersion: updateScene ? "9.9.9" : pkg.version,
+                updateAvailable: updateScene },
             frontendVersion: pkg.version,
             isFrontendBackendVersionMatched: true,
             loggedIn: true,
@@ -662,92 +670,111 @@ const scene = createApp({
             terminals.delete(name);
             shellBuffers.delete(name);
         },
-        emitAgent(_endpoint : string, event : string, ...args : unknown[]) {
-            // Typing into the fake shell: the fixture echoes the keys and answers a few commands
-            if (event === "terminalInput") {
-                const terminalName = String(args[0]);
-                const terminal = terminals.get(terminalName);
-                const data = String(args[1]);
-                if (terminal) {
-                    let buffer = shellBuffers.get(terminalName) ?? "";
-                    for (const character of data) {
-                        if (character === "\r") {
-                            terminal.write(`\r\n${shellAnswer(buffer)}${shellPrompt(terminalName)}`);
-                            buffer = "";
-                        } else if (character === "") {
-                            if (buffer.length > 0) {
-                                buffer = buffer.slice(0, -1);
-                                terminal.write("\b \b");
-                            }
-                        } else {
-                            buffer += character;
-                            terminal.write(character);
-                        }
-                    }
-                    shellBuffers.set(terminalName, buffer);
-                }
+
+        /**
+         * Echo what was typed into the fake shell and answer the few commands it knows.
+         * @param {string} terminalName Terminal the keys were typed into
+         * @param {string} data Keys that were typed
+         * @returns {void}
+         */
+        typeIntoShell(terminalName : string, data : string) {
+            const terminal = terminals.get(terminalName);
+
+            if (!terminal) {
+                return;
             }
 
-            const callback = args.at(-1) as (result : unknown) => void;
-            if (typeof callback !== "function") {
-                return;
+            let buffer = shellBuffers.get(terminalName) ?? "";
+            for (const character of data) {
+                if (character === "\r") {
+                    terminal.write(`\r\n${shellAnswer(buffer)}${shellPrompt(terminalName)}`);
+                    buffer = "";
+                } else if (character === "") {
+                    if (buffer.length > 0) {
+                        buffer = buffer.slice(0, -1);
+                        terminal.write("\b \b");
+                    }
+                } else {
+                    buffer += character;
+                    terminal.write(character);
+                }
             }
-            const name = String(args[0]);
+            shellBuffers.set(terminalName, buffer);
+        },
+
+        /**
+         * Play the canned output of a stack or service command.
+         *
+         * Only the text is played; no container is touched.
+         * @param {string} event Command of the agent protocol
+         * @param {string} name Stack the command was sent to
+         * @param {Function} callback Acknowledgement of that command
+         * @returns {void}
+         */
+        playCommand(event : string, name : string, callback : (result : unknown) => void) {
+            // Only the canned text is written; no container is touched.
+            // uptime-kuma всегда падает: на нем видно красную панель и вывод,
+            // который раскрывается сам
+            const stopping = [ "stopStack", "downStack", "stopService" ].includes(event);
+            const failing = name === "uptime-kuma";
+            const frames = failing ? failFrames(name) : stopping ? stopFrames(name) : startFrames(name);
+            playProgress(getComposeTerminalName("", name), frames, failing ? failTail : [], () => callback(failing
+                ? { ok: false,
+                    msg: "Тестовая сцена: команда не выполнялась, ответ подделан" }
+                : { ok: true,
+                    msg: "Тестовая сцена: команда не выполнялась" }));
+        },
+
+        /**
+         * Answer one read of the fixture.
+         * @param {string} event Event of the agent protocol
+         * @param {string} name Stack the event was sent to
+         * @param {Array} args Arguments of that event
+         * @returns {unknown} What the fixture answers
+         */
+        agentAnswer(event : string, name : string, args : unknown[]) : unknown {
             const stack = stacks[`${name}_`] ?? stacks.paperless_;
-            if ([ "startStack", "stopStack", "restartStack", "updateStack", "downStack", "startService", "stopService", "restartService" ].includes(event)) {
-                // Only the canned text is written; no container is touched.
-                // uptime-kuma всегда падает: на нем видно красную панель и вывод,
-                // который раскрывается сам
-                const stopping = [ "stopStack", "downStack", "stopService" ].includes(event);
-                const failing = name === "uptime-kuma";
-                const frames = failing ? failFrames(name) : stopping ? stopFrames(name) : startFrames(name);
-                playProgress(getComposeTerminalName("", name), frames, failing ? failTail : [], () => callback(failing
-                    ? { ok: false,
-                        msg: "Тестовая сцена: команда не выполнялась, ответ подделан" }
-                    : { ok: true,
-                        msg: "Тестовая сцена: команда не выполнялась" }));
-                return;
-            }
+
             if (event === "getStack") {
-                callback({ ok: true,
+                return { ok: true,
                     stack: { ...stack,
                         composeYAML: compose,
-                        composeENV: envTexts[inventory.config.activeEnvFileName] ?? "" } });
+                        composeENV: envTexts[inventory.config.activeEnvFileName] ?? "" } };
             } else if (event === "serviceStatusList") {
-                callback({ ok: true,
+                return { ok: true,
                     // Имя контейнера настоящее: по нему строка сервиса находит
                     // свой шаг в выводе compose
                     serviceStatusList: Object.fromEntries([ "web", "broker", "db" ].map(service => [ service, [{ name: `${name}-${service}`,
-                        state: stack?.status === RUNNING ? "running" : "exited" }]])) });
+                        state: stack?.status === RUNNING ? "running" : "exited" }]])) };
             } else if (event === "stabilityOverview") {
-                callback({ ok: true,
+                return { ok: true,
                     overview: { ...stabilityOverview,
-                        windowHours: Number(args[0]) } });
+                        windowHours: Number(args[0]) } };
             } else if (event === "stackAvailability") {
-                callback({ ok: true,
+                return { ok: true,
                     availability: { verdict: "clean",
                         ratio: 1,
                         coveredMs: 86_400_000,
                         windowMs: 86_400_000,
-                        incidents: 0 } });
+                        incidents: 0 } };
             } else if (event === "gitPreviewUpdate") {
-                callback({ ok: true,
-                    preview });
+                return { ok: true,
+                    preview };
             } else if (event === "dockerStats") {
-                callback({ ok: true,
-                    dockerStats: {} });
+                return { ok: true,
+                    dockerStats: {} };
             } else if (event === "getStackFiles") {
                 // Копия, а не тот же объект: по настоящему сокету инвентарь приходит
                 // разобранным из JSON, и страница видит новую ссылку. Отдавая одну и ту
                 // же, заготовка молча гасила бы перерисовку после заведения файла
-                callback({ ok: true,
-                    inventory: structuredClone(inventory) });
+                return { ok: true,
+                    inventory: structuredClone(inventory) };
             } else if (event === "setStackFiles") {
                 // Выбор запоминается: иначе кнопка сохранения оставалась бы нажатой
                 // навсегда, а форма заведения файла - закрытой своей же защитой
                 inventory.config = structuredClone(args[1] as typeof inventory.config);
-                callback({ ok: true,
-                    msg: "Тестовая сцена: на диск ничего не писалось" });
+                return { ok: true,
+                    msg: "Тестовая сцена: на диск ничего не писалось" };
             } else if (event === "saveEnvFile") {
                 // Файл заводится только в заготовке: на диск сцена не пишет, но список
                 // обновляется, иначе новую строку в выборе файлов было бы не увидеть
@@ -756,15 +783,37 @@ const scene = createApp({
                 if (!inventory.envFileNames.includes(fileName)) {
                     inventory.envFileNames.push(fileName);
                 }
-                callback({ ok: true,
-                    msg: "Тестовая сцена: файл не создавался" });
+                return { ok: true,
+                    msg: "Тестовая сцена: файл не создавался" };
             } else if ([ "interactiveTerminal", "terminalLeave", "terminalInput", "mainTerminal", "joinCombinedTerminal", "leaveCombinedTerminal" ].includes(event)) {
                 // Accepted so the journal tab opens; nothing is executed
-                callback({ ok: true });
+                return { ok: true };
             } else {
-                callback({ ok: false,
-                    msg: "Visual fixture: operations are disabled" });
+                return { ok: false,
+                    msg: "Visual fixture: operations are disabled" };
             }
+        },
+
+        emitAgent(_endpoint : string, event : string, ...args : unknown[]) {
+            // Typing into the fake shell: the fixture echoes the keys and answers a few commands
+            if (event === "terminalInput") {
+                this.typeIntoShell(String(args[0]), String(args[1]));
+            }
+
+            const callback = args.at(-1) as (result : unknown) => void;
+            if (typeof callback !== "function") {
+                return;
+            }
+
+            const name = String(args[0]);
+
+            // A command answers when its output has finished playing, a read answers at once
+            if ([ "startStack", "stopStack", "restartStack", "updateStack", "downStack", "startService", "stopService", "restartService" ].includes(event)) {
+                this.playCommand(event, name, callback);
+                return;
+            }
+
+            callback(this.agentAnswer(event, name, args));
         },
 
         /**

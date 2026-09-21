@@ -78,6 +78,9 @@ const projectRules = {
     "no-control-regex": "off",
     "one-var": [ "error", "never" ],
     "max-statements-per-line": [ "error", { "max": 1 } ],
+    // A limit rather than a wish: branching past this is split into named phases,
+    // otherwise the order of writing, undoing and committing has to be held in one head
+    "complexity": [ "error", 20 ],
     "@typescript-eslint/ban-ts-comment": "error",
     "@typescript-eslint/no-unused-vars": [ "warn", {
         "args": "none",

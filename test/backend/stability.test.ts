@@ -134,3 +134,82 @@ test("the panel's own containers are not recorded", async () => {
         assert.equal(all.stacks.flatMap((s) => s.containers).length, 2);
     });
 });
+
+test("a stop that lands inside the Docker read reaches the database too", async (context) => {
+    await withDatabase(async () => {
+        let reached = () => {};
+        const reading = new Promise<void>((resolve) => {
+            reached = resolve;
+        });
+
+        let release = () => {};
+        const held = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+
+        // Docker is what takes the time, and this read is caught in the middle of it:
+        // the shutdown starts after the collector is already inside, which is where the
+        // signal of the round used to stop arriving
+        const collector = new StabilityCollector(async () => {
+            reached();
+            await held;
+            return [ container ];
+        });
+
+        const touched : string[] = [];
+        const realKnex = Database.getKnex.bind(Database);
+        context.mock.method(Database, "getKnex", () => {
+            touched.push("knex");
+            return realKnex();
+        });
+
+        const controller = new AbortController();
+        const observing = collector.observe(stacks, NOW, "", controller.signal);
+        await reading;
+        controller.abort();
+        release();
+        await observing;
+
+        // A failed write is swallowed by the collector, so counting the writes is the
+        // only honest measure: the warning "Cannot record a Docker runtime observation"
+        // is what this used to produce against a database that was already closed
+        assert.deepEqual(touched, [], "an abandoned observation reached the database anyway");
+
+        // The same observation without a signal writes, which is what makes the check
+        // above a statement about the abort and not about an empty sample
+        const writing = new StabilityCollector(async () => [ container ]);
+        await writing.observe(stacks, NOW, "");
+        assert.ok(touched.length > 0, "a normal observation has to record what it read");
+    });
+});
+
+test("a stop between two containers leaves the write rolled back, not half applied", async (context) => {
+    await withDatabase(async () => {
+        const second : ContainerRuntime = { ...container,
+            id: "b".repeat(64),
+            name: "demo-db-1",
+            service: "db" };
+
+        const controller = new AbortController();
+        const collector = new StabilityCollector(async () => [ container, second ]);
+        const knex = Database.getKnex();
+        const real = knex.transaction.bind(knex);
+
+        // The signal arrives once the transaction is open: the first container is written
+        // and the second is where the round is asked to give up
+        context.mock.method(knex, "transaction", (handler : (trx : unknown) => Promise<unknown>) => real(async (trx : unknown) => {
+            const answer = handler(trx);
+            controller.abort();
+            return answer;
+        }));
+
+        await collector.observe(stacks, NOW, "", controller.signal);
+
+        assert.equal((await Database.getKnex()("container_observation")).length, 0,
+            "a cancelled observation left rows behind");
+
+        // A cancelled round is not a Docker failure: what the panel knew it still knows
+        const result = await collector.read(24, NOW);
+        assert.equal(result.error, "noObservation");
+    });
+});

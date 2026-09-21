@@ -81,21 +81,30 @@ export async function recordStatus(stackName : string, endpoint : string, status
  * Record the statuses of a whole scan and prune old rows from time to time.
  * @param stacks Stack name, endpoint and status of every stack of this scan
  * @param now Current time, injectable for tests
+ * @param signal Abort of the round, checked before every write
  * @returns How many rows were written
  */
 export async function recordScan(
     stacks : readonly { name : string; endpoint : string; status : number }[],
     now = Date.now(),
+    signal? : AbortSignal,
 ) : Promise<number> {
     let written = 0;
 
     for (const stack of stacks) {
+        // Every stack is a separate write with a wait in front of it, so a shutdown can
+        // land between two of them. What is already written stays; the rest is dropped
+        // rather than carried into a database that is being released
+        if (signal?.aborted) {
+            return written;
+        }
+
         if (await recordStatus(stack.name, stack.endpoint, stack.status, now)) {
             written += 1;
         }
     }
 
-    if (now - lastPruneAt > PRUNE_EVERY_MS) {
+    if (!signal?.aborted && now - lastPruneAt > PRUNE_EVERY_MS) {
         lastPruneAt = now;
         await pruneOldObservations(now);
     }

@@ -616,22 +616,22 @@ export class DockgeServer {
             }
 
             // Run every 10 seconds
-            const observation = new ScheduledRounds("stack observation", "*/10 * * * * *", async () => {
+            const observation = new ScheduledRounds("stack observation", "*/10 * * * * *", async (signal) => {
                 // A round started during the shutdown would query a closing database
-                if (this.resources.stopping) {
+                if (signal.aborted || this.resources.stopping) {
                     return;
                 }
 
-                await this.observeStacks().catch((e) => log.error("observations", e));
+                await this.observeStacks(signal).catch((e) => log.error("observations", e));
 
                 // Every step asks again: the shutdown can begin while Docker is answering,
                 // and what follows is work nobody is waiting for any more
-                if (this.resources.stopping) {
+                if (signal.aborted || this.resources.stopping) {
                     return;
                 }
                 await this.sendStackList(true);
 
-                if (this.resources.stopping) {
+                if (signal.aborted || this.resources.stopping) {
                     return;
                 }
 
@@ -670,12 +670,23 @@ export class DockgeServer {
     async sendInfo(socket : Socket, hideVersion = false) {
         let versionProperty;
         let latestVersionProperty;
+        let updateAvailableProperty;
         let isContainer;
         let agentProtocolProperty;
 
         if (!hideVersion) {
             versionProperty = packageJSON.version;
-            latestVersionProperty = checkVersion.latestVersion;
+
+            // The switch decides what the panel may say about updates, and the release it
+            // found outlives the switch being turned off. Reading it here rather than on
+            // each screen is what keeps the account button, the menu and the About screen
+            // from telling three different stories about one setting
+            const noticeAllowed = await Settings.get("checkUpdate") === true;
+
+            latestVersionProperty = noticeAllowed ? checkVersion.latestVersion : undefined;
+            // Said separately from the version itself: the newest release is also the
+            // answer "you are up to date", and only the comparison tells them apart
+            updateAvailableProperty = noticeAllowed && checkVersion.updateAvailable;
             isContainer = (process.env.DOCKGE_IS_CONTAINER === "1");
             // Said alongside the version, not instead of it: a panel connecting to
             // this one as an agent decides on the protocol, while the version is
@@ -686,6 +697,7 @@ export class DockgeServer {
         socket.emit("info", {
             version: versionProperty,
             latestVersion: latestVersionProperty,
+            updateAvailable: updateAvailableProperty,
             agentProtocol: agentProtocolProperty,
             isContainer,
             primaryHostname: await Settings.get("primaryHostname"),
@@ -843,15 +855,30 @@ export class DockgeServer {
      * screen rather than how the stack ran.
      * @returns {void}
      */
-    async observeStacks() : Promise<void> {
+    async observeStacks(signal? : AbortSignal) : Promise<void> {
         const stackList = await Stack.getStackList(this, true);
+
+        // Reading Docker takes as long as Docker takes, and the shutdown can start in the
+        // middle of it. What comes back then belongs to a panel whose database is already
+        // being released, so the observation is dropped rather than written into a
+        // connection that is about to close
+        if (signal?.aborted) {
+            return;
+        }
 
         await recordScan([ ...stackList.values() ].map((stack) => ({
             name: stack.name,
             endpoint: "",
             status: stack.status,
-        })));
-        await observeContainerStability(stackList, await readOwnProjectName());
+        })), Date.now(), signal);
+
+        if (signal?.aborted) {
+            return;
+        }
+
+        // The signal goes on into the collector: Docker is read again there, and a stop
+        // landing inside that read used to come back to a database that was already closed
+        await observeContainerStability(stackList, await readOwnProjectName(), signal);
     }
 
     async sendStackList(useCache = false) {
@@ -994,6 +1021,23 @@ export class DockgeServer {
         }
 
         return report;
+    }
+
+    /**
+     * Tell every signed-in browser what the panel says about itself now.
+     *
+     * The update notice is one setting for the whole panel, so a second tab, another
+     * browser or another user must not keep showing news that was switched off here.
+     * @returns {Promise<void>}
+     */
+    async sendInfoToAll() : Promise<void> {
+        for (const rawSocket of this.io.sockets.sockets.values()) {
+            const socket = rawSocket as DockgeSocket;
+
+            if (socket.userID) {
+                await this.sendInfo(socket);
+            }
+        }
     }
 
     /**

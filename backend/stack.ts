@@ -48,6 +48,7 @@ import { composeArgs } from "./compose-args";
 import { readAvailability } from "./observations";
 import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
+import { withStackLock } from "./stack-lock";
 import { clearImageUpdateCache } from "./image-updates";
 import {
     type ComposeLsEntry, readComposeProjects, readInstanceMap, readOwnProjectName, readStatusList,
@@ -491,6 +492,25 @@ export class Stack {
     async save(isAdd : boolean, baseline? : StackFileBaseline) : Promise<StackFileBaseline> {
         this.validate();
 
+        const dir = this.path;
+
+        // The selection is read, checked against the baseline and written inside one
+        // lock. Held only around the file transaction, the check and the change were two
+        // operations: a selection changed in between was read as unchanged here and then
+        // written back by this save, losing a confirmed decision. `writeStackFiles` takes
+        // the same lock and passes straight through, because a lock already held by this
+        // operation is not taken twice
+        return withStackLock(dir, () => this.writeSaved(isAdd, baseline));
+    }
+
+    /**
+     * The body of a save, running with the stack directory locked
+     * @param isAdd Whether the stack directory has to be created
+     * @param baseline What the editor read before it started changing the files
+     * @returns Hashes of the saved files
+     * @throws {StackWriteConflictError} If a file no longer holds what the caller read
+     */
+    private async writeSaved(isAdd : boolean, baseline? : StackFileBaseline) : Promise<StackFileBaseline> {
         const dir = this.path;
 
         await this.prepareDirectory(isAdd);
@@ -1240,16 +1260,22 @@ export class Stack {
      */
     async setFileConfig(config : StackFileConfig) : Promise<StackFileConfig> {
         const dir = this.path;
-        const validated = await StackConfig.validate(dir, config);
 
-        await StackConfig.set(this.name, validated);
-        await this.loadFileConfig();
+        // The same lock a save takes: otherwise this change could land between the moment
+        // a save reads the selection and the moment it writes its own, and the save would
+        // put the old selection back over this one
+        return withStackLock(dir, async () => {
+            const validated = await StackConfig.validate(dir, config);
 
-        // Drop cached texts, the selected files may be different now
-        this._composeYAML = undefined;
-        this._composeENV = undefined;
+            await StackConfig.set(this.name, validated);
+            await this.loadFileConfig();
 
-        return validated;
+            // Drop cached texts, the selected files may be different now
+            this._composeYAML = undefined;
+            this._composeENV = undefined;
+
+            return validated;
+        });
     }
 
     /**

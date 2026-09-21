@@ -59,6 +59,14 @@ const screens : Screen[] = [
         path: "/settings/appearance",
         ready: ".settings-page .panel",
         phone: false },
+    { name: "settings-about",
+        path: "/settings/about",
+        ready: ".settings-page .panel",
+        phone: false },
+    { name: "settings-about-update",
+        path: "/settings/about?update=available",
+        ready: ".settings-page .update-news",
+        phone: false },
     { name: "login",
         path: "/login",
         ready: ".auth-screen",
@@ -97,3 +105,39 @@ for (const screen of screens) {
         });
     });
 }
+
+/**
+ * Имя редактора проверяется не снимком, а деревом доступности.
+ *
+ * Снимок не отличает поле с именем от поля без имени: на кадре оба выглядят
+ * одинаково, а читалка во втором случае объявляет два "текстовых поля" и не может
+ * сказать, где compose, а где env. Имя нужно с первого появления - ожидание в тесте
+ * скрыло бы ровно тот дефект, из-за которого оно появлялось с задержкой.
+ */
+test("редакторы называют свой файл с первого появления", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-light", "Доступное имя не зависит от темы и ширины окна");
+
+    const editors = () => page.$$eval(".cm-content", (nodes) => nodes.map((node) => ({
+        label: node.getAttribute("aria-label"),
+        role: node.getAttribute("role"),
+        editable: node.getAttribute("contenteditable"),
+    })));
+
+    await page.goto("/stack/paperless/files");
+    await page.waitForSelector(".cm-content", { state: "attached" });
+
+    const shown = await editors();
+    expect(shown).toHaveLength(2);
+    expect(shown[0]?.label).toContain("compose.yaml");
+    expect(shown[1]?.label).toContain(".env");
+    expect(shown[0]?.label).not.toEqual(shown[1]?.label);
+
+    // Переход к правке без единого ожидания: поле становится редактируемым, и имя
+    // обязано быть на нем уже в этот момент
+    await page.getByRole("button", { name: "Изменить" }).first().click();
+
+    const editing = await editors();
+    expect(editing.map((editor) => editor.editable)).toEqual([ "true", "true" ]);
+    expect(editing[0]?.label).toEqual(shown[0]?.label);
+    expect(editing[1]?.label).toEqual(shown[1]?.label);
+});

@@ -119,6 +119,11 @@ const STATE_TOKENS = [
     "--state-unknown",
     "--state-failed",
     "--state-changes",
+    // Приглушенное состояние остается текстом работающей ссылки, поэтому порог тот же
+    "--state-running-quiet",
+    "--state-attention-quiet",
+    "--state-stopped-quiet",
+    "--state-unknown-quiet",
 ];
 
 /** One threshold for both lists: a colour that carries words is read, not glanced at */
@@ -179,6 +184,30 @@ test("надпись на акцентной кнопке и граница ко
             borderRatio >= 3,
             `${theme.name}: граница контрола ${border} на фоне дает ${borderRatio.toFixed(2)}, нужно 3`,
         );
+    }
+});
+
+test("приглушенное состояние приглушено насыщенностью, а не прозрачностью", () => {
+    const dashboard = readFileSync(path.join(process.cwd(), "frontend/src/components/StabilityDashboard.vue"), "utf8");
+    const styles = styleBlocks("frontend/src/components/StabilityDashboard.vue", dashboard);
+
+    // Прозрачность гасит и текст: ссылка фильтра с нулем работает, поэтому ее
+    // подпись обязана держать порог, а не выглядеть отключенной
+    for (const [ index, line ] of styles.split("\n").entries()) {
+        if (line.trimStart().startsWith("//")) {
+            continue;
+        }
+        assert.equal(
+            /opacity:\s*0?\.[0-9]/.test(line),
+            false,
+            `счетчики гасятся прозрачностью в строке ${index + 1}: ${line.trim()}`,
+        );
+    }
+
+    // Каждое состояние получает собственный приглушенный цвет, иначе ноль одного
+    // состояния выглядел бы как живое значение другого
+    for (const state of [ "running", "attention", "stopped", "unknown" ]) {
+        assert.match(styles, new RegExp(`a\\.zero\\.count-${state}[^}]*var\\(--state-${state}-quiet\\)`));
     }
 });
 

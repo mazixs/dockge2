@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import type { DockgeServer } from "../../backend/dockge-server";
+import checkVersion from "../../backend/check-version";
 import { MainSocketHandler, stripGeneratedProjectName } from "../../backend/socket-handlers/main-socket-handler";
 import { Settings } from "../../backend/settings";
 import type { DockgeSocket } from "../../backend/util-server";
@@ -221,5 +222,78 @@ test("composerize отдает компоуз без служебного име
         assert.equal(template.includes("<your project name>"), false, template);
         assert.match(template, /services:/);
         assert.match(template, /# -P/);
+    });
+});
+
+test("turning the update check on answers on the screen that turned it on", { timeout: 30_000 }, async (context) => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+
+        const asked : string[] = [];
+        context.mock.method(globalThis, "fetch", async (url : unknown) => {
+            asked.push(String(url));
+            return { json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
+        });
+
+        let informed : () => void = () => undefined;
+        const infoSent = new Promise<void>((resolve) => {
+            informed = resolve;
+        });
+        // Every signed-in browser is told, not only the tab that saved the switch: the
+        // setting belongs to the panel, and a second tab must not keep the old answer
+        const server = Object.assign(createServer(stacksDir), { sendInfoToAll: () => {
+            informed();
+        } });
+
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, server);
+
+        const saved = await emitWithCallback(socket, "setSettings", { checkUpdate: true }, TEST_PASSWORD);
+        assert.equal(saved.ok, true);
+
+        // The interval that normally asks runs every 48 hours. Saving the switch and
+        // saying nothing until the next restart is what made this setting look broken,
+        // so the answer has to be fetched before the client is told about itself
+        await infoSent;
+
+        assert.deepEqual(asked.length, 1, "the registry was not asked before the client was informed");
+        assert.equal(checkVersion.latestVersion, "9999.0.0");
+        assert.equal(checkVersion.updateAvailable, true);
+
+        checkVersion.latestVersion = undefined;
+    });
+});
+
+test("saving the settings tells every open browser, not only the tab that changed them", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+
+        // The switch belongs to the panel and not to the tab that flipped it: without the
+        // broadcast the indicator and the menu item stayed until the panel was restarted
+        let broadcasts = 0;
+        const server = createServer(stacksDir) as DockgeServer & { sendInfoToAll : () => Promise<void> };
+        server.sendInfoToAll = async () => {
+            broadcasts += 1;
+        };
+
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, server);
+
+        await Settings.set("checkUpdate", true, "general");
+        checkVersion.latestVersion = "9999.0.0";
+
+        const saved = await emitWithCallback(socket, "setSettings", { checkUpdate: false }, TEST_PASSWORD);
+        assert.equal(saved.ok, true);
+
+        // The client is answered before the broadcast, so the sending is started in the
+        // background and the test waits for it instead of racing it
+        for (let attempt = 0; attempt < 100 && broadcasts === 0; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        assert.equal(broadcasts, 1, "the other sessions were never told about the change");
+        checkVersion.latestVersion = undefined;
     });
 });

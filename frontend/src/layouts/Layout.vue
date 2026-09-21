@@ -15,8 +15,11 @@
                 </span>
                 <ThemePicker v-if="!$root.appReady" compact />
                 <div v-if="$root.appReady" class="dropdown">
-                    <button class="profile-trigger" type="button" data-bs-toggle="dropdown" :aria-label="$t('accountMenu')" aria-expanded="false">
+                    <button class="profile-trigger" type="button" data-bs-toggle="dropdown" :aria-label="$root.info.updateAvailable ? $t('accountMenuWithUpdate') : $t('accountMenu')" aria-expanded="false">
                         <span class="profile-pic">{{ $root.usernameFirstChar }}</span>
+                        <!-- Told by the label above as well: a coloured dot on its own
+                             says nothing to a screen reader -->
+                        <span v-if="$root.info.updateAvailable" class="update-dot" aria-hidden="true"></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><span class="dropdown-item-text">{{ $root.username || $t("accountMenu") }}</span></li>
@@ -34,6 +37,11 @@
                             </button>
                         </li>
                         <li><hr class="dropdown-divider" /></li>
+                        <!-- Only ever here, and only when there is news: an update of the
+                             panel is not what the first screen is for -->
+                        <li v-if="$root.info.updateAvailable">
+                            <router-link to="/settings/about" class="dropdown-item update-item">{{ $t("newUpdate") }}: {{ $root.info.latestVersion }}</router-link>
+                        </li>
                         <li><router-link to="/settings/appearance" class="dropdown-item">{{ $t("Settings") }}</router-link></li>
                         <li v-if="$root.isAdmin"><router-link to="/settings/users" class="dropdown-item">{{ $t("familiarUsers") }}</router-link></li>
                         <li v-if="$root.isAdmin"><router-link to="/settings/agents" class="dropdown-item">{{ $t("dockgeAgent", 2) }}</router-link></li>
@@ -257,8 +265,13 @@ export default {
 .connection-state { font-size: var(--text-sm); color: var(--text-muted); display: flex; align-items: center; gap: var(--gap-sm); white-space: nowrap; }
 .connection-state i { background: var(--state-running); width: 6px; height: 6px; border-radius: 50%; }
 .connection-state.offline i { background: var(--state-failed); }
-.profile-trigger { background: transparent; border: none; padding: var(--gap-xs); min-width: 44px; min-height: 44px; }
+.profile-trigger { background: transparent; border: none; padding: var(--gap-xs); min-width: 44px; min-height: 44px; position: relative; }
 .profile-pic { width: 32px; height: 32px; display: grid; place-items: center; background: var(--surface-raised); color: var(--text-strong); border-radius: 50%; font-size: var(--text-xs); }
+/* A small dot beside the avatar. News about the version of the panel must not compete
+   with a stack that is in trouble, so there is no counter and no state colour here.
+   The ring is the colour of the header, so the dot reads as one shape on any theme */
+.update-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-text); border: 2px solid var(--surface-panel); }
+.update-item { font-weight: var(--weight-strong); }
 .connection-pending { padding: var(--gap-xl); color: var(--text-muted); }
 .lost-connection { background: var(--surface-panel); color: var(--state-failed); padding: var(--gap-md) var(--gap-xl); }
 @media (max-width: 800px) {

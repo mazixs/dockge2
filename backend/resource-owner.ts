@@ -128,7 +128,10 @@ export class ResourceOwner {
             }
 
             const left = timeoutMs - (Date.now() - startedAt);
-            const share = Math.max(MIN_RESOURCE_BUDGET_MS, Math.floor(left / (pending.length - index)));
+            // The minimum keeps a long list from starving its last entries, but it is not
+            // allowed to outlive the budget itself: a shutdown asked to take 100ms took
+            // 500 because one resource was given a floor larger than the whole budget
+            const share = Math.max(0, Math.min(left, Math.max(MIN_RESOURCE_BUDGET_MS, Math.floor(left / (pending.length - index)))));
             const outcome = await this.stopOne(entry, share);
 
             if (outcome.timedOut) {

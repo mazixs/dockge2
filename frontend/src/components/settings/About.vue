@@ -21,6 +21,22 @@
 
             <div class="field">
                 <span class="form-label">{{ $t("aboutUpdates") }}</span>
+
+                <!-- Four different answers that all used to look the same, which was
+                     like nothing at all: the check is off, no answer yet, this is the
+                     newest release, a newer one exists -->
+                <p v-if="notice === 'available'" class="alert alert-info update-news" role="status">
+                    <font-awesome-icon icon="arrow-alt-circle-up" />
+                    <span>{{ $t("newUpdate") }}: {{ $root.info.latestVersion }}</span>
+                </p>
+                <p v-else-if="notice !== 'off'" class="update-state">
+                    {{ notice === "current" ? $t("updateCurrent") : $t("updatePending") }}
+                </p>
+
+                <p v-if="notice === 'available'" class="update-how">
+                    {{ $t("updateHow") }} <code>./install.sh --update</code>
+                </p>
+
                 <label class="form-check">
                     <input v-model="settings.checkUpdate" class="form-check-input" type="checkbox" @change="saveSettings()" />
                     <span class="form-check-label">{{ $t("Show update if available") }}</span>
@@ -42,11 +58,19 @@
 <script>
 import BrandMark from "../BrandMark.vue";
 import InterfaceIcon from "../InterfaceIcon.vue";
+import { updateNotice } from "../../update-notice";
 
 export default {
     components: { BrandMark,
         InterfaceIcon },
     computed: {
+        /**
+         * What may be said about updates right now
+         * @returns {string} One of "off", "pending", "current", "available"
+         */
+        notice() {
+            return updateNotice(this.$root.info, this.settings.checkUpdate);
+        },
         settings() {
             return this.$parent.$parent.$parent.settings;
         },
@@ -111,5 +135,25 @@ export default {
 
 .alert {
     margin: 0;
+}
+
+// The news and the plain state sit in the same place, so the block does not jump
+// when the answer arrives
+.update-news {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+}
+
+.update-state,
+.update-how {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+    color: var(--text-faint);
+}
+
+.update-how code {
+    color: var(--text-strong);
 }
 </style>

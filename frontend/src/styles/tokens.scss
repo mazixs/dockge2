@@ -128,6 +128,14 @@
     // Git-правки - не авария контейнера, поэтому у них своя роль, а не --state-attention
     --state-changes: #8d5a12;
 
+    // Приглушенное состояние: тот же оттенок с меньшей насыщенностью и тем же
+    // порогом 4.5. Раньше ноль гасился прозрачностью всей ссылки, и активная
+    // ссылка фильтра давала около 2,1:1 - приглушают насыщенность, а не текст
+    --state-running-quiet: #3a5849;
+    --state-attention-quiet: #604f32;
+    --state-stopped-quiet: #61656a;
+    --state-unknown-quiet: #6b5e94;
+
     // --- служебное ---
     --shadow-panel: 0 1px 2px rgba(18, 26, 34, .06), 0 10px 28px rgba(18, 26, 34, .06);
     // Притемнение под слоем: цвет, а не backdrop-filter, потому что фильтр
@@ -181,6 +189,11 @@ body.dark {
     --state-unknown: #a78bfa;
     --state-failed: #e26a60;
     --state-changes: #edbf7b;
+
+    --state-running-quiet: #79a390;
+    --state-attention-quiet: #b09774;
+    --state-stopped-quiet: #8c9197;
+    --state-unknown-quiet: #b9afd6;
 
     --shadow-panel: 0 1px 2px rgba(0, 0, 0, .5), 0 14px 34px rgba(0, 0, 0, .35);
     --scrim: rgba(0, 0, 0, .62);

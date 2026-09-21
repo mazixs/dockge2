@@ -43,6 +43,26 @@ export const VERB_KEYS : Record<string, string> = {
     error: "progressVerbError",
 };
 
+/**
+ * Verb forms that depend on the kind of resource.
+ *
+ * "Created" is one word in English and three in a language that inflects: the panel
+ * writes a whole sentence - kind, name, verb - so the verb has to agree with the noun
+ * in front of it. Only the finished states need this; a resource that is still being
+ * created is described the same way whatever it is.
+ */
+export const VERB_KIND_KEYS : Record<string, Record<string, string>> = {
+    network: {
+        created: "progressVerbCreatedNetwork",
+        started: "progressVerbStartedNetwork",
+        stopped: "progressVerbStoppedNetwork",
+        removed: "progressVerbRemovedNetwork",
+        pulled: "progressVerbPulledNetwork",
+        built: "progressVerbBuiltNetwork",
+        skipped: "progressVerbSkippedNetwork",
+    },
+};
+
 export const KIND_KEYS : Record<string, string> = {
     container: "progressKindContainer",
     network: "progressKindNetwork",

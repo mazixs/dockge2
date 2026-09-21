@@ -293,6 +293,7 @@ import { parseDocument } from "yaml";
 
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import {
+    acceptedComposeFileNames,
     envsubstYAML,
     getComposeTerminalName,
     PROGRESS_TERMINAL_ROWS
@@ -424,22 +425,7 @@ export default {
             return null;
         };
 
-        const extensions = [
-            editorTheme,
-            yaml(),
-            lineNumbers(),
-            EditorView.focusChangeEffect.of(focusEffectHandler)
-        ];
-
-        const extensionsEnv = [
-            editorTheme,
-            python(),
-            lineNumbers(),
-            EditorView.focusChangeEffect.of(focusEffectHandler)
-        ];
-
-        return { extensions,
-            extensionsEnv,
+        return { focusEffectHandler,
             editorFocus };
     },
     data() {
@@ -582,6 +568,60 @@ export default {
          */
         activeEnvFileName() {
             return this.fileInventory?.config?.activeEnvFileName || ".env";
+        },
+
+        /**
+         * Name of the compose editor, spoken instead of "text box".
+         *
+         * The file is what tells the two editors apart, so it is the name. Until the
+         * stack is read the panel says the name it would create, the same way the env
+         * editor falls back to `.env`: an unnamed box is worse than a name one keystroke
+         * ahead of the answer.
+         * @returns {string} Accessible name
+         */
+        composeEditorLabel() {
+            return this.$t("fileEditorLabel", { file: this.stack.composeFileName || acceptedComposeFileNames[0] });
+        },
+
+        /**
+         * Name of the env editor, spoken instead of "text box"
+         * @returns {string} Accessible name
+         */
+        envEditorLabel() {
+            return this.$t("fileEditorLabel", { file: this.activeEnvFileName });
+        },
+
+        /**
+         * Configuration of the compose editor.
+         *
+         * The name is part of it rather than an attribute put on afterwards: CodeMirror
+         * owns the editable element and rebuilds it, so a name written from outside
+         * arrives late and disappears on the next render. Changing this list reconfigures
+         * the editor, which is what carries a new file name into the accessibility tree.
+         * @returns {import("@codemirror/state").Extension[]} Editor extensions
+         */
+        extensions() {
+            return [
+                editorTheme,
+                yaml(),
+                lineNumbers(),
+                EditorView.focusChangeEffect.of(this.focusEffectHandler),
+                EditorView.contentAttributes.of({ "aria-label": this.composeEditorLabel })
+            ];
+        },
+
+        /**
+         * Configuration of the env editor, named after the file it shows
+         * @returns {import("@codemirror/state").Extension[]} Editor extensions
+         */
+        extensionsEnv() {
+            return [
+                editorTheme,
+                python(),
+                lineNumbers(),
+                EditorView.focusChangeEffect.of(this.focusEffectHandler),
+                EditorView.contentAttributes.of({ "aria-label": this.envEditorLabel })
+            ];
         },
 
         /**
