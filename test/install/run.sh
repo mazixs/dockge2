@@ -304,6 +304,40 @@ scenario_diverged_branch_stops() {
     expect_eq "$CODE" 1 "exit code"
     expect_grep "cannot be fast-forwarded" "$OUT" "names the reason"
     expect_no_grep "compose -f docker-compose.yml build" "$STUB_LOG" "no build"
+    # A dead end with no way out of it is what made this case a support request:
+    # the way to look at both sides, the way to take origin, and the way to
+    # update nothing but the image all belong in the message
+    expect_grep "log --oneline --left-right HEAD...origin/main" "$OUT" "how to see both sides"
+    expect_grep "diff --stat HEAD origin/main" "$OUT" "how to see whether files differ"
+    expect_grep "reset --hard origin/main" "$OUT" "how to take origin when only the history differs"
+    expect_grep "backup-" "$OUT" "a copy of the data first"
+    expect_grep "[-][-]image-only" "$OUT" "the way that needs no Git at all"
+}
+
+scenario_image_only_leaves_the_checkout_alone() {
+    # The panel runs from an image; the checkout only holds the compose file.
+    # So a broken Git half must not stop an update of the image
+    fresh "$WORK/s19"
+    git -C "$WORK/s19" reset -q --hard "$OLD_COMMIT"
+    STUB_PULL_OK=1 run "$WORK/s19/install.sh" --image-only --yes
+    expect_eq "$CODE" 0 "exit code"
+    expect_eq "$(git -C "$WORK/s19" rev-parse --short HEAD)" "$OLD_COMMIT" "HEAD not moved"
+    expect_grep "updates the image and nothing else" "$OUT" "says what it did not do"
+    expect_no_grep "Now at" "$OUT" "claims no fast-forward"
+    expect_grep "Dockge2 is running" "$OUT" "the panel is up"
+    expect_grep "compose -f docker-compose.yml up -d" "$STUB_LOG" "restarted"
+}
+
+scenario_image_only_works_on_a_detached_head() {
+    # Where --update stops on purpose, --image-only is the way through: after a
+    # rollback the checkout stands on a commit, and that is not a reason to be
+    # stuck with the image of that rollback
+    fresh "$WORK/s20"
+    git -C "$WORK/s20" checkout -q "$OLD_COMMIT"
+    STUB_PULL_OK=1 run "$WORK/s20/install.sh" --image-only --yes
+    expect_eq "$CODE" 0 "exit code"
+    expect_eq "$(git -C "$WORK/s20" rev-parse --short HEAD)" "$OLD_COMMIT" "still on that commit"
+    expect_no_grep "checked out at a commit" "$OUT" "does not stop"
 }
 
 scenario_detached_head_stops() {

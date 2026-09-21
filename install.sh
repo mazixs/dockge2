@@ -12,6 +12,7 @@
 #   ./install.sh --yes                 take every default, ask nothing
 #   ./install.sh --port 8080 --stacks-dir /srv/stacks --yes
 #   ./install.sh --update              rebuild the installation this script lives in
+#   ./install.sh --image-only          refresh the image only, leave the checkout alone
 #
 set -euo pipefail
 
@@ -32,6 +33,7 @@ DATA_DIR=""
 PORT=""
 ASSUME_YES=0
 DO_UPDATE=0
+IMAGE_ONLY=0
 INTERACTIVE=0
 SUDO=""
 FSUDO=""
@@ -69,6 +71,7 @@ Dockge2 installer.
   ./install.sh --yes                 take every default, ask nothing
   ./install.sh --port 8080 --stacks-dir /srv/stacks --yes
   ./install.sh --update              rebuild the installation this script lives in
+  ./install.sh --image-only          refresh the image only, leave the checkout alone
 
   --dir PATH          where this repository is checked out (default /opt/dockge2)
   --stacks-dir PATH   where your stacks live, absolute path only (default /opt/stacks)
@@ -78,6 +81,9 @@ Dockge2 installer.
   --image REF         use this published image instead of looking for one
   --build             build from the sources, do not look for a published image
   --update            rebuild an existing installation
+  --image-only        update without touching Git: keep the checkout as it is, get the
+                      image and restart. The way out when the checkout cannot be
+                      fast-forwarded, or when this host cannot reach GitHub at all
   -y, --yes           take the defaults and ask nothing
   -h, --help          this text
 
@@ -107,6 +113,7 @@ while [ $# -gt 0 ]; do
         --image) need_value "$1" "${2:-}"; IMAGE_REF="$2"; shift 2 ;;
         --build) BUILD_FROM_SOURCE=1; shift ;;
         --update) DO_UPDATE=1; shift ;;
+        --image-only) DO_UPDATE=1; IMAGE_ONLY=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage ;;
         *) die "Unknown option: $1 (try --help)" ;;
@@ -499,40 +506,68 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     $FSUDO git -C "$INSTALL_DIR" rev-parse --git-dir >/dev/null 2>&1 \
         || die "git will not read $INSTALL_DIR (it is probably owned by another user). Allow it with: ${FSUDO:+$FSUDO }git config --global --add safe.directory $INSTALL_DIR"
 
-    # A checkout standing on a commit rather than a branch is what the rollback
-    # hint leaves behind. Fast-forwarding it would move HEAD and print a branch
-    # name that is not true, so the user is asked to step back onto the branch first
-    CURRENT_REF="$($FSUDO git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-    if [ "$CURRENT_REF" = "HEAD" ] || [ -z "$CURRENT_REF" ]; then
-        die "$INSTALL_DIR is checked out at a commit, not a branch (after a rollback, probably). Return to the branch with: ${FSUDO:+$FSUDO }git -C $INSTALL_DIR checkout ${BRANCH:-$DEFAULT_BRANCH} - then run this again. Nothing was changed."
-    fi
-    if [ "$BRANCH_SET" = "0" ]; then
-        BRANCH="$CURRENT_REF"
-    fi
-
-    # An unfinished local edit is somebody's work, and a rebuild is not a reason
-    # to lose it. The installer never resets, stashes or overwrites it. Untracked
-    # files are nobody's business here: .env is one of them
-    if [ -n "$($FSUDO git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-        warn "There are uncommitted changes in $INSTALL_DIR:"
-        $FSUDO git -C "$INSTALL_DIR" status --short >&2
-        info "They are left exactly as they are; the update below can only fast-forward."
-        confirm "Continue?" || die "Nothing was changed."
-    fi
-
     ROLLBACK_COMMIT="$($FSUDO git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-    info "Fetching origin/$BRANCH."
-    $FSUDO git -C "$INSTALL_DIR" fetch --prune origin \
-        || die "Could not reach $REPO_URL. Check the network and run this again; nothing was changed."
-    if ! $FSUDO git -C "$INSTALL_DIR" merge --ff-only "origin/$BRANCH" 2>/dev/null; then
-        die "$INSTALL_DIR cannot be fast-forwarded to origin/$BRANCH: it has local commits, or it is on a branch that has diverged. Resolve it by hand (git -C $INSTALL_DIR status) and run this again. Nothing was changed."
+
+    # --image-only exists for the day the Git half of an update cannot work:
+    # the history was rewritten, the branch diverged, the host cannot reach
+    # GitHub, or the checkout stands on a commit after a rollback. The image and
+    # the compose configuration are enough to run the panel, so that half is done
+    # on its own and the checkout is left exactly as it is
+    if [ "$IMAGE_ONLY" = "1" ]; then
+        info "Leaving the checkout at ${ROLLBACK_COMMIT:-its current commit}: --image-only updates the image and nothing else."
+        info "The compose file and .env are read from here, so a checkout far behind the image can disagree with it."
+    else
+        # A checkout standing on a commit rather than a branch is what the rollback
+        # hint leaves behind. Fast-forwarding it would move HEAD and print a branch
+        # name that is not true, so the user is asked to step back onto the branch first
+        CURRENT_REF="$($FSUDO git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        if [ "$CURRENT_REF" = "HEAD" ] || [ -z "$CURRENT_REF" ]; then
+            die "$INSTALL_DIR is checked out at a commit, not a branch (after a rollback, probably). Return to the branch with: ${FSUDO:+$FSUDO }git -C $INSTALL_DIR checkout ${BRANCH:-$DEFAULT_BRANCH} - then run this again. Nothing was changed."
+        fi
+        if [ "$BRANCH_SET" = "0" ]; then
+            BRANCH="$CURRENT_REF"
+        fi
+
+        # An unfinished local edit is somebody's work, and a rebuild is not a reason
+        # to lose it. The installer never resets, stashes or overwrites it. Untracked
+        # files are nobody's business here: .env is one of them
+        if [ -n "$($FSUDO git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+            warn "There are uncommitted changes in $INSTALL_DIR:"
+            $FSUDO git -C "$INSTALL_DIR" status --short >&2
+            info "They are left exactly as they are; the update below can only fast-forward."
+            confirm "Continue?" || die "Nothing was changed."
+        fi
+
+        info "Fetching origin/$BRANCH."
+        $FSUDO git -C "$INSTALL_DIR" fetch --prune origin \
+            || die "Could not reach $REPO_URL. Check the network and run this again; nothing was changed. To update the image alone from what is already here: $INSTALL_DIR/install.sh --image-only"
+        if ! $FSUDO git -C "$INSTALL_DIR" merge --ff-only "origin/$BRANCH" 2>/dev/null; then
+            warn "$INSTALL_DIR cannot be fast-forwarded to origin/$BRANCH."
+            info "It has commits of its own, or the branch it follows was rewritten. Nothing was changed."
+            info ""
+            info "What the two sides look like:"
+            info "    ${FSUDO:+$FSUDO }git -C $INSTALL_DIR log --oneline --left-right HEAD...origin/$BRANCH"
+            info "Whether the files themselves differ at all:"
+            info "    ${FSUDO:+$FSUDO }git -C $INSTALL_DIR diff --stat HEAD origin/$BRANCH"
+            info ""
+            info "Commits of your own are yours to keep - rebase or merge them by hand."
+            info "When the files match and only the history is different, take origin/$BRANCH as it is:"
+            info "    ${FSUDO:+$FSUDO }cp -a $DATA_DIR $DATA_DIR.backup-\$(date +%Y%m%d)"
+            info "    ${FSUDO:+$FSUDO }git -C $INSTALL_DIR branch before-update-\$(date +%Y%m%d) HEAD"
+            info "    ${FSUDO:+$FSUDO }git -C $INSTALL_DIR reset --hard origin/$BRANCH"
+            info "    $INSTALL_DIR/install.sh --update"
+            info ""
+            info "Or leave the checkout alone and update the image only:"
+            info "    $INSTALL_DIR/install.sh --image-only"
+            die "Nothing was changed."
+        fi
+        info "Now at $($FSUDO git -C "$INSTALL_DIR" rev-parse --short HEAD) on $BRANCH."
     fi
-    info "Now at $($FSUDO git -C "$INSTALL_DIR" rev-parse --short HEAD) on $BRANCH."
 else
     # --update on something that was never installed would quietly become a
     # second installation, on the same port as the first one
     if [ "$DO_UPDATE" = "1" ]; then
-        die "--update was asked for, but $INSTALL_DIR is not a dockge2 checkout. Run the installer from the directory of your installation, name it with --dir, or drop --update to install a new one."
+        die "An update was asked for, but $INSTALL_DIR is not a dockge2 checkout. Run the installer from the directory of your installation, name it with --dir, or drop --update to install a new one."
     fi
     [ "$BRANCH_SET" = "1" ] || BRANCH="$DEFAULT_BRANCH"
     if [ -e "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then

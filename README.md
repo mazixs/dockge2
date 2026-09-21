@@ -273,10 +273,93 @@ cd /opt/dockge2
 `--update` works on the checkout the script itself lives in, so an installation made with `--dir`
 updates from its own directory without naming it again.
 
+### By hand, without the installer
+
+An update is three things: the checkout catches up, the image is replaced, the container is
+recreated. Nothing else happens, so the same update is four commands with `git` and `docker`
+alone - no `npm`, which a server running the published image does not have:
+
+```bash
+cd /opt/dockge2
+git pull --ff-only origin main                                  # the checkout
+docker compose -f docker-compose.yml pull                       # the image named in .env
+docker compose -f docker-compose.yml up -d --wait --wait-timeout 180
+docker compose -f docker-compose.yml ps                         # healthy is the answer to look for
+```
+
+Built here rather than downloaded (`DOCKGE_IMAGE=dockge2:latest` in `.env`), the middle two become
+`docker compose -f docker-compose.yml up -d --build --wait --wait-timeout 180`. The health check
+starts 60 seconds after the container does, so anything shorter than a minute reports a panel that
+is merely still starting.
+
+Take a copy of the data directory first when the release notes mention a migration:
+
+```bash
+cd /opt/dockge2
+docker compose -f docker-compose.yml stop
+tar czf ~/dockge2-data-$(date +%Y%m%d).tar.gz data
+```
+
+<details>
+<summary><b>When the checkout cannot be fast-forwarded</b></summary>
+
+`git pull --ff-only` refuses when the checkout has commits of its own, or when the branch it
+follows was rewritten upstream. The installer stops there as well, and says the same as this:
+
+```bash
+cd /opt/dockge2
+git fetch --prune origin
+git log --oneline --left-right HEAD...origin/main   # what each side has
+git diff --stat HEAD origin/main                    # whether the files differ at all
+```
+
+Commits of your own are yours to keep: rebase or merge them. When the files match and only the
+history is different, take the branch as it is - after a copy of the data and a name for the
+commit you are leaving, so that going back needs nothing but that name:
+
+```bash
+cp -a data data.backup-$(date +%Y%m%d)
+git branch before-update-$(date +%Y%m%d) HEAD
+git reset --hard origin/main
+./install.sh --update
+```
+
+`reset --hard` throws away uncommitted changes to files that are in the repository; `.env`, `data`
+and your stacks are not in it and are not touched.
+
+</details>
+
+<details>
+<summary><b>When Git cannot be used at all</b></summary>
+
+The panel runs from an image, and the checkout only holds the compose file and `.env`. So the
+image can be updated on its own - when the host cannot reach GitHub, when the checkout stands on a
+commit after a rollback, or while a diverged branch is waiting to be sorted out:
+
+```bash
+cd /opt/dockge2
+./install.sh --image-only          # pull the image, recreate the container, leave Git alone
+```
+
+Or without the installer:
+
+```bash
+cd /opt/dockge2
+docker compose -f docker-compose.yml pull
+docker compose -f docker-compose.yml up -d --wait --wait-timeout 180
+```
+
+The compose file and `.env` are then the ones of the old checkout. That is fine across a patch
+release and is not a promise across a larger one: if the panel does not come up healthy, the
+rollback below puts the previous image back.
+
+</details>
+
 <details>
 <summary><b>The same thing as a bundled command</b></summary>
 
-`npm run update-docker` runs the same sequence and prints what it will do first. It is fixed and
+`npm run update-docker` runs the same sequence and prints what it will do first. It needs `npm` on
+the host, which an installation running the published image has no other use for. It is fixed and
 non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then either
 `docker compose pull` and `docker compose up -d --wait --wait-timeout 180`, or
 `docker compose up -d --build --wait --wait-timeout 180`. The health check starts after 60 seconds
