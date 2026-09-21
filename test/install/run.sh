@@ -323,6 +323,7 @@ scenario_image_only_leaves_the_checkout_alone() {
     expect_eq "$CODE" 0 "exit code"
     expect_eq "$(git -C "$WORK/s19" rev-parse --short HEAD)" "$OLD_COMMIT" "HEAD not moved"
     expect_grep "updates the image and nothing else" "$OUT" "says what it did not do"
+    expect_no_grep "Updating the checkout" "$OUT" "does not claim to update the checkout"
     expect_no_grep "Now at" "$OUT" "claims no fast-forward"
     expect_grep "Dockge2 is running" "$OUT" "the panel is up"
     expect_grep "compose -f docker-compose.yml up -d" "$STUB_LOG" "restarted"

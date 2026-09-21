@@ -293,7 +293,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
 if [ "$DIR_SET" = "0" ]; then
     if [ -d "$SCRIPT_DIR/.git" ] && [ -f "$SCRIPT_DIR/docker-compose.yml" ] && [ -f "$SCRIPT_DIR/docker/Dockerfile" ]; then
         INSTALL_DIR="$SCRIPT_DIR"
-        [ "$DO_UPDATE" = "1" ] && info "Updating the checkout this script lives in: $INSTALL_DIR"
+        if [ "$IMAGE_ONLY" = "1" ]; then
+            info "Updating the installation this script lives in: $INSTALL_DIR"
+        elif [ "$DO_UPDATE" = "1" ]; then
+            info "Updating the checkout this script lives in: $INSTALL_DIR"
+        fi
     else
         INSTALL_DIR="$DEFAULT_INSTALL_DIR"
     fi
