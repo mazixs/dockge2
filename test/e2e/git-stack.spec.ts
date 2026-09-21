@@ -115,7 +115,7 @@ test.describe.serial("стек из Git", () => {
 
         // Последний экран честно предупреждает, что отличие от Git никуда не денется
         const review = page.locator(".review-card");
-        await expect(review).toContainText(/останутся отличиями|remain different from git/i);
+        await expect(review).toContainText(/по-прежнему отличаться|still differ from the versions in git/i);
         await review.getByRole("button", { name: /сохранить без запуска|save without starting/i }).click();
         await expect(page.locator(".result-card")).toContainText(/изменения сохранены|changes saved/i, { timeout: 60_000 });
 

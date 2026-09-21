@@ -104,7 +104,7 @@ test.describe("доступность", () => {
 
         // Месяц наблюдался не целиком, и это сказано прямо, а не спрятано
         await page.getByRole("button", { name: /^30 (d|д)$/ }).click();
-        await expect(section.locator(".note")).toHaveText(/observed|наблюдалось/i);
+        await expect(section.locator(".note")).toHaveText(/data collected|данные собраны/i);
         await expect(page.getByRole("button", { name: /^30 (d|д)$/ })).toHaveAttribute("aria-pressed", "true");
     });
 });
