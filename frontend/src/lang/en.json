@@ -630,7 +630,7 @@
     "stackNameTooLong": "The stack name is too long. Up to {max} characters.",
     "stackNameTooLongHint": "Up to {max} characters.",
     "gitUiComposeFile": "Compose file",
-    "gitUiComposeFileHelp": "A file at the repository root, such as compose.yaml or docker-compose.yml.",
+    "gitUiComposeFileHelp": "Leave empty to detect compose.yaml, compose.yml, docker-compose.yaml or docker-compose.yml at the repository root, or enter a file name.",
     "gitUiCloneValidation": "After confirmation, the repository is cloned to the server and Compose is validated. Save without starting to configure the environment in the stack files first.",
     "gitUiCloning": "Cloning the repository and validating Compose. Please wait for the result.",
     "gitUiCreatedDeployed": "{0} deployed",
@@ -794,5 +794,8 @@
     "progressVerbRemovedNetwork": "removed",
     "progressVerbPulledNetwork": "pulled",
     "progressVerbBuiltNetwork": "built",
-    "progressVerbSkippedNetwork": "skipped"
+    "progressVerbSkippedNetwork": "skipped",
+    "createEnvHelp": "Optional variables for Compose and services. Saved as .env before validation and deployment.",
+    "gitUiComposeAutomatic": "Automatic detection",
+    "gitComposeFileNotFound": "No standard Compose file found at the repository root. Enter its file name explicitly."
 }

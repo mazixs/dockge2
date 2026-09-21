@@ -97,6 +97,12 @@
                 </div>
 
                 <div class="part">
+                    <label class="part-title" for="create-stack-env">.env</label>
+                    <span id="create-stack-env-help" class="sub">{{ $t("createEnvHelp") }}</span>
+                    <textarea id="create-stack-env" v-model="composeENV" :disabled="saving" aria-describedby="create-stack-env-help" spellcheck="false" autocomplete="off" rows="5" placeholder="VARIABLE=value"></textarea>
+                </div>
+
+                <div class="part">
                     <span class="part-title">{{ $t("whereToDeploy") }}</span>
                     <div class="where">
                         <label class="field">
@@ -124,13 +130,7 @@
             <!-- Развертывание: тот же слой, список контейнеров и время. Команду
                  видно, пока она идет, и ее можно прервать: раньше кнопка обрыва
                  была только в коде -->
-            <div v-else class="progress">
-                <div class="progress-head">
-                    <span class="pulse" aria-hidden="true"></span>
-                    <span class="progress-title">{{ $t("deployRunning", [ elapsed ]) }}</span>
-                    <span class="spacer"></span>
-                    <button class="btn btn-quiet btn-sm" type="button" @click="abort">{{ $t("abortRunning") }}</button>
-                </div>
+            <div v-else class="deployment-progress">
                 <div v-for="service in progressServices" :key="service" class="prow">
                     <span v-ellipsis-title class="name">{{ service }}</span>
                     <span class="sub">{{ $t("deployWaiting") }}</span>
@@ -205,6 +205,7 @@ export default {
              */
             opener: null,
             source: "",
+            composeENV: this.$root.envTemplate || ENV_DEFAULT,
             /** Исходная команда, чтобы ее можно было вернуть: правка поля ломает отмену браузера */
             originalCommand: "",
             converted: false,
@@ -610,16 +611,12 @@ export default {
                 this.startClock();
             }
 
-            // Пустой .env создается сразу: его почти всегда правят следующим шагом,
-            // и пусть он лежит с подсказкой, а не появляется из ниоткуда потом
-            const composeENV = this.$root.envTemplate || ENV_DEFAULT;
-
             // A new stack states that neither file exists yet: a directory that appeared
             // in the meantime is reported instead of being written into
             const baseline = { compose: null,
                 env: null };
 
-            this.$root.emitAgentRequest(this.endpoint, event, [ name, this.source, composeENV, true, baseline ], { timeoutMs: CREATE_REQUEST_TIMEOUT_MS }).then((res) => {
+            this.$root.emitAgentRequest(this.endpoint, event, [ name, this.source, this.composeENV, true, baseline ], { timeoutMs: CREATE_REQUEST_TIMEOUT_MS }).then((res) => {
                 if (attempt !== this.attempt) {
                     return;
                 }
@@ -689,6 +686,7 @@ export default {
          */
         reset() {
             this.source = "";
+            this.composeENV = this.$root.envTemplate || ENV_DEFAULT;
             this.originalCommand = "";
             this.converted = false;
             this.report = null;
@@ -858,6 +856,10 @@ textarea {
     padding: var(--gap-sm) var(--gap-md);
     resize: vertical;
 
+    &#create-stack-env {
+        min-height: 110px;
+    }
+
     &.joined {
         border-radius: 0 0 var(--radius-control) var(--radius-control);
     }
@@ -987,7 +989,8 @@ textarea {
     display: flex;
     flex-direction: column;
     gap: var(--gap-xs);
-    min-width: 190px;
+    min-width: 0;
+    flex: 1 1 190px;
 
     > span {
         color: var(--text-muted);
@@ -1012,7 +1015,7 @@ textarea {
     }
 }
 
-.progress {
+.deployment-progress {
     padding: var(--gap-md) var(--gap-lg);
     display: flex;
     flex-direction: column;
@@ -1042,37 +1045,6 @@ textarea {
     }
 }
 
-// Шапка развертывания: что идет, сколько уже идет и чем это прервать
-.progress-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--gap-sm);
-    padding-bottom: var(--gap-sm);
-    border-bottom: 1px solid var(--line-hair);
-    font-size: var(--text-sm);
-}
-
-.progress-title {
-    color: var(--text-strong);
-}
-
-.pulse {
-    width: var(--gap-sm);
-    height: var(--gap-sm);
-    flex: none;
-    border-radius: 50%;
-    background-color: var(--state-attention);
-    animation: pulse-fade 1.2s var(--motion-ease) infinite;
-}
-
-@keyframes pulse-fade {
-    50% { opacity: .3; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .pulse { animation: none; }
-}
 
 footer {
     display: flex;

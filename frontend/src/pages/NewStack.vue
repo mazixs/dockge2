@@ -83,7 +83,7 @@
 
                     <div class="field">
                         <label for="git-compose-file" class="form-label">{{ $t("gitUiComposeFile") }}</label>
-                        <input id="git-compose-file" v-model="composeFile" :disabled="busy" type="text" class="form-control" placeholder="compose.yaml" autocomplete="off" spellcheck="false" required>
+                        <input id="git-compose-file" v-model="composeFile" :disabled="busy" type="text" class="form-control" :placeholder="$t('gitUiComposeAutomatic')" autocomplete="off" spellcheck="false">
                         <p class="form-text">{{ $t("gitUiComposeFileHelp") }}</p>
                     </div>
 
@@ -147,7 +147,7 @@ export default {
             // Whether the name is the user's own. A suggested name follows the address;
             // one that was typed is kept, because only its author knows what it is for
             nameChosen: false,
-            composeFile: "compose.yaml",
+            composeFile: "",
             busy: false,
             uncertain: false,
             composeBusy: false,
@@ -168,8 +168,7 @@ export default {
         canCreate() {
             const name = this.name.trim();
             return this.$root.canManageStacks && !this.busy && !this.uncertain && this.sourceReady
-                && /^[a-z0-9][a-z0-9_-]*$/.test(name) && name.length <= this.maxNameLength
-                && Boolean(this.composeFile.trim());
+                && /^[a-z0-9][a-z0-9_-]*$/.test(name) && name.length <= this.maxNameLength;
         },
         maxNameLength() {
             return MAX_STACK_NAME_LENGTH;

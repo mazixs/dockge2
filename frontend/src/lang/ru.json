@@ -630,7 +630,7 @@
     "stackNameTooLong": "Имя стека слишком длинное. До {max} символов.",
     "stackNameTooLongHint": "До {max} символов.",
     "gitUiComposeFile": "Compose-файл",
-    "gitUiComposeFileHelp": "Имя файла в корне репозитория, например compose.yaml или docker-compose.yml.",
+    "gitUiComposeFileHelp": "Оставьте пустым для поиска compose.yaml, compose.yml, docker-compose.yaml или docker-compose.yml в корне репозитория либо укажите имя файла.",
     "gitUiCloneValidation": "После подтверждения репозиторий будет скопирован на сервер, а Compose проверен. При сохранении без запуска можно сначала настроить окружение в файлах стека.",
     "gitUiCloning": "Копируем репозиторий и проверяем Compose. Дождитесь результата.",
     "gitUiCreatedDeployed": "{0} развернут",
@@ -794,5 +794,8 @@
     "progressVerbRemovedNetwork": "удалена",
     "progressVerbPulledNetwork": "загружена",
     "progressVerbBuiltNetwork": "собрана",
-    "progressVerbSkippedNetwork": "пропущена"
+    "progressVerbSkippedNetwork": "пропущена",
+    "createEnvHelp": "Переменные для Compose и сервисов. Файл .env будет сохранен перед проверкой и запуском. Можно оставить пустым.",
+    "gitUiComposeAutomatic": "Определить автоматически",
+    "gitComposeFileNotFound": "В корне репозитория нет стандартного Compose-файла. Укажите его имя вручную."
 }

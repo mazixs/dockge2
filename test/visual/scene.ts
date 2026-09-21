@@ -807,6 +807,11 @@ const scene = createApp({
 
             const name = String(args[0]);
 
+            // Keep creation pending so its layout can be inspected without Docker.
+            if (event === "deployStack") {
+                return;
+            }
+
             // A command answers when its output has finished playing, a read answers at once
             if ([ "startStack", "stopStack", "restartStack", "updateStack", "downStack", "startService", "stopService", "restartService" ].includes(event)) {
                 this.playCommand(event, name, callback);

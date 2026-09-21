@@ -514,3 +514,36 @@ test("listing branches reports every head of the remote and refuses an unusable 
     await assert.rejects(() => workflow.listBranches("--upload-pack=touch /tmp/pwned"));
     await assert.rejects(() => new StackGitWorkflow({ validate: async () => undefined }).listBranches(upstream));
 });
+
+test("clone detects standard Compose names and preserves an explicit selection", async (t) => {
+    const f = await fixture(t);
+    for (const fileName of [ "compose.yml", "docker-compose.yaml", "docker-compose.yml" ]) {
+        git(f.upstream, "mv", "compose.yaml", fileName);
+        git(f.upstream, "commit", "-m", "rename compose");
+        const selected = { ...config,
+            composeFileName: "" };
+        const workflow = new StackGitWorkflow({ allowLocalTransport: true,
+            validate: async (dir, actual) => {
+                assert.equal(actual.composeFileName, fileName);
+                assert.equal(await fs.readFile(path.join(dir, actual.composeFileName), "utf8"), compose);
+            } });
+        await workflow.clone(path.join(f.root, fileName), { ...f.input,
+            composeFile: "" }, selected);
+        assert.equal(selected.composeFileName, fileName);
+        git(f.upstream, "mv", fileName, "compose.yaml");
+        git(f.upstream, "commit", "-m", "restore compose");
+    }
+    const explicit = { ...config,
+        composeFileName: "custom.yaml" };
+    const workflow = new StackGitWorkflow({ allowLocalTransport: true,
+        validate: async (_dir, actual) => {
+            assert.equal(actual.composeFileName, "custom.yaml");
+            throw new Error("missing explicit file");
+        } });
+    await assert.rejects(workflow.clone(path.join(f.root, "explicit"), f.input, explicit), /missing explicit file/);
+    git(f.upstream, "rm", "compose.yaml");
+    git(f.upstream, "commit", "-m", "remove compose");
+    await assert.rejects(workflow.clone(path.join(f.root, "missing"), f.input, { ...config,
+        composeFileName: "" }), /gitComposeFileNotFound/);
+    await assert.rejects(fs.access(path.join(f.root, "missing")));
+});

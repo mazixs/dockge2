@@ -141,3 +141,26 @@ test("редакторы называют свой файл с первого п
     expect(editing[0]?.label).toEqual(shown[0]?.label);
     expect(editing[1]?.label).toEqual(shown[1]?.label);
 });
+
+test("new stack keeps environment editable and deployment details visible", async ({ page }) => {
+    await page.goto("/new");
+    await page.getByRole("tab", { name: "Вставить Compose" }).click();
+    await page.getByLabel("Что развернуть", { exact: true }).fill("services:\n  app:\n    image: nginx:alpine\n");
+    await page.getByLabel(".env", { exact: true }).fill("PORT=8123\n");
+    await expect(page.getByLabel(".env", { exact: true })).toHaveValue("PORT=8123\n");
+    await page.getByLabel("Имя стека", { exact: true }).fill("visual-check");
+    await page.getByRole("button", { name: "Развернуть",
+        exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Развертывание visual-check" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Прервать",
+        exact: true })).toHaveCount(1);
+    const progress = page.locator(".deployment-progress");
+    await expect(progress).toContainText("app");
+    const dimensions = await progress.evaluate((element) => ({
+        height: element.clientHeight,
+        contentHeight: element.scrollHeight,
+    }));
+    expect(dimensions.height).toBeGreaterThan(60);
+    expect(dimensions.contentHeight).toBeLessThanOrEqual(dimensions.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

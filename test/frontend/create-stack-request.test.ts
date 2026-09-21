@@ -310,3 +310,17 @@ test("changing what is created starts a new attempt instead of repeating the unk
     assert.equal(sent.length, 2);
     assert.equal(sent[1]!.args[0], "beta");
 });
+
+test("creation sends the edited environment unchanged for save and deploy", async () => {
+    for (const deploy of [ false, true ]) {
+        const sheet = makeSheet();
+        sheet.ctx.composeENV = "PORT=8123\nPASSWORD='a $literal value'\n";
+        sheet.ctx.send(deploy ? "deployStack" : "saveStack", deploy);
+        assert.equal(sheet.sent[0]!.args[2], sheet.ctx.composeENV);
+        sheet.sent[0]!.ack({ ok: false,
+            msg: "validation failed" });
+        await settle();
+        assert.equal(sheet.ctx.composeENV, "PORT=8123\nPASSWORD='a $literal value'\n");
+        sheet.requests.failAll();
+    }
+});

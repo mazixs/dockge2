@@ -9,6 +9,8 @@ import type { StackFileConfig } from "../common/types/stack";
 import { gitRepositoryProblem } from "../common/git-repository";
 import { stackLockBusy, withStackLock } from "./stack-lock";
 
+import { acceptedComposeFileNames } from "../common/util-common";
+
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_FILES = 1000;
@@ -430,6 +432,13 @@ export class StackGitWorkflow {
                 const intended = await this.tree(repo, await this.commit(repo));
                 await writeTree(repo, intended);
                 await this.git(repo, [ "read-tree", "HEAD" ]);
+                if (!config.composeFileName) {
+                    const selected = acceptedComposeFileNames.find((name) => intended.has(name));
+                    if (!selected) {
+                        throw new StackGitError("gitComposeFileNotFound");
+                    }
+                    config.composeFileName = selected;
+                }
                 let pending: StackGitError | undefined;
                 try {
                     await this.options.validate(repo, config);
