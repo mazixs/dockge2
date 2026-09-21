@@ -1,4 +1,4 @@
-import { Document, isAlias, isMap, isNode, isPair, isScalar, isSeq, parseDocument, visit } from "yaml";
+import { Document, isAlias, isMap, isNode, isPair, isScalar, parseDocument, visit } from "yaml";
 import { LooseObject } from "./util-common";
 
 /**
@@ -180,7 +180,7 @@ export function serialiseEditedDocument(source : string, doc : Document) : strin
  * @param source Compose file content
  * @returns Indentation width, two spaces when it cannot be determined
  */
-export function detectIndent(source : string) : number {
+function detectIndent(source : string) : number {
     for (const line of source.split("\n")) {
         const match = /^( +)\S/.exec(line);
 
@@ -198,7 +198,7 @@ export function detectIndent(source : string) : number {
  * @param output Serialised YAML
  * @returns Serialised YAML with the original line endings
  */
-export function withSourceLineEndings(source : string, output : string) : string {
+function withSourceLineEndings(source : string, output : string) : string {
     return source.includes("\r\n") ? output.replace(/\r?\n/g, "\r\n") : output;
 }
 
@@ -207,7 +207,7 @@ export function withSourceLineEndings(source : string, output : string) : string
  * @param doc Parsed source document
  * @returns Original text per node path
  */
-export function collectLegacyOctal(doc : Document) : Map<string, string> {
+function collectLegacyOctal(doc : Document) : Map<string, string> {
     const result = new Map<string, string>();
 
     visit(doc, (key, node, path) => {
@@ -236,7 +236,7 @@ export function collectLegacyOctal(doc : Document) : Map<string, string> {
  * @param octalByPath Original text per node path
  * @returns YAML with the original octal notation
  */
-export function restoreLegacyOctal(output : string, octalByPath : Map<string, string>) : string {
+function restoreLegacyOctal(output : string, octalByPath : Map<string, string>) : string {
     if (octalByPath.size === 0) {
         return output;
     }
@@ -453,13 +453,3 @@ export function listServiceNames(config : LooseObject) : string[] {
     return Object.keys(services as object);
 }
 
-/**
- * Whether a document contains a sequence node at the given path.
- * Small helper for structured edits that append to a list.
- * @param doc Document to inspect
- * @param path Node path
- * @returns True when the node exists and is a sequence
- */
-export function hasSequenceAt(doc : Document, path : readonly unknown[]) : boolean {
-    return isSeq(doc.getIn(path));
-}

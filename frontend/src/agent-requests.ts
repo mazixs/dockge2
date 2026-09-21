@@ -6,7 +6,7 @@ import type {
 } from "../../common/agent-events";
 
 /** How long an ordinary read may take before its result counts as unknown */
-export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /** How a request may be steered */
 export interface AgentRequestOptions {
@@ -21,7 +21,7 @@ export interface AgentRequestOptions {
  * and doing it twice is worse than asking the person to look at the current state.
  * @returns A response saying the result is unknown
  */
-export function unknownResult() : AgentErrorResponse {
+function unknownResult() : AgentErrorResponse {
     return { ok: false,
         unknown: true,
         msgi18n: true,

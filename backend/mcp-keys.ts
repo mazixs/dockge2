@@ -9,7 +9,7 @@ import { Database } from "./database";
 import { Settings } from "./settings";
 import { MCP_ACTIONS, type McpMode } from "../common/mcp";
 
-export const issueKeySchema = z.object({
+const issueKeySchema = z.object({
     name: z.string().trim().min(1).max(80),
     userId: z.string().min(1).max(128),
     role: z.enum([ "viewer", "operator" ]).default("viewer"),

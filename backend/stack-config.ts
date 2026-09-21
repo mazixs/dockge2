@@ -7,10 +7,10 @@ import { Settings } from "./settings";
 import { ValidationError } from "./util-server";
 
 /** Settings key holding the file selection of every stack */
-export const STACK_FILES_SETTING_KEY = "stackFiles";
+const STACK_FILES_SETTING_KEY = "stackFiles";
 
 /** Settings type, so the general settings screen cannot overwrite this entry */
-export const STACK_FILES_SETTING_TYPE = "stackFiles";
+const STACK_FILES_SETTING_TYPE = "stackFiles";
 
 /** Control characters never reach the screen: a name only ever becomes text there */
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;

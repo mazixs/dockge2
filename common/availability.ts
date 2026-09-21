@@ -21,7 +21,7 @@ export interface Availability {
 }
 
 export const MIN_COVERAGE_MS = 30 * 60_000;
-export const OBSERVATION_FRESHNESS_MS = 90_000;
+const OBSERVATION_FRESHNESS_MS = 90_000;
 const STOPPED = new Set([ EXITED, CREATED_FILE, CREATED_STACK ]);
 
 /** Whether the Docker state was running and did not need attention. */

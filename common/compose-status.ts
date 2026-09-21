@@ -58,14 +58,14 @@ export interface DockerPsRaw {
  * Compose extension that marks a service as a one-shot worker or init container.
  * Written as `x-dockge: { lifecycle: one-shot }` or `x-dockge.lifecycle: one-shot` in the service.
  */
-export const ONE_SHOT_EXTENSION = "x-dockge";
-export const ONE_SHOT_VALUE = "one-shot";
+const ONE_SHOT_EXTENSION = "x-dockge";
+const ONE_SHOT_VALUE = "one-shot";
 
 /** Container label with the same meaning, for stacks that were not created by Dockge */
-export const ONE_SHOT_LABEL = "dockge.lifecycle";
+const ONE_SHOT_LABEL = "dockge.lifecycle";
 
 export const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
-export const COMPOSE_SERVICE_LABEL = "com.docker.compose.service";
+const COMPOSE_SERVICE_LABEL = "com.docker.compose.service";
 
 /** Directory the compose project was started from, stable even when the project is renamed */
 export const COMPOSE_WORKING_DIR_LABEL = "com.docker.compose.project.working_dir";
@@ -325,7 +325,7 @@ export function normaliseInstance(entry : ComposePsEntry, oneShotServices : Read
  * @param instance Normalised instance
  * @returns Issue reason, or null when the instance is fine
  */
-export function resolveInstanceIssue(instance : ContainerInstanceStatus) : string | null {
+function resolveInstanceIssue(instance : ContainerInstanceStatus) : string | null {
     if (!KNOWN_STATES.includes(instance.state)) {
         return "unknownState";
     }

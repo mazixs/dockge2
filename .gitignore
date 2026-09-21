@@ -1,5 +1,5 @@
-# .dockerignore шире этого файла: в образ не идут еще и тесты,
-# документация и приемка. Меняя здесь, сверяйтесь с ним
+# .dockerignore is wider than this file: the image also leaves out the tests,
+# the documentation and the review stand. Check it when changing anything here
 .env
 .env.local
 .tmp/
@@ -8,11 +8,13 @@ node_modules
 data
 stacks
 tmp
-/private
 
 # Git only
 frontend-dist
 coverage
+
+# Local review artefacts: screenshots, probes and their notes
+/output/
 
 # Playwright
 /test-results/
@@ -29,7 +31,7 @@ Thumbs.db
 *~
 *.swp
 
-# Появляется у того, кто развернул панель по README
+# Appears on a machine where the panel was deployed as the README describes
 certs
 docker-compose.override.yml
 

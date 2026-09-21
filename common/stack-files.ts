@@ -82,7 +82,7 @@ export function classifyStackFile(fileName : string) : StackFileKind | null {
  * @param fileName Name to check
  * @returns Whether compose can be pointed at this file
  */
-export function isComposeFileName(fileName : string) : boolean {
+function isComposeFileName(fileName : string) : boolean {
     if (acceptedComposeFileNames.includes(fileName)) {
         return true;
     }
@@ -120,7 +120,7 @@ export function isEnvFileName(fileName : string) : boolean {
  * @param fileName Name to check
  * @returns Whether the file can hold a compose secret
  */
-export function isSecretFileName(fileName : string) : boolean {
+function isSecretFileName(fileName : string) : boolean {
     if (fileName === ".secret") {
         return true;
     }

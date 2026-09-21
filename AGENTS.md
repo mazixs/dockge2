@@ -28,7 +28,7 @@ settings stay supporting features.
 
 ```bash
 npm run dev            # backend 5001 + frontend 5000 (dev:backend / dev:frontend separately)
-npm run check          # lint + check-ts + test - run this before handing work over
+npm run check          # lint + check-ts + check-vue + test - run this before handing work over
 npm run lint           # ESLint over **/*.{ts,vue}; npm run fmt fixes what it can
 npm run check-ts       # tsc --noEmit (strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes)
 npm run test           # c8 + node:test, coverage floor 70%

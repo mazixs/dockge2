@@ -1,41 +1,25 @@
-// Console colors
+// Console colors. Only the ones the log actually prints are kept: the rest came
+// from upstream, where they were never used either, and an unused export reads
+// as an offer to use it.
 // https://stackoverflow.com/questions/9781218/how-to-change-node-jss-console-font-color
 import { intHash, isDev } from "../common/util-common";
 import dayjs from "dayjs";
 
-export const CONSOLE_STYLE_Reset = "\x1b[0m";
-export const CONSOLE_STYLE_Bright = "\x1b[1m";
-export const CONSOLE_STYLE_Dim = "\x1b[2m";
-export const CONSOLE_STYLE_Underscore = "\x1b[4m";
-export const CONSOLE_STYLE_Blink = "\x1b[5m";
-export const CONSOLE_STYLE_Reverse = "\x1b[7m";
-export const CONSOLE_STYLE_Hidden = "\x1b[8m";
+const CONSOLE_STYLE_Reset = "\x1b[0m";
 
-export const CONSOLE_STYLE_FgBlack = "\x1b[30m";
-export const CONSOLE_STYLE_FgRed = "\x1b[31m";
-export const CONSOLE_STYLE_FgGreen = "\x1b[32m";
-export const CONSOLE_STYLE_FgYellow = "\x1b[33m";
-export const CONSOLE_STYLE_FgBlue = "\x1b[34m";
-export const CONSOLE_STYLE_FgMagenta = "\x1b[35m";
-export const CONSOLE_STYLE_FgCyan = "\x1b[36m";
-export const CONSOLE_STYLE_FgWhite = "\x1b[37m";
-export const CONSOLE_STYLE_FgGray = "\x1b[90m";
-export const CONSOLE_STYLE_FgOrange = "\x1b[38;5;208m";
-export const CONSOLE_STYLE_FgLightGreen = "\x1b[38;5;119m";
-export const CONSOLE_STYLE_FgLightBlue = "\x1b[38;5;117m";
-export const CONSOLE_STYLE_FgViolet = "\x1b[38;5;141m";
-export const CONSOLE_STYLE_FgBrown = "\x1b[38;5;130m";
-export const CONSOLE_STYLE_FgPink = "\x1b[38;5;219m";
-
-export const CONSOLE_STYLE_BgBlack = "\x1b[40m";
-export const CONSOLE_STYLE_BgRed = "\x1b[41m";
-export const CONSOLE_STYLE_BgGreen = "\x1b[42m";
-export const CONSOLE_STYLE_BgYellow = "\x1b[43m";
-export const CONSOLE_STYLE_BgBlue = "\x1b[44m";
-export const CONSOLE_STYLE_BgMagenta = "\x1b[45m";
-export const CONSOLE_STYLE_BgCyan = "\x1b[46m";
-export const CONSOLE_STYLE_BgWhite = "\x1b[47m";
-export const CONSOLE_STYLE_BgGray = "\x1b[100m";
+const CONSOLE_STYLE_FgRed = "\x1b[31m";
+const CONSOLE_STYLE_FgGreen = "\x1b[32m";
+const CONSOLE_STYLE_FgYellow = "\x1b[33m";
+const CONSOLE_STYLE_FgBlue = "\x1b[34m";
+const CONSOLE_STYLE_FgMagenta = "\x1b[35m";
+const CONSOLE_STYLE_FgCyan = "\x1b[36m";
+const CONSOLE_STYLE_FgGray = "\x1b[90m";
+const CONSOLE_STYLE_FgOrange = "\x1b[38;5;208m";
+const CONSOLE_STYLE_FgLightGreen = "\x1b[38;5;119m";
+const CONSOLE_STYLE_FgLightBlue = "\x1b[38;5;117m";
+const CONSOLE_STYLE_FgViolet = "\x1b[38;5;141m";
+const CONSOLE_STYLE_FgBrown = "\x1b[38;5;130m";
+const CONSOLE_STYLE_FgPink = "\x1b[38;5;219m";
 
 const consoleModuleColors = [
     CONSOLE_STYLE_FgCyan,

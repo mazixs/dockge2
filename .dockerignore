@@ -1,15 +1,28 @@
-# Should be identical to .gitignore
+# Everything .gitignore keeps out of the repository is kept out of the build
+# context too, and this file adds what only the image has no use for. A path
+# that is missing here does reach the image: the release stage copies the whole
+# context, so a TLS key left next to the compose file would be baked into a
+# layer.
 .env
 .env.local
 .tmp/
 node_modules
-frontend/node_modules
 frontend-dist
 .idea
 data
 stacks
 tmp
-/private
+
+# Private to whoever deployed the panel: the TLS files DOCKGE_SSL_* points at,
+# their own compose overrides and the assistant's local settings
+certs
+docker-compose.override.yml
+.claude
+
+# Local review artefacts and the leftovers of an interrupted type check
+output
+frontend/src/pages/TypeCheckProbe*.vue
+tsconfig.vue.probe.json
 
 # Docker extra
 docker
@@ -18,7 +31,6 @@ local.sh
 .env.example
 coverage
 .editorconfig
-.eslintrc.cjs
 .git
 .gitignore
 README.md
@@ -30,8 +42,9 @@ blob-report
 *.log
 *.tsbuildinfo
 
-# Не попадает в образ: приемка и тесты. extra/seed-review.ts поднимает стенд
-# с выключенной аутентификацией, и его место - в репозитории, а не на хосте
+# Never in the image: the review stand and the tests. extra/seed-review.ts
+# starts a panel with authentication switched off, so it belongs in the
+# repository and nowhere near a host
 docs
 test
 extra/seed-review.ts

@@ -53,7 +53,7 @@ export interface GitCommandOptions {
  * @param options Settings of the call
  * @returns Environment to spawn with
  */
-export function gitEnvironment(options : GitCommandOptions) : NodeJS.ProcessEnv {
+function gitEnvironment(options : GitCommandOptions) : NodeJS.ProcessEnv {
     const env : NodeJS.ProcessEnv = { ...process.env };
 
     for (const key of Object.keys(env)) {

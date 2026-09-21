@@ -54,7 +54,7 @@ export interface NewUser {
 }
 
 /** Validate owner-issued credentials consistently for setup and later accounts. */
-export function validateNewUser(data : unknown) : NewUser {
+function validateNewUser(data : unknown) : NewUser {
     const input = data as Partial<NewUser> | null;
     if (!input || typeof input.username !== "string" || !/^[a-zA-Z0-9_.]{3,30}$/.test(input.username)) {
         throw new Error("authInvalidUsername");

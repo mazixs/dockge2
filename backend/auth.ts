@@ -147,7 +147,7 @@ export function resolveTrustedOrigins(server : DockgeServer, request : RequestOr
  * @param request Request handed to the auth handler
  * @returns Origin hints of that request
  */
-export function requestOrigins(request? : Request) : RequestOrigins {
+function requestOrigins(request? : Request) : RequestOrigins {
     if (!request) {
         return {};
     }

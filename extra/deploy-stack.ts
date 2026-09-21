@@ -31,7 +31,7 @@ const SAFE_STACK_NAME = /^[a-z0-9_-]+$/;
 const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 export const DEFAULT_BRANCH = "main";
-export const DEFAULT_COMPOSE_FILE = "compose.yaml";
+const DEFAULT_COMPOSE_FILE = "compose.yaml";
 
 /**
  * Build the commands that update one stack from Git and redeploy it.
