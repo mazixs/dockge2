@@ -236,6 +236,7 @@ test("stack operations refuse a wrong argument and an unknown stack before Docke
             [ "startService", [ "app", 5 ]],
             [ "stopService", [ 5, "web" ]],
             [ "restartService", [ "app", null ]],
+            [ "updateService", [ "app", null ]],
         ];
 
         for (const [ event, args ] of wrongType) {

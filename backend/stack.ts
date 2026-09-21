@@ -1092,7 +1092,7 @@ export class Stack {
         if (![ "start", "stop", "restart", "deploy", "update" ].includes(action)) {
             throw new Error("Unsupported stack control action");
         }
-        if ([ "start", "deploy", "update" ].includes(action)) {
+        if ([ "start", "deploy", "update", "restart" ].includes(action)) {
             await this.validateComposeConfig();
         }
         // Стек, который собирает свой образ сам, иначе не увидел бы ни одной правки:
@@ -1125,7 +1125,9 @@ export class Stack {
         const upOptions = builds && action !== "update"
             ? this.getComposeOptions("up", "-d", "--build", "--remove-orphans")
             : this.getComposeOptions("up", "-d", "--remove-orphans");
-        const options = [ "start", "deploy", "update" ].includes(action) ? upOptions : this.getComposeOptions(action);
+        const options = action === "restart"
+            ? this.getComposeOptions("up", "-d", "--force-recreate")
+            : [ "start", "deploy", "update" ].includes(action) ? upOptions : this.getComposeOptions(action);
         const exitCode = await execute(options, this.path);
         if (exitCode !== 0) {
             throw new Error("Stack control failed; check the operation output.");
@@ -1417,11 +1419,33 @@ export class Stack {
     }
 
     async restartService(socket: DockgeSocket, serviceName: string): Promise<number> {
-        const exitCode = await this.execServiceCommand(socket, "restart", serviceName);
+        this.assertServiceExists(serviceName);
+        await this.validateComposeConfig();
+        const exitCode = await this.execServiceCommand(socket, "up", serviceName, "-d", "--no-deps", "--force-recreate");
         if (exitCode !== 0) {
             throw new Error(`Failed to restart service ${serviceName}, please check logs for more information.`);
         }
 
+        return exitCode;
+    }
+
+    /** Update only the selected service image and recreate its container. */
+    async updateService(socket: DockgeSocket, serviceName: string): Promise<number> {
+        this.assertServiceExists(serviceName);
+        await this.validateComposeConfig();
+        const definition = yaml.parse(this.composeYAML).services[serviceName];
+        const builds = Boolean(definition.build);
+        const code = builds
+            ? await this.execServiceCommand(socket, "build", serviceName, "--pull")
+            : await this.execServiceCommand(socket, "pull", serviceName);
+        if (code !== 0) {
+            throw new Error("Service image update failed; check the operation output.");
+        }
+        clearImageUpdateCache(readComposeImages(this.composeYAML));
+        const exitCode = await this.execServiceCommand(socket, "up", serviceName, "-d", "--no-deps", "--force-recreate");
+        if (exitCode !== 0) {
+            throw new Error("Service update failed; check the operation output.");
+        }
         return exitCode;
     }
 }

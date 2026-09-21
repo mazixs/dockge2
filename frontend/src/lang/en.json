@@ -124,6 +124,7 @@
     "Saved": "Saved",
     "serviceStarted": "Service {service} started",
     "serviceStopped": "service stopped",
+    "serviceUpdated": "Service {service} updated",
     "serviceRestarted": "Service {service} restarted",
     "unexpectedServerError": "Unexpected error: {detail}",
     "Deployed": "Deployed",

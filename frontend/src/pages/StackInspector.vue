@@ -222,6 +222,9 @@
                                                         >
                                                             <font-awesome-icon icon="rotate" fixed-width /> {{ $t("restartStack") }}
                                                         </button>
+                                                        <button class="menu-action" type="button" :disabled="processing" :aria-label="`${$t('updateStack')}: ${service.name}`" @click="runService('updateService', service.name)">
+                                                            <InterfaceIcon name="refresh" /> {{ $t("updateStack") }}
+                                                        </button>
                                                         <button v-if="service.running" class="menu-action" type="button" :disabled="processing" :aria-label="`${$t('stopStack')}: ${service.name}`" @click="runService('stopService', service.name)">
                                                             <font-awesome-icon icon="stop" fixed-width /> {{ $t("stopStack") }}
                                                         </button>
@@ -880,6 +883,10 @@ export default {
         },
     },
     mounted() {
+        window.addEventListener("scroll", this.dismissServiceMenus, true);
+        window.addEventListener("resize", this.dismissServiceMenus, true);
+        document.addEventListener("pointerdown", this.dismissServiceMenus);
+        document.addEventListener("keydown", this.dismissServiceMenus);
         this.loadStack();
 
         // Возраст замера идет секундами: подпись таблицы обещает именно это
@@ -890,6 +897,10 @@ export default {
         }, 1000);
     },
     unmounted() {
+        window.removeEventListener("scroll", this.dismissServiceMenus, true);
+        window.removeEventListener("resize", this.dismissServiceMenus, true);
+        document.removeEventListener("pointerdown", this.dismissServiceMenus);
+        document.removeEventListener("keydown", this.dismissServiceMenus);
         this.disposed = true;
         // Ответы, которые еще придут, не относятся ни к какому экрану
         this.requests.invalidate();
@@ -1274,7 +1285,7 @@ export default {
 
         /**
          * Действие над одним сервисом
-         * @param {"startService" | "stopService" | "restartService"} event Имя события
+         * @param {"startService" | "stopService" | "restartService" | "updateService"} event Имя события
          * @param {string} serviceName Сервис
          * @returns {void}
          */
@@ -1324,6 +1335,11 @@ export default {
          */
         placeServiceMenu(event) {
             const details = event.target instanceof HTMLDetailsElement ? event.target : null;
+            this.positionServiceMenu(details);
+        },
+
+        /** @param {HTMLDetailsElement | null} details Open service menu to position. */
+        positionServiceMenu(details) {
             const menu = details?.querySelector("div");
             const trigger = details?.querySelector("summary");
 
@@ -1349,33 +1365,29 @@ export default {
             menu.style.top = `${placement.top}px`;
             menu.style.left = `${placement.left}px`;
             menu.style.maxHeight = placement.maxHeight === null ? "" : `${placement.maxHeight}px`;
-
-            /**
-             * Убрать меню, когда страница уехала из-под него
-             * @param {Event} moved Прокрутка любой области страницы
-             * @returns {void}
-             */
-            const dismiss = (moved) => {
-                // Прокрутка внутри самого меню - это чтение его же пунктов, а не уехавшая
-                // страница: закрывать меню на ней значило бы отнимать нижние действия
-                if (moved?.type === "scroll" && moved.target instanceof Node && menu.contains(moved.target)) {
-                    window.addEventListener("scroll", dismiss, { capture: true,
-                        once: true });
-                    return;
-                }
-                details.removeAttribute("open");
-            };
-
-            window.addEventListener("scroll", dismiss, { capture: true,
-                once: true });
-            window.addEventListener("resize", dismiss, { once: true });
         },
 
         /**
-         * Закрыть меню сервиса: выбранное действие уже ушло, открытое меню перекрывает строку
-         * @param {Event} event Клик по пункту или Escape внутри меню
+         * Dismiss menus outside their bounds without accumulating per-open listeners.
+         * @param {Event} event Pointer, keyboard, scroll or resize event
          * @returns {void}
          */
+        dismissServiceMenus(event) {
+            if (event instanceof KeyboardEvent && event.key !== "Escape") {
+                return;
+            }
+            for (const menu of this.$el.querySelectorAll(".service-menu[open]")) {
+                if (event.type === "scroll" || event.type === "resize") {
+                    this.positionServiceMenu(menu);
+                    continue;
+                }
+                if (event instanceof KeyboardEvent || !(event.target instanceof Node) || !menu.contains(event.target)) {
+                    menu.removeAttribute("open");
+                }
+            }
+        },
+
+        /** @param {Event} event Menu action or Escape. */
         closeServiceMenu(event) {
             const target = event.target instanceof Element ? event.target : null;
 

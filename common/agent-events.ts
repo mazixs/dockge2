@@ -142,6 +142,7 @@ export interface AgentRequestContract extends AgentEventContract {
     // Services and host
     startService : { args : [ stackName : string, serviceName : string ]; result : AgentDone };
     stopService : { args : [ stackName : string, serviceName : string ]; result : AgentDone };
+    updateService : { args : [ stackName : string, serviceName : string ]; result : AgentDone };
     restartService : { args : [ stackName : string, serviceName : string ]; result : AgentDone };
     dockerStats : { args : []; result : AgentResponse<{ dockerStats : Record<string, object> }> };
     getDockerNetworkList : { args : []; result : AgentResponse<{ dockerNetworkList : string[] }> };
@@ -235,6 +236,7 @@ const REQUEST_NAMES : Record<AgentRequestName, true> = {
     startService: true,
     stopService: true,
     restartService: true,
+    updateService: true,
     dockerStats: true,
     getDockerNetworkList: true,
     gitCloneStack: true,

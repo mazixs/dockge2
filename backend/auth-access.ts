@@ -160,7 +160,7 @@ export const OPERATOR_EVENTS = new Set([
     ...VIEWER_EVENTS, "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
     "restartStack", "updateStack", "downStack", "stackUpdatePreview", "abortCompose", "getStackFiles",
     "setStackFiles", "saveEnvFile", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
-    "bindSecret", "unbindSecret", "dockerStats", "startService", "stopService", "restartService",
+    "bindSecret", "unbindSecret", "dockerStats", "startService", "stopService", "restartService", "updateService",
     "getDockerNetworkList", "terminalInput", "mainTerminal", "checkMainTerminal", "interactiveTerminal",
     "terminalJoin", "terminalLeave", "joinCombinedTerminal", "leaveCombinedTerminal", "terminalResize",
 ]);

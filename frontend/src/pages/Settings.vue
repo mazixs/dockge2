@@ -27,7 +27,8 @@
             <div class="settings-content">
                 <p v-if="currentPage && !subMenus[currentPage]" class="alert alert-warning" role="alert">{{ $t("familiarRestricted") }}</p>
                 <router-view v-else v-slot="{ Component }">
-                    <transition name="slide-fade" appear>
+                    <!-- Keep the wrapper: legacy settings children traverse it via $parent. -->
+                    <transition :css="false">
                         <component :is="Component" />
                     </transition>
                 </router-view>

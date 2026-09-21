@@ -156,6 +156,7 @@
     // Консоль темная в обеих темах, поэтому текст на ней не следует за темой:
     // без этой пары подпись на консольной поверхности уходит в нечитаемое
     --text-on-console: #dfe5ee;
+    --editor-selection: #1e2948;
     --surface-console-selection: rgba(157, 172, 249, .32);
     --focus-ring: 2px solid var(--accent-text);
     --focus-offset: 2px;

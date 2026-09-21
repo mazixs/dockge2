@@ -733,12 +733,35 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     throw new Error("Invalid stackName or serviceName");
                 }
 
-                const stack = await Stack.getStack(server, stackName, true);
+                const stack = await Stack.getStack(server, stackName);
                 await stack.restartService(socket, serviceName);
                 callbackResult({
                     ok: true,
                     msg: {
                         key: "serviceRestarted",
+                        values: { service: serviceName },
+                    },
+                    msgi18n: true,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        agentSocket.on("updateService", async (stackName: unknown, serviceName: unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof stackName !== "string" || typeof serviceName !== "string") {
+                    throw new Error("Invalid stackName or serviceName");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                await stack.updateService(socket, serviceName);
+                callbackResult({
+                    ok: true,
+                    msg: {
+                        key: "serviceUpdated",
                         values: { service: serviceName },
                     },
                     msgi18n: true,

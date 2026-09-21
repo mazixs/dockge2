@@ -19,6 +19,7 @@ export const COMMAND_KEYS : Record<string, string> = {
     startService: "progressRunStart",
     stopService: "progressRunStop",
     restartService: "progressRunRestart",
+    updateService: "progressRunUpdate",
 };
 
 /** Глагол compose словами интерфейса */

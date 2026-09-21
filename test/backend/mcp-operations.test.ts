@@ -163,8 +163,8 @@ test("UI and MCP share lifecycle command selection without rewriting Compose", a
             return 0;
         });
     }
-    assert.equal(validated, 1);
-    assert.deepEqual(commands, [[ "compose", "-f", "compose.yaml", "up", "-d", "--remove-orphans" ], [ "compose", "-f", "compose.yaml", "stop" ], [ "compose", "-f", "compose.yaml", "restart" ]]);
+    assert.equal(validated, 2);
+    assert.deepEqual(commands, [[ "compose", "-f", "compose.yaml", "up", "-d", "--remove-orphans" ], [ "compose", "-f", "compose.yaml", "stop" ], [ "compose", "-f", "compose.yaml", "up", "-d", "--force-recreate" ]]);
 });
 
 test("container control checks actual immutable ID, managed path and declared service before side effects", async () => {

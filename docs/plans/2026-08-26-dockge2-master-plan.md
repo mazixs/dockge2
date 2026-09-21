@@ -1449,3 +1449,11 @@ the selected period"; экраны ведут себя как прежде, ус
 Вывод на будущее: `npm run check` не запускает ни `test:e2e`, ни интеграцию с Docker, поэтому
 правка текста интерфейса не видна в нем вообще. Перед тегом нужен `npm run test:e2e` - это
 единственная проверка, которая читает готовые предложения панели так, как их читает человек.
+
+
+## 2026-09-21: container controls and interface fixes
+
+- Restart recreates containers using the current Compose and env files; service restart leaves dependencies alone.
+- The service menu dismisses on outside pointer interaction and Escape, and offers an image update for that service.
+- File editor selection is visible in both themes. Settings categories switch without an entrance animation.
+- Managed container names in the global overview link to their stack inspector, preserving the agent endpoint.

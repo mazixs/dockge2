@@ -87,9 +87,10 @@
                                 </span>
                             </th>
                         </tr>
-                        <tr v-for="container in stack.containers" :key="container.id">
+                        <tr v-for="container in stack.containers" :key="container.id" :class="{ 'managed-container': stack.managed }" @click="openContainer($event, stack.name, host.endpoint, stack.managed)">
                             <th scope="row" class="container-name">
-                                <span>{{ container.name }}</span>
+                                <router-link v-if="stack.managed" :to="stackRoute(stack.name, host.endpoint)">{{ container.name }}</router-link>
+                                <span v-else>{{ container.name }}</span>
                                 <small v-if="container.service">{{ container.service }}</small>
                             </th>
                             <td>
@@ -356,6 +357,12 @@ export default defineComponent({
         bucketLabel(bucket : StabilityHistoryBucket) : string {
             return `${this.dateTime(bucket.from)} - ${this.dateTime(bucket.to)}: ${this.$t(`stabilityState_${bucket.state}`)}; ${this.$t("stabilityCoverage", [ this.percent(bucket.coverage) ])}`;
         },
+        /** Open the managed stack from any non-interactive part of its container row. */
+        openContainer(event : MouseEvent, name : string, endpoint : string, managed : boolean) {
+            if (managed && event.target instanceof Element && !event.target.closest("a, button") && !window.getSelection()?.toString()) {
+                this.$router.push(this.stackRoute(name, endpoint));
+            }
+        },
         stackRoute(name : string, endpoint : string) {
             return endpoint ? { name: "stackInspectorEndpoint",
                 params: { stackName: name,
@@ -566,6 +573,14 @@ export default defineComponent({
 
 .container-table tr + tr {
     border-top: 1px solid var(--line-hair);
+}
+
+.managed-container {
+    cursor: pointer;
+
+    &:hover {
+        background: var(--surface-raised);
+    }
 }
 
 .container-name {

@@ -146,6 +146,7 @@
     "Saved": "Сохранено",
     "serviceStarted": "Сервис {service} запущен",
     "serviceStopped": "сервис остановлен",
+    "serviceUpdated": "Сервис {service} обновлен",
     "serviceRestarted": "Сервис {service} перезапущен",
     "unexpectedServerError": "Непредвиденная ошибка: {detail}",
     "Deployed": "Развернуто",

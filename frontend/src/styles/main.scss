@@ -1147,8 +1147,8 @@ body.dark {
     background-color: transparent !important;
 }
 
-.cm-selectionBackground {
-    background-color: var(--accent-soft) !important;
+.cm-selectionBackground, .cm-content ::selection {
+    background-color: var(--editor-selection) !important;
 }
 
 .cm-focused {
