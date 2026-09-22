@@ -50,7 +50,7 @@ sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --dry-run
 sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --yes
 ```
 
-The verified installer is supported from `0.0.9`, with `release.json`, signatures and host updater
+The verified installer is supported from `0.0.10`, with `release.json`, signatures and host updater
 binaries attached to the release. Older releases, including `0.0.8`, do not have this contract.
 For an existing installation, follow [the migration instructions](docs/self-updates.md#legacy-import).
 

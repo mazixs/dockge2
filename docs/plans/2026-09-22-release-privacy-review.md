@@ -1,7 +1,7 @@
 # Release privacy review
 
 Scope: current source tree, existing and newly added Markdown documentation, checked-in images,
-release payloads and Docker build-context exclusions for 0.0.9.
+release payloads and Docker build-context exclusions for the 0.0.9 candidate and 0.0.10 release.
 
 ## Findings and remediation
 
@@ -36,7 +36,7 @@ project metadata and remain unchanged.
 
 This review does not rewrite Git history or author attribution. Older commits and already published
 source archives can retain earlier document contents and commit contact metadata. Removing those
-historical copies would require a separate coordinated history/release cleanup; the 0.0.9 source
+historical copies would require a separate coordinated history/release cleanup; the 0.0.10 source
 revision and its release files contain the sanitized documentation.
 
 A secret scanner and visual review reduce the risk of accidental disclosure; they do not constitute

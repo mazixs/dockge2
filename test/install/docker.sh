@@ -30,6 +30,7 @@ node "$root/test/install/account.mjs" bootstrap "$work/fresh-data" 39871
 docker ps -aq --filter "label=com.docker.compose.project=$project-fresh" | xargs -r docker rm -f >/dev/null
 docker pull --platform "linux/$arch" ghcr.io/mazixs/dockge2:0.0.8
 legacy=$(docker image inspect ghcr.io/mazixs/dockge2:0.0.8 --format '{{.Id}}')
+legacy_digest=$(docker image inspect ghcr.io/mazixs/dockge2:0.0.8 --format '{{json .RepoDigests}}' | jq -er '.[] | select(startswith("ghcr.io/mazixs/dockge2@"))')
 git -C "$root" show v0.0.8:docker-compose.yml > "$deployment/docker-compose.yml"
 printf 'services:\n  dockge:\n    image: %s\n' "$legacy" > "$work/baseline.yml"
 port=$((41000 + RANDOM % 10000))
@@ -75,3 +76,9 @@ if "$verifier" verify-blob --bundle "$assets/release.json.sigstore.json" --certi
     echo 'Wrong signer accepted' >&2; exit 1
 fi
 echo "Verified $arch: legacy import, exact artifact readiness, owner login, no-op, explicit data restore and unrelated stack preservation."
+# The classic Docker image store cannot retain two platforms for one index digest.
+# Release only the exact fixture references after all fixture containers are gone.
+# Do not force removal: an unexpected user of either image must stop this gate.
+cleanup
+trap - EXIT
+docker image rm "$image" "$legacy_digest" ghcr.io/mazixs/dockge2:0.0.8
