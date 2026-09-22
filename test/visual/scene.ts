@@ -1,6 +1,6 @@
 import { createApp, h } from "vue";
 import { createRouter, createWebHistory, RouterView } from "vue-router";
-import "bootstrap";
+import "bootstrap/js/dist/dropdown";
 import "@xterm/xterm/css/xterm.css";
 import "../../frontend/src/styles/main.scss";
 import { ellipsisTitle } from "../../frontend/src/directives/ellipsis-title";
@@ -24,11 +24,13 @@ import Login from "../../frontend/src/components/Login.vue";
 import Setup from "../../frontend/src/pages/Setup.vue";
 import { FontAwesomeIcon } from "../../frontend/src/icon";
 import ru from "../../frontend/src/lang/ru.json";
-import pkg from "../../package.json";
 import { i18n } from "../../frontend/src/i18n";
 import responsive from "../../frontend/src/mixins/responsive";
 import theme from "../../frontend/src/mixins/theme";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING, getComposeTerminalName } from "../../common/util-common";
+
+// Screenshot content must not change when the real release version is bumped.
+const sceneVersion = "0.0.7";
 
 // Deliberately disconnected fixture data. This module never imports the socket mixin,
 // contacts a backend, writes files, or controls containers. Production components render it.
@@ -601,16 +603,15 @@ const scene = createApp({
     mixins: [ responsive, theme ],
     data() {
         return { appReady: true,
-            // Версия берется из манифеста: вписанная руками она осталась на 1.5.0
-            // и экран "О программе" показывал версию, которой у форка никогда не было
+            // Fixed fixture versions keep screenshots independent of release bumps.
             info: { primaryHostname: "localhost",
-                version: pkg.version,
+                version: sceneVersion,
                 // The panel's own update is news on one screen only, and the address
                 // says which shot wants it: handing it to every screen would put the
                 // badge in the header of every reference shot there is
-                latestVersion: updateScene ? "9.9.9" : pkg.version,
+                latestVersion: updateScene ? "9.9.9" : sceneVersion,
                 updateAvailable: updateScene },
-            frontendVersion: pkg.version,
+            frontendVersion: sceneVersion,
             isFrontendBackendVersionMatched: true,
             loggedIn: true,
             canManageStacks: true,

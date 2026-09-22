@@ -1,0 +1,170 @@
+{
+    "schemaVersion": 1,
+    "date": "2026-09-22",
+    "commit": "d1003358dc5c231997d64da0fad80856b829bdfc",
+    "applicationVersion": "0.0.7",
+    "preexistingModifiedFiles": [
+        "frontend/src/components/StabilityDashboard.vue"
+    ],
+    "environment": {
+        "node": "22.23.2",
+        "cpu": "Intel Core i7-11700K",
+        "logicalCpus": 16,
+        "cpuThrottling": false,
+        "frontend": "production build",
+        "browser": "Chromium through Playwright CLI and CDP",
+        "browserTabs": 1,
+        "localEndpoints": 1,
+        "syntheticUndeployedStackDirectories": 50,
+        "observedExistingContainers": 17,
+        "observedExternalProjects": 11,
+        "database": "fresh isolated database",
+        "existingDockerWorkloadsModified": false
+    },
+    "limits": [
+        "Exploratory single-machine samples, not a statistically established benchmark",
+        "JS heap excludes other browser process memory",
+        "Node RSS samples exclude subprocesses and Docker daemon",
+        "No constrained host, long soak, remote agent, large Git preview or 30-day history benchmark",
+        "No full heap retaining-path attribution"
+    ],
+    "build": {
+        "command": "npm run build:frontend -- --outDir <temporary-build-directory> --manifest",
+        "exitCode": 0,
+        "elapsedSeconds": 4.22,
+        "maximumRssKiB": 1190376
+    },
+    "assets": {
+        "entryStaticJavaScript": {
+            "rawBytes": 724138,
+            "gzipBytes": 232254,
+            "brotliBytes": 199994
+        },
+        "entryCss": {
+            "rawBytes": 327951,
+            "brotliBytes": 35203
+        },
+        "scope": "Entry JS and transitive static imports; excludes route and locale chunks, CSS and fonts from JS totals"
+    },
+    "nodeRssSamplesKiB": {
+        "beforeLogin": 188620,
+        "afterOverview": 198200,
+        "afterNavigation": 228116
+    },
+    "overviewAfterGc": {
+        "heapMiB": 10.030685424804688,
+        "dom": {
+            "documents": 2,
+            "nodes": 4091,
+            "jsEventListeners": 163
+        },
+        "visibleElements": 2921,
+        "historyBuckets": 816,
+        "containerRows": 17
+    },
+    "overviewIdle": {
+        "scenario": "overview-idle-15s",
+        "frames": 2,
+        "characters": 32032,
+        "taskSeconds": 0.265525
+    },
+    "dateFormatting": {
+        "scenario": "overview-formatting-11s",
+        "dateFormatCalls": 6532
+    },
+    "inspectorBeforeOpeningLogs": {
+        "scenario": "inspector-without-opening-logs",
+        "url": "http://127.0.0.1:5101/stack/perf-000",
+        "heapMiB": 12.280956268310547,
+        "dom": {
+            "documents": 2,
+            "nodes": 4495,
+            "jsEventListeners": 264
+        },
+        "xterms": 1
+    },
+    "filesNavigation": [
+        {
+            "label": "files-open",
+            "heapMiB": 12.833751678466797,
+            "dom": {
+                "documents": 2,
+                "nodes": 2393,
+                "jsEventListeners": 318
+            },
+            "editors": 1,
+            "xterms": 1
+        },
+        {
+            "label": "overview-after-files",
+            "heapMiB": 13.907447814941406,
+            "dom": {
+                "documents": 2,
+                "nodes": 4759,
+                "jsEventListeners": 250
+            },
+            "editors": 0,
+            "xterms": 0
+        },
+        {
+            "label": "overview-after-10-roundtrips",
+            "heapMiB": 23.048606872558594,
+            "dom": {
+                "documents": 2,
+                "nodes": 11219,
+                "jsEventListeners": 1050
+            },
+            "editors": 0,
+            "xterms": 0
+        }
+    ],
+    "settledAfterFilesNavigation": {
+        "label": "overview-10s-settle-post-gc",
+        "heapMiB": 22.960044860839844,
+        "dom": {
+            "documents": 2,
+            "nodes": 11219,
+            "jsEventListeners": 1050
+        },
+        "elements": 2933
+    },
+    "inspectorOnlyControl": {
+        "scenario": "10-more-inspector-only-roundtrips",
+        "start": {
+            "documents": 2,
+            "nodes": 11219,
+            "jsEventListeners": 1050
+        },
+        "heapMiB": 23.214683532714844,
+        "end": {
+            "documents": 2,
+            "nodes": 11219,
+            "jsEventListeners": 1050
+        },
+        "elements": 2933
+    },
+    "additionalFilesNavigation": {
+        "scenario": "10-more-files-roundtrips",
+        "heapMiB": 29.879287719726562,
+        "dom": {
+            "documents": 2,
+            "nodes": 17679,
+            "jsEventListeners": 1850
+        },
+        "elements": 2933
+    },
+    "navigationMethod": {
+        "routeSequence": [
+            "overview",
+            "inspector of synthetic stack",
+            "files",
+            "overview"
+        ],
+        "roundtripsPerBlock": 10,
+        "delayBetweenRouteActionsMs": 250,
+        "garbageCollection": "HeapProfiler.collectGarbage before reported heap samples",
+        "laterControls": "4 s settling; Runtime.discardConsoleEntries before GC",
+        "visibleElementCountAtEnd": 2933
+    },
+    "interpretation": "Repeated files navigation retains resources. Missing Bootstrap Modal disposal is confirmed in code; its share of the measured retention requires retaining-path analysis and a repair-and-retest comparison."
+}

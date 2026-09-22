@@ -52,3 +52,19 @@ test("invalidating makes the next caller read again", async () => {
 
     assert.equal(await reading.get(), 2);
 });
+
+test("an invalidated in-flight reading cannot overwrite or release its replacement", async () => {
+    const replies : ((value : string) => void)[] = [];
+    const reading = new SharedReading(() => new Promise<string>(resolve => replies.push(resolve)), 60_000);
+    const old = reading.get();
+    reading.invalidate();
+    const current = reading.get();
+    replies[0]!("old");
+    await old;
+    const joined = reading.get();
+    assert.equal(replies.length, 2);
+    replies[1]!("current");
+    assert.equal(await current, "current");
+    assert.equal(await joined, "current");
+    assert.equal(await reading.get(), "current");
+});

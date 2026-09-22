@@ -55,8 +55,18 @@ export default {
             type: String,
             default: "",
         },
+        runOutcome: {
+            type: String,
+            default: "",
+        },
+    },
+    data() {
+        return { disposed: false };
     },
     computed: {
+        stackStatus() {
+            return this.$root.completeStackList[this.stackName + "_" + this.endpoint]?.status;
+        },
         /** Имя общего терминала стека: по нему сервер шлет вывод всех сервисов */
         terminalName() {
             return getCombinedTerminalName(this.endpoint, this.stackName);
@@ -74,12 +84,25 @@ export default {
             return this.$root.agentStatusList[this.endpoint] === "online";
         },
     },
-    mounted() {
-        this.$root.emitAgent(this.endpoint, "joinCombinedTerminal", this.stackName, (res) => {
-            if (!res?.ok) {
-                this.$root.toastRes(res);
+    watch: {
+        runOutcome(value) {
+            if (value && this.connected) {
+                this.join();
             }
-        });
+        },
+        connected(value) {
+            if (value) {
+                this.join();
+            }
+        },
+        stackStatus() {
+            if (this.connected) {
+                this.join();
+            }
+        },
+    },
+    mounted() {
+        this.join();
 
         // Высота консоли зависит от экрана. Когда окно меняет размер, xterm
         // остается в старой сетке и налезает на подпись, поэтому область под
@@ -92,9 +115,19 @@ export default {
         this.observer.observe(this.$refs.body);
     },
     beforeUnmount() {
+        this.disposed = true;
+        this.$root.emitAgentRequest(this.endpoint, "leaveCombinedTerminal", [ this.stackName ]);
         this.observer?.disconnect();
     },
     methods: {
+        /** Reattach when the stream or connection was replaced. */
+        join() {
+            this.$root.emitAgentRequest(this.endpoint, "joinCombinedTerminal", [ this.stackName ]).then((res) => {
+                if (!this.disposed && !res?.ok) {
+                    this.$root.toastRes(res);
+                }
+            });
+        },
         /** Подогнать вывод под область: скрытый xterm не знает своего размера */
         refit() {
             this.$refs.terminal?.updateTerminalSize?.();

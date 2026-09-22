@@ -78,3 +78,35 @@ test("a history bucket containing a stop is not painted as uninterrupted running
     ], HOUR, NOW, 1);
     assert.notEqual(history[0]?.state, "running");
 });
+
+test("history clips unsorted intervals, duplicate starts, gaps and future observations", () => {
+    const history = buildStabilityHistory([
+        { status: ATTENTION,
+            at: NOW - HOUR,
+            until: NOW + HOUR },
+        { status: RUNNING,
+            at: NOW - 5 * HOUR,
+            until: NOW - 2 * HOUR },
+        { status: RUNNING,
+            at: NOW - HOUR,
+            until: NOW },
+        { status: EXITED,
+            at: NOW + HOUR,
+            until: NOW + 2 * HOUR },
+    ], 4 * HOUR, NOW, 4);
+    assert.deepEqual(history.map(bucket => [ bucket.state, bucket.coverage ]), [
+        [ "running", 1 ], [ "running", 1 ], [ "unknown", 0 ], [ "running", 1 ],
+    ]);
+});
+
+test("thousands of short alternating intervals retain exact coverage across bucket boundaries", () => {
+    const changes = Array.from({ length: 5000 }, (_, i) => ({
+        at: i * 1000,
+        until: i * 1000 + 500,
+        status: i % 2 === 0 ? RUNNING : ATTENTION,
+    }));
+    const history = buildStabilityHistory(changes, 5_000_000, 5_000_000, 50);
+    assert.ok(history.every(bucket => bucket.state === "attention" && bucket.coverage === 0.5));
+    assert.equal(history[0]?.from, 0);
+    assert.equal(history.at(-1)?.to, 5_000_000);
+});

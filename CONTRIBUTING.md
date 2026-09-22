@@ -132,6 +132,36 @@ scene in `test/visual/scene.ts`, so the same revision always gives the same fram
 committed under `test/visual/baseline/`. A difference fails the run and is reviewed, one by one -
 re-approving is a decision, not a step of the run.
 
+## Performance checks
+
+Build once, then run the isolated production probe:
+
+```bash
+npm run build:frontend -- --manifest
+npm run test:performance
+```
+
+The probe creates its own database, account and undeployed stack directories, runs 100 files-route
+round trips, and removes its temporary runtime on completion. It reads host Docker state but never
+deploys the fixture stacks. Results and private runtime logs stay under ignored `output/performance/`.
+Do not publish raw logs; use the sanitized result JSON. The frontend build is copied into the runtime.
+
+For deterministic row counts without contacting the host Docker daemon:
+
+```bash
+DOCKGE_PERF_CONTAINERS=500 DOCKGE_PERF_STACKS=50 DOCKGE_PERF_CYCLES=5 DOCKGE_PERF_CPU_RATE=4 npm run test:performance
+```
+
+`DOCKGE_PERF_OUTPUT` selects an output directory. `DOCKGE_PERF_VIEWERS=5` compares one and five local
+dashboard clients with the synthetic Docker fixture. `DOCKGE_PERF_VISIBILITY=1` injects visibility
+events and records outgoing event names, not their arguments. This tests application scheduling, not
+the operating system's tab suspension. `DOCKGE_PERF_LIMITS=1` requires Linux systemd user scopes and
+runs a 30 minute local screen with `MemoryMax=1G` and `CPUQuota=100%`; it includes backend children,
+but excludes Chromium and the Docker daemon. It is not a substitute for qualification on a small VPS.
+
+See [the performance results](docs/plans/2026-09-22-performance-results.md) for measured improvements,
+cache ownership, rejected experiments and remaining deployment qualification.
+
 ## Database Migration
 
 TODO

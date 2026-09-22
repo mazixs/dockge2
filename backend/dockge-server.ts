@@ -622,14 +622,16 @@ export class DockgeServer {
                     return;
                 }
 
-                await this.observeStacks(signal).catch((e) => log.error("observations", e));
+                const observed = await this.observeStacks(signal).catch((e) => {
+                    log.error("observations", e);
+                });
 
                 // Every step asks again: the shutdown can begin while Docker is answering,
                 // and what follows is work nobody is waiting for any more
                 if (signal.aborted || this.resources.stopping) {
                     return;
                 }
-                await this.sendStackList(true);
+                await this.sendStackList(true, observed || undefined);
 
                 if (signal.aborted || this.resources.stopping) {
                     return;
@@ -853,9 +855,9 @@ export class DockgeServer {
      * Kept apart from sending the list: availability has to be counted while nobody has
      * the panel open, or the percentage would describe how long someone was watching the
      * screen rather than how the stack ran.
-     * @returns {void}
+     * @returns The observed list for publication, or undefined if the round was cancelled
      */
-    async observeStacks(signal? : AbortSignal) : Promise<void> {
+    async observeStacks(signal? : AbortSignal) : Promise<Map<string, Stack> | undefined> {
         const stackList = await Stack.getStackList(this, true);
 
         // Reading Docker takes as long as Docker takes, and the shutdown can start in the
@@ -879,9 +881,14 @@ export class DockgeServer {
         // The signal goes on into the collector: Docker is read again there, and a stop
         // landing inside that read used to come back to a database that was already closed
         await observeContainerStability(stackList, await readOwnProjectName(), signal);
+        return signal?.aborted ? undefined : stackList;
     }
 
-    async sendStackList(useCache = false) {
+    async sendStackList(useCache = false, observed? : Map<string, Stack>) {
+        if (!useCache) {
+            // Explicit publication follows a mutation; pre-operation usage is no longer current.
+            this.dockerStatsReading.invalidate();
+        }
         let socketList = this.io.sockets.sockets.values();
 
         let stackList;
@@ -894,7 +901,7 @@ export class DockgeServer {
 
                 // Get the list only if there is a logged in user
                 if (!stackList) {
-                    stackList = await Stack.getStackList(this, useCache);
+                    stackList = observed ?? await Stack.getStackList(this, useCache);
                     await Stack.fillAvailability(stackList);
                 }
 
@@ -952,7 +959,7 @@ export class DockgeServer {
 
     /**
      * Ask Docker for the statistics of every running container
-     * @returns Statistics by container name, empty when Docker cannot answer
+     * @returns Statistics by container name; rejects when Docker cannot answer
      */
     protected async readDockerStats() : Promise<Map<string, object>> {
         let stats = new Map<string, object>();
@@ -981,7 +988,7 @@ export class DockgeServer {
             return stats;
         } catch (e) {
             log.error("getDockerStats", e);
-            return stats;
+            throw new Error("dockerStatsUnavailable", { cause: e });
         }
     }
 

@@ -10,6 +10,7 @@ import { isContainerShell } from "../../common/util-common";
 
 export class TerminalSocketHandler extends AgentSocketHandler {
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
+        const logJoins = new Map<string, symbol>();
 
         agentSocket.on("terminalInput", async (terminalName : unknown, cmd : unknown, callback) => {
             try {
@@ -200,13 +201,17 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Stack name must be a string.");
                 }
 
+                const token = Symbol();
+                logJoins.set(stackName, token);
                 const stack = await Stack.getStack(server, stackName);
 
                 if (!stack.isManagedByDockge) {
                     throw new ValidationError("This stack is not managed by Dockge.");
                 }
 
-                await stack.joinCombinedTerminal(socket);
+                if (logJoins.get(stackName) === token && socket.connected !== false) {
+                    await stack.joinCombinedTerminal(socket);
+                }
 
                 callbackResult({
                     ok: true,
@@ -227,8 +232,11 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Stack name must be a string.");
                 }
 
+                logJoins.delete(stackName);
                 const stack = await Stack.getStack(server, stackName);
-                await stack.leaveCombinedTerminal(socket);
+                if (!logJoins.has(stackName)) {
+                    await stack.leaveCombinedTerminal(socket);
+                }
 
                 callbackResult({
                     ok: true,

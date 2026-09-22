@@ -52,7 +52,7 @@
              стало с каждым сервисом, она не повторяет - это говорит таблица
              сервисов теми же словами, которыми отвечает compose -->
         <StackProgress
-            v-if="stack.isManagedByDockge && $root.canManageStacks"
+            v-if="stack.isManagedByDockge && $root.canManageStacks && (running || runHasOutput || runOutcome)"
             ref="progress"
             :key="stackName"
             :stack-name="stackName"
@@ -309,10 +309,10 @@
 
         <!-- Журнал: вывод стека, только чтение. Сюда смотрят, когда что-то упало -->
         <transition name="tab">
-            <div v-if="logsMounted" v-show="tab === 'logs'" class="tab-panel fill">
+            <div v-if="tab === 'logs'" class="tab-panel fill">
                 <div class="inspector-grid">
                     <div class="inspector-main">
-                        <StackJournal :key="stackName" ref="journal" :stack-name="stackName" :endpoint="endpoint" />
+                        <StackJournal :key="stackName" ref="journal" :stack-name="stackName" :endpoint="endpoint" :run-outcome="runOutcome" />
                     </div>
                     <StackSourcePanel :source="source" :directory="stackPath" :files-url="filesUrl" :git-url="gitUrl" :compare-promoted="$root.canManageStacks" />
                 </div>
@@ -355,6 +355,7 @@ import StackJournal from "../components/StackJournal.vue";
 import StackTerminals from "../components/StackTerminals.vue";
 import StackProgress from "../components/StackProgress.vue";
 import { defineAsyncComponent, markRaw } from "vue";
+import { VisibleTask } from "../visible-task";
 import { RequestTracker } from "../request-tracker";
 import { StackRun } from "../stack-run";
 import Uptime from "../components/Uptime.vue";
@@ -435,8 +436,8 @@ export default {
             allIssues: false,
             /** @type {ReturnType<typeof setTimeout> | undefined} */
             statusTimer: undefined,
-            /** @type {ReturnType<typeof setInterval> | undefined} */
-            ageTimer: undefined,
+            /** @type {import("../visible-task").VisibleTask | null} */
+            ageTask: null,
             /**
              * Разобранный compose с подставленными переменными окружения
              * @type {import("../../../common/compose-editor").ComposeModel}
@@ -480,8 +481,6 @@ export default {
              * @type {import("../../../common/availability").Availability | null}
              */
             availabilityData: null,
-            /** Журнал остается живым после ухода на другую вкладку: иначе вывод начнется заново */
-            logsMounted: false,
             /** Терминал тем более: размонтирование убивает открытые оболочки */
             terminalMounted: false,
             /**
@@ -850,8 +849,7 @@ export default {
     },
     watch: {
         // Выбор другого стека в списке остается в том же компоненте
-        stackName(to, from) {
-            this.leaveLogs(from, this.stack.endpoint || "");
+        stackName() {
             // Просьба открыть оболочку принадлежала прежнему стеку
             this.shellRequest = null;
             this.loadStack();
@@ -864,9 +862,7 @@ export default {
                     return;
                 }
 
-                if (value === "logs") {
-                    this.logsMounted = true;
-                } else {
+                if (value === "terminal") {
                     this.terminalMounted = true;
                 }
 
@@ -890,11 +886,13 @@ export default {
         this.loadStack();
 
         // Возраст замера идет секундами: подпись таблицы обещает именно это
-        this.ageTimer = setInterval(() => {
+        this.ageTask = markRaw(new VisibleTask(document, 1000, () => {
             if (this.statusReadAt) {
                 this.statusAgeSeconds = Math.round((Date.now() - this.statusReadAt) / 1000);
             }
-        }, 1000);
+        }));
+        this.ageTask.start();
+        document.addEventListener("visibilitychange", this.onVisibility);
     },
     unmounted() {
         window.removeEventListener("scroll", this.dismissServiceMenus, true);
@@ -905,28 +903,20 @@ export default {
         // Ответы, которые еще придут, не относятся ни к какому экрану
         this.requests.invalidate();
         clearTimeout(this.statusTimer);
-        clearInterval(this.ageTimer);
+        this.ageTask?.stop();
+        document.removeEventListener("visibilitychange", this.onVisibility);
         this.operation.release();
-        this.leaveLogs(this.stackName, this.endpoint);
     },
     methods: {
         stackColor,
-        /**
-         * `getStack` подписывает клиента на вывод стека, поэтому уходя надо отписаться.
-         * Журнал этого же стека уходит вместе со страницей, так что чужую подписку
-         * это не рвет.
-         * @param {string} stackName Стек, от которого уходим
-         * @param {string} endpoint Агент
-         * @returns {void}
-         */
-        leaveLogs(stackName, endpoint) {
-            if (!this.$root.canManageStacks || !stackName) {
-                return;
+        /** Resume from one current reading; server commands and observations keep running. */
+        onVisibility() {
+            clearTimeout(this.statusTimer);
+            if (!document.hidden) {
+                this.requestServiceStatus();
+                this.requestAvailability();
             }
-
-            this.$root.emitAgent(endpoint, "leaveCombinedTerminal", stackName, () => {});
         },
-
         /**
          * Уход со вкладки файлов спрашивает про несохраненные правки: редактор
          * больше не отдельная страница, но его вопрос никуда не делся
@@ -1070,7 +1060,7 @@ export default {
         requestServiceStatus(generation) {
             const current = generation ?? this.requests.generation;
 
-            if (!this.isCurrentRequest(current)) {
+            if (document.hidden || !this.isCurrentRequest(current)) {
                 return;
             }
 
@@ -1106,9 +1096,7 @@ export default {
                     return;
                 }
 
-                if (res.ok) {
-                    this.dockerStats = res.dockerStats;
-                }
+                this.dockerStats = res.ok ? res.dockerStats : {};
             });
         },
 

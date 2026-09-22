@@ -1,4 +1,9 @@
 {
+    "stabilityPagination": "Container pages",
+    "stabilityPreviousPage": "Previous",
+    "stabilityNextPage": "Next",
+    "stabilityPage": "Page {0} of {1}",
+    "dockerStatsUnavailable": "Container statistics are unavailable. They will be retried automatically.",
     "languageName": "English",
     "setupTitle": "Create your account",
     "setupHint": "Create the first owner account. After setup, the owner can issue accounts and assign their permissions.",

@@ -25,7 +25,9 @@
 </template>
 
 <script>
-import { Modal } from "bootstrap";
+import Modal from "bootstrap/js/dist/modal";
+import { shallowRef } from "vue";
+import { ownModal } from "../modal-lifecycle";
 
 export default {
     props: {
@@ -52,10 +54,15 @@ export default {
     },
     emits: [ "yes", "no" ],
     data: () => ({
-        modal: null,
+        modal: shallowRef(null),
+        releaseModal: null,
     }),
     mounted() {
         this.modal = new Modal(this.$refs.modal);
+        this.releaseModal = ownModal(this.$refs.modal, this.modal);
+    },
+    beforeUnmount() {
+        this.releaseModal?.();
     },
     methods: {
         /**

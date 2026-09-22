@@ -112,7 +112,9 @@
 </template>
 
 <script>
-import { Modal } from "bootstrap";
+import Modal from "bootstrap/js/dist/modal";
+import { shallowRef } from "vue";
+import { ownModal } from "../modal-lifecycle";
 import Terminal from "./Terminal.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { getComposeTerminalName, PROGRESS_TERMINAL_ROWS } from "../../../common/util-common";
@@ -170,6 +172,8 @@ export default {
     data() {
         return {
             open: false,
+            releaseModal: null,
+            dialog: shallowRef(null),
             /** Команда, чей ход сейчас показан: после конца ее имя еще нужно в строке */
             lastCommand: "",
             tasks: [],
@@ -285,6 +289,10 @@ export default {
     },
     mounted() {
         this.dialog = new Modal(this.$refs.dialog);
+        this.releaseModal = ownModal(this.$refs.dialog, this.dialog);
+        if (this.running) {
+            this.startRun(this.running);
+        }
 
         // Закрытое окно не имеет размера, и xterm не может себя измерить:
         // сетка подгоняется в тот момент, когда окно уже на экране
@@ -309,8 +317,7 @@ export default {
         this.$refs.dialog?.removeEventListener("shown.bs.modal", this.refit);
         // Окно уносит с собой затемнение: без явного закрытия оно осталось бы
         // висеть над следующим стеком
-        this.dialog?.hide();
-        this.dialog?.dispose();
+        this.releaseModal?.();
         this.observer?.disconnect();
         this.writeSub?.dispose();
         clearTimeout(this.sampleTimer);

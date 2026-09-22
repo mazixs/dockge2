@@ -83,8 +83,9 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, markRaw } from "vue";
-import { Modal } from "bootstrap";
+import { defineComponent, shallowRef } from "vue";
+import Modal from "bootstrap/js/dist/modal";
+import { ownModal } from "../modal-lifecycle";
 import Confirm from "./Confirm.vue";
 import { authClient } from "../auth-client";
 import { authErrorMessage } from "../auth-messages";
@@ -104,7 +105,8 @@ export default defineComponent({
             currentPassword: "",
             processing: false,
             /** The dialog itself, kept as it is: Bootstrap works on the element, not on a copy */
-            modal: null as Modal | null,
+            modal: shallowRef<Modal | null>(null),
+            releaseModal: null as (() => void) | null,
             /** Address the authenticator reads, null while the setup has not started */
             uri: null as string | null,
             /** Whether the account has two factor on, null while it is not known */
@@ -122,22 +124,30 @@ export default defineComponent({
     },
     mounted() {
         const element = this.$refs.modal as HTMLElement;
-        this.modal = markRaw(new Modal(element));
+        this.modal = new Modal(element);
+        this.releaseModal = ownModal(element, this.modal);
         this.getStatus();
 
         // Closing the dialog halfway leaves a secret the account never confirmed. It is
         // harmless - `better-auth` does not switch two factor on until the code is
         // verified, so the next login still takes the password alone - but the dialog
         // has to say so, or the reader is left thinking they locked themselves out
-        element.addEventListener("hidden.bs.modal", () => {
+        element.addEventListener("hidden.bs.modal", this.onHidden);
+    },
+    beforeUnmount() {
+        (this.$refs.modal as HTMLElement).removeEventListener("hidden.bs.modal", this.onHidden);
+        this.releaseModal?.();
+        this.reset();
+    },
+    methods: {
+        /** Clear unfinished secrets when the dialog closes. */
+        onHidden() {
             if (this.uri && !this.confirmed) {
                 this.$root.toastError("twoFASetupAbandoned");
             }
 
             this.reset();
-        });
-    },
-    methods: {
+        },
         /** Show the dialog */
         show() {
             this.modal?.show();

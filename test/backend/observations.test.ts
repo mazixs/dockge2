@@ -1,6 +1,40 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { Database } from "../../backend/database";
+import { readAvailabilityBatch } from "../../backend/observations";
+
+test("batch availability matches individual reads and keeps endpoint boundaries", async () => {
+    await withDatabase(async () => {
+        const now = 1_700_000_000_000;
+        const day = 86_400_000;
+        await Database.getKnex()("stack_observation").insert([
+            { stack_name: "a",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: now - 2 * day,
+                observed_until: now - 1000 },
+            { stack_name: "a",
+                endpoint: "",
+                status: ATTENTION,
+                observed_at: now - 1000,
+                observed_until: now },
+            { stack_name: "a",
+                endpoint: "remote",
+                status: EXITED,
+                observed_at: now - day,
+                observed_until: now },
+            { stack_name: "b",
+                endpoint: "",
+                status: RUNNING,
+                observed_at: now - 3 * day,
+                observed_until: now - 2 * day },
+        ]);
+        const batch = await readAvailabilityBatch([ "a", "b", "missing" ], "", day, now);
+        for (const name of [ "a", "b", "missing" ]) {
+            assert.deepEqual(batch.get(name), await readAvailability(name, "", day, now));
+        }
+    });
+});
 import { pruneOldObservations, readAvailability, readChanges, recordScan, recordStatus, resetObservationState, RETENTION_MS } from "../../backend/observations";
 import { ATTENTION, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 import { withDatabase } from "../helpers/database";

@@ -148,6 +148,8 @@ export default {
         return {
             /** @type {import("../../../common/types/stack-git").GitUpdatePreview | null} */
             preview: null,
+            previewEndpoint: "",
+            previewStackName: "",
             selectedPath: "",
             /** @type {Record<string, import("../../../common/types/stack-git").GitFileChoice>} */
             choices: {},
@@ -160,8 +162,6 @@ export default {
             /** @type {import("../../../common/types/stack-git").GitSaveResult | null} */
             result: null,
             requestVersion: 0,
-            /** @type {ReturnType<typeof setTimeout> | undefined} */
-            previewTimeout: undefined,
         };
     },
     computed: {
@@ -243,8 +243,10 @@ export default {
          * @returns {void}
          */
         forgetRequest() {
-            clearTimeout(this.previewTimeout);
-            this.previewTimeout = undefined;
+            if (this.preview && !this.applying) {
+                this.$root.emitAgentRequest(this.previewEndpoint, "gitDiscardPreview", [ this.previewStackName, this.preview.id ]);
+            }
+            this.preview = null;
             this.requestVersion++;
             this.loading = false;
             this.applying = false;
@@ -303,33 +305,34 @@ export default {
                 this.failure = this.$t("gitUiRequestFailed");
                 return;
             }
-            clearTimeout(this.previewTimeout);
             const version = ++this.requestVersion;
-            this.previewTimeout = setTimeout(() => {
-                if (version === this.requestVersion) {
-                    this.requestVersion++;
-                    this.loading = false;
-                    this.failure = this.$t("gitUiPreviewTimeout");
-                }
-            }, 90_000);
             this.loading = true;
             this.failure = "";
+            if (this.preview) {
+                this.$root.emitAgentRequest(this.previewEndpoint, "gitDiscardPreview", [ this.previewStackName, this.preview.id ]);
+            }
             this.preview = null;
             this.choices = {};
             this.editedContents = {};
             this.review = false;
             this.result = null;
-            this.$root.emitAgent(this.endpoint, "gitPreviewUpdate", this.stackName, (res) => {
+            const endpoint = this.endpoint;
+            const stackName = this.stackName;
+            this.$root.emitAgentRequest(endpoint, "gitPreviewUpdate", [ stackName ], { timeoutMs: 90_000 }).then((res) => {
                 if (version !== this.requestVersion) {
+                    if (res?.ok) {
+                        this.$root.emitAgentRequest(endpoint, "gitDiscardPreview", [ stackName, res.preview.id ]);
+                    }
                     return;
                 }
-                clearTimeout(this.previewTimeout);
                 this.loading = false;
                 if (!res?.ok) {
-                    this.failure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
+                    this.failure = res?.unknown ? this.$t("gitUiPreviewTimeout") : this.$root.serverText(res?.msg, "gitUiRequestFailed");
                     return;
                 }
                 this.preview = res.preview;
+                this.previewEndpoint = endpoint;
+                this.previewStackName = stackName;
                 this.selectedPath = res.preview.files[0]?.path || "";
             });
         },

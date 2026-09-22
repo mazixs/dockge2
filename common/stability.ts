@@ -94,28 +94,43 @@ export function containerUptime(state : string, startedAt : number | null, obser
 /** Build a compact history whose partial buckets retain the amount of missing evidence. */
 export function buildStabilityHistory(changes : readonly StatusChange[], windowMs : number, now : number, count = 48) : StabilityHistoryBucket[] {
     const sorted = changes.slice().sort((a, b) => a.at - b.at);
-    return Array.from({ length: count }, (_, index) => {
-        const from = now - windowMs + index * windowMs / count;
-        const to = from + windowMs / count;
-        let knownMs = 0;
-        let runningMs = 0;
-        let attentionMs = 0;
-        for (const [ changeIndex, change ] of sorted.entries()) {
-            if (change.status === UNKNOWN) {
-                continue;
+    const width = windowMs / count;
+    const beginning = now - windowMs;
+    const buckets = Array.from({ length: count }, (_, index) => ({
+        from: beginning + index * width,
+        to: beginning + (index + 1) * width,
+        knownMs: 0,
+        runningMs: 0,
+        attentionMs: 0,
+    }));
+    for (const [ index, change ] of sorted.entries()) {
+        if (change.status === UNKNOWN) {
+            continue;
+        }
+        const from = Math.max(beginning, change.at);
+        const to = Math.min(now, change.until ?? change.at, sorted[index + 1]?.at ?? now);
+        if (!(to > from)) {
+            continue;
+        }
+        // Visit only intersecting buckets rather than scanning every interval 48 times.
+        for (let bucketIndex = Math.max(0, Math.floor((from - beginning) / width)); bucketIndex < count; bucketIndex++) {
+            const bucket = buckets[bucketIndex]!;
+            if (bucket.from >= to) {
+                break;
             }
-            const overlap = Math.max(0, Math.min(change.until ?? change.at, sorted[changeIndex + 1]?.at ?? to, to) - Math.max(change.at, from));
-            knownMs += overlap;
+            const overlap = Math.max(0, Math.min(to, bucket.to) - Math.max(from, bucket.from));
+            bucket.knownMs += overlap;
             if (change.status === RUNNING) {
-                runningMs += overlap;
+                bucket.runningMs += overlap;
             } else if (change.status === ATTENTION) {
-                attentionMs += overlap;
+                bucket.attentionMs += overlap;
             }
         }
-        const state : StabilityState = knownMs === 0 ? "unknown" : (attentionMs > 0 || (runningMs > 0 && runningMs < knownMs)) ? "attention" : runningMs > 0 ? "running" : "stopped";
-        return { from,
-            to,
-            state,
-            coverage: Math.min(1, knownMs / (to - from)) };
-    });
+    }
+    return buckets.map(({ from, to, knownMs, runningMs, attentionMs }) => ({
+        from,
+        to,
+        state: knownMs === 0 ? "unknown" : (attentionMs > 0 || (runningMs > 0 && runningMs < knownMs)) ? "attention" : runningMs > 0 ? "running" : "stopped",
+        coverage: Math.min(1, knownMs / (to - from)),
+    }));
 }

@@ -15,6 +15,45 @@ const config: StackFileConfig = { composeFileName: "compose.yaml",
 const compose = "# preserve this comment\r\nservices:\r\n  app:\r\n    image: nginx:1\r\n";
 const updatedCompose = compose.replace("nginx:1", "nginx:2");
 
+test("discarding an abandoned comparison prevents apply without modifying files", async (t) => {
+    const f = await fixture(t);
+    const preview = await f.workflow.preview(f.stack, config);
+    f.workflow.discard(f.stack, preview.id);
+    await assert.rejects(f.workflow.apply(f.stack, { stackName: "stack",
+        previewId: preview.id,
+        choices: {},
+        deploy: false }, config), /gitComparisonExpired/);
+    assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), compose);
+});
+
+test("large valid comparisons fit individually and evict older payloads by bytes", async (t) => {
+    const f = await fixture(t);
+    const oneMiB = "a".repeat(1024 * 1024);
+    for (let index = 0; index < 19; index++) {
+        await fs.writeFile(path.join(f.upstream, `large-${index}.txt`), oneMiB);
+    }
+    git(f.upstream, "add", ".");
+    git(f.upstream, "commit", "-m", "large baseline");
+    const first = path.join(f.root, "large-first");
+    const second = path.join(f.root, "large-second");
+    await f.workflow.clone(first, f.input, { ...config });
+    await f.workflow.clone(second, f.input, { ...config });
+    for (let index = 0; index < 19; index++) {
+        await fs.writeFile(path.join(f.upstream, `large-${index}.txt`), "b".repeat(1024 * 1024));
+    }
+    git(f.upstream, "add", ".");
+    git(f.upstream, "commit", "-m", "large update");
+    const old = await f.workflow.preview(first, config);
+    const current = await f.workflow.preview(second, config);
+    assert.equal(current.files.length, 19, "the supported repository size remains usable");
+    await assert.rejects(f.workflow.apply(first, { stackName: "large-first",
+        previewId: old.id,
+        choices: {},
+        deploy: false }, config), /gitComparisonExpired/);
+    f.workflow.discard(second, current.id);
+    assert.equal(await fs.readFile(path.join(first, "large-0.txt"), "utf8"), oneMiB);
+});
+
 function git(dir: string, ...args: string[]): string {
     return execFileSync("git", args, { cwd: dir,
         encoding: "utf8",

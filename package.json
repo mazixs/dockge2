@@ -11,6 +11,7 @@
         "check-ts": "tsc --noEmit",
         "check-vue": "vue-tsc --noEmit -p tsconfig.vue.json",
         "test:unit": "node --import tsx --test --test-concurrency=1 \"test/backend/*.test.ts\" \"test/common/*.test.ts\" \"test/frontend/*.test.ts\"",
+        "test:performance": "node --import tsx extra/performance-audit.ts",
         "test:install": "bash test/install/run.sh",
         "test:docker-integration": "cross-env DOCKGE_DOCKER_INTEGRATION=1 node --import tsx --test --test-concurrency=1 \"test/docker/*.test.ts\"",
         "coverage": "c8 npm run test:unit",

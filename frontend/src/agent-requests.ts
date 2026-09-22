@@ -37,6 +37,7 @@ export type AgentRequestSender = <E extends AgentRequestName>(
     eventName : E,
     args : AgentRequestArgs<E>,
     ack : (response : AgentRequestResult<E> | undefined) => void,
+    timeoutMs : number,
 ) => void;
 
 /**
@@ -106,7 +107,7 @@ export class AgentRequests {
             const timer = setTimeout(() => settle(unknown()), timeoutMs);
 
             this.waitingList.set(id, settle as (response : AgentErrorResponse) => void);
-            this.send(endpoint, eventName, args, (response) => settle(response ?? unknown()));
+            this.send(endpoint, eventName, args, (response) => settle(response ?? unknown()), timeoutMs);
         });
     }
 

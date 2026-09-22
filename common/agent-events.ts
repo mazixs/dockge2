@@ -151,6 +151,7 @@ export interface AgentRequestContract extends AgentEventContract {
     gitCloneStack : { args : [ payload : GitCloneInput ]; result : AgentResponse<GitSaveResult> };
     gitListBranches : { args : [ repository : string ]; result : AgentResponse<{ branches : string[] }> };
     gitPreviewUpdate : { args : [ stackName : string ]; result : AgentResponse<{ preview : GitUpdatePreview }> };
+    gitDiscardPreview : { args : [ stackName : string, previewId : string ]; result : AgentResponse };
     gitApplyUpdate : { args : [ payload : GitApplyInput ]; result : AgentResponse<GitSaveResult> };
 
     // Terminals
@@ -242,6 +243,7 @@ const REQUEST_NAMES : Record<AgentRequestName, true> = {
     gitCloneStack: true,
     gitListBranches: true,
     gitPreviewUpdate: true,
+    gitDiscardPreview: true,
     gitApplyUpdate: true,
     terminalInput: true,
     mainTerminal: true,

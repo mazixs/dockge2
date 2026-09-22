@@ -13,6 +13,7 @@ export class SharedReading<T> {
     protected value : T | undefined = undefined;
     protected readAt = 0;
     protected request : Promise<T> | undefined = undefined;
+    private generation = 0;
 
     /**
      * @param read How to produce the value
@@ -35,15 +36,20 @@ export class SharedReading<T> {
             return this.request;
         }
 
-        this.request = this.read().then((value) => {
-            this.value = value;
-            this.readAt = Date.now();
+        const generation = this.generation;
+        const request = this.read().then((value) => {
+            if (this.generation === generation) {
+                this.value = value;
+                this.readAt = Date.now();
+            }
             return value;
         }).finally(() => {
-            this.request = undefined;
+            if (this.request === request) {
+                this.request = undefined;
+            }
         });
-
-        return this.request;
+        this.request = request;
+        return request;
     }
 
     /**
@@ -53,5 +59,7 @@ export class SharedReading<T> {
     invalidate() : void {
         this.value = undefined;
         this.readAt = 0;
+        this.generation++;
+        this.request = undefined;
     }
 }

@@ -48,6 +48,7 @@ blob-report
 docs
 test
 extra/seed-review.ts
+extra/performance-*
 playwright.config.ts
 playwright-visual.config.ts
 .github

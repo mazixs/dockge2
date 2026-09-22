@@ -196,8 +196,9 @@ export class StabilityCollector {
             // a link anywhere. That the panel is up is evident from the page being
             // there at all
             const observed = ownProject ? runtime.filter((container) => container.project !== ownProject) : runtime;
+            const managedByPath = new Map([ ...stacks.values() ].filter(stack => stack.isManagedByDockge).map(stack => [ stack.path, stack ]));
             const containers : StoredContainer[] = observed.map((container) => {
-                const managed = [ ...stacks.values() ].find((stack) => stack.isManagedByDockge && stack.path === container.workingDir)
+                const managed = managedByPath.get(container.workingDir)
                     ?? stacks.get(container.project);
                 return { ...container,
                     stackName: managed?.name ?? container.project,

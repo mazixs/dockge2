@@ -9,7 +9,7 @@ import { ellipsisTitle } from "./directives/ellipsis-title";
 import { rootApp } from "./root";
 
 // Dependencies
-import "bootstrap";
+import "bootstrap/js/dist/dropdown";
 import Vue3Toastify, { toast } from "vue3-toastify";
 
 // CSS

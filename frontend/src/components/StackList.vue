@@ -69,7 +69,7 @@
                 </EmptyState>
             </div>
 
-            <div v-for="(agent, agentIndex) in agentStackList" :key="agentIndex" class="stack-list-inner">
+            <div v-for="agent in agentStackList" :key="agent.endpoint" class="stack-list-inner">
                 <button
                     v-if="$root.agentCount > 1"
                     class="agent-select" type="button"
@@ -83,8 +83,8 @@
                 </button>
 
                 <StackListItem
-                    v-for="(item, index) in agent.stacks"
-                    v-show="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)" :key="index" :stack="item" :isSelectMode="selectMode"
+                    v-for="item in agent.stacks"
+                    v-show="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)" :key="item.name" :stack="item" :isSelectMode="selectMode"
                     :isSelected="isSelected" :select="select" :deselect="deselect"
                 />
             </div>

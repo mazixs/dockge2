@@ -20,14 +20,14 @@ const StackGitChanges = () => import("./pages/StackGitChanges.vue");
 const Settings = () => import("./pages/Settings.vue");
 
 // Settings - Sub Pages
-import Appearance from "./components/settings/Appearance.vue";
-import General from "./components/settings/General.vue";
+const Appearance = () => import("./components/settings/Appearance.vue");
+const General = () => import("./components/settings/General.vue");
 const Security = () => import("./components/settings/Security.vue");
 const Mcp = () => import("./components/settings/Mcp.vue");
 const Users = () => import("./components/settings/Users.vue");
 const Agents = () => import("./components/settings/Agents.vue");
 const GlobalEnv = () => import("./components/settings/GlobalEnv.vue");
-import About from "./components/settings/About.vue";
+const About = () => import("./components/settings/About.vue");
 
 const routes = [
     {

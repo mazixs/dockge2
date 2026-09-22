@@ -1,3 +1,4 @@
+import { BoundedCache } from "./bounded-cache";
 import fs from "node:fs";
 import path from "node:path";
 import { runGit } from "./git-command";
@@ -17,7 +18,8 @@ interface CacheEntry {
     readAt : number;
 }
 
-const cache = new Map<string, CacheEntry>();
+const cache = new BoundedCache<CacheEntry>(4 * 1024 * 1024, 512, CACHE_MS);
+const pending = new Map<string, Promise<StackSource>>();
 
 /**
  * Run one git command inside a directory and return its trimmed output.
@@ -116,16 +118,29 @@ export function cleanRemote(remote : string) : string {
  * @returns What the directory says about itself
  */
 export async function readStackSource(dir : string, now = Date.now()) : Promise<StackSource> {
-    const cached = cache.get(dir);
+    const cached = cache.get(dir, now);
 
     if (cached && now - cached.readAt < CACHE_MS) {
         return cached.source;
     }
 
-    const source = await readFromDisk(dir);
-    cache.set(dir, { source,
-        readAt: now });
-    return source;
+    const active = pending.get(dir);
+    if (active) {
+        return active;
+    }
+    const request = readFromDisk(dir).then((source) => {
+        if (pending.get(dir) === request) {
+            cache.set(dir, { source,
+                readAt: now }, 2 * JSON.stringify(source).length, now);
+        }
+        return source;
+    }).finally(() => {
+        if (pending.get(dir) === request) {
+            pending.delete(dir);
+        }
+    });
+    pending.set(dir, request);
+    return request;
 }
 
 /**
@@ -226,7 +241,9 @@ function fetchedAt(dir : string) : number | null {
 export function clearStackSourceCache(dir? : string) : void {
     if (dir) {
         cache.delete(dir);
+        pending.delete(dir);
         return;
     }
     cache.clear();
+    pending.clear();
 }

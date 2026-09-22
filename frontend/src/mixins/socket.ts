@@ -1,3 +1,5 @@
+import { TerminalBindings } from "../terminal-bindings";
+import { reconcileSnapshot } from "../snapshot-identity";
 import { io } from "socket.io-client";
 import { Socket } from "socket.io-client";
 import { defineComponent } from "vue";
@@ -20,7 +22,7 @@ let socket : Socket;
 let initializationDeadline : ReturnType<typeof setTimeout> | undefined;
 let sessionRefresh : { generation : number; socketID : string | undefined; userID : string; promise : Promise<boolean> } | undefined;
 
-let terminalMap : Map<string, Terminal> = new Map();
+const terminalMap = new TerminalBindings<Terminal>();
 
 /**
  * Requests still waiting for their acknowledgement, and what happens when none comes.
@@ -29,8 +31,11 @@ let terminalMap : Map<string, Terminal> = new Map();
  * request and the ending of everything still waiting live in `AgentRequests`, where they
  * are tested without a browser.
  */
-const agentRequests = new AgentRequests((endpoint, eventName, args, ack) => {
-    socket.emit("agent", endpoint, eventName, ...args, ack);
+const agentRequests = new AgentRequests((endpoint, eventName, args, ack, timeoutMs) => {
+    // Release Socket.IO's acknowledgement closure too, not only our waiting list.
+    socket.timeout(timeoutMs).emit("agent", endpoint, eventName, ...args, (error : Error | null, response : AgentRequestResult<typeof eventName>) => {
+        ack(error ? undefined : response);
+    });
 });
 
 /**
@@ -391,7 +396,7 @@ export default defineComponent({
                     // Когда список пришел: шапка честно говорит, насколько он свежий
                     this.stackListAt = Date.now();
                     if (!res.endpoint) {
-                        this.stackList = stackList;
+                        this.stackList = reconcileSnapshot(this.stackList, stackList);
                         this.applySessionBootstrap({ type: "stacks",
                             generation: this.sessionBootstrap.generation });
                     } else {
@@ -402,7 +407,7 @@ export default defineComponent({
                         }
                         const instance = this.allAgentStackList[res.endpoint];
                         if (instance) {
-                            instance.stackList = stackList;
+                            instance.stackList = reconcileSnapshot(instance.stackList, stackList);
                         }
                     }
                 }
@@ -771,12 +776,14 @@ export default defineComponent({
         },
 
         bindTerminal(endpoint : string, terminalName : string, terminal : Terminal) {
-            // Load terminal, get terminal screen
-            this.emitAgent(endpoint, "terminalJoin", terminalName, (res) => {
+            const token = terminalMap.begin(terminalName);
+            // A late acknowledgement must not resurrect an unmounted renderer.
+            this.emitAgentRequest(endpoint, "terminalJoin", [ terminalName ]).then((res) => {
                 if (res.ok) {
-                    terminal.write(res.buffer);
-                    terminalMap.set(terminalName, terminal);
-                } else {
+                    if (terminalMap.accept(terminalName, token, terminal)) {
+                        terminal.write(res.buffer);
+                    }
+                } else if (terminalMap.reject(terminalName, token)) {
                     const root = this.$root as unknown as { toastRes: (response: AgentErrorResponse) => void };
                     root.toastRes(res);
                 }

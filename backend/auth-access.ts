@@ -157,7 +157,7 @@ export function accessPlugin() {
 export const VIEWER_EVENTS = new Set([ "requestStackList", "serviceStatusList", "stackAvailability", "stabilityOverview" ]);
 /** Agent events an operator may send, a viewer being allowed a part of them */
 export const OPERATOR_EVENTS = new Set([
-    ...VIEWER_EVENTS, "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
+    ...VIEWER_EVENTS, "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitDiscardPreview", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
     "restartStack", "updateStack", "downStack", "stackUpdatePreview", "abortCompose", "getStackFiles",
     "setStackFiles", "saveEnvFile", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
     "bindSecret", "unbindSecret", "dockerStats", "startService", "stopService", "restartService", "updateService",

@@ -104,7 +104,6 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msgi18n: true,
                     fileHashes,
                 }, callback);
-                stack.joinCombinedTerminal(socket);
             } catch (e) {
                 callbackError(e, callback);
             }
@@ -164,10 +163,6 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 const stack = await Stack.getStack(server, stackName);
 
-                if (stack.isManagedByDockge) {
-                    stack.joinCombinedTerminal(socket);
-                }
-
                 callbackResult({
                     ok: true,
                     stack: await stack.toJSON(socket.endpoint),
@@ -209,8 +204,6 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msgi18n: true,
                 }, callback);
                 runInBackground("stack list", () => server.sendStackList());
-
-                stack.joinCombinedTerminal(socket);
 
             } catch (e) {
                 callbackError(e, callback);
@@ -685,7 +678,6 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 const stack = await Stack.getStack(server, stackName);
                 await stack.startService(socket, serviceName);
-                stack.joinCombinedTerminal(socket); // Ensure the combined terminal is joined
                 callbackResult({
                     ok: true,
                     msg: {
@@ -711,6 +703,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 const stack = await Stack.getStack(server, stackName);
                 await stack.stopService(socket, serviceName);
+                runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
                     msg: {
@@ -735,6 +728,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 const stack = await Stack.getStack(server, stackName);
                 await stack.restartService(socket, serviceName);
+                runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
                     msg: {
@@ -758,6 +752,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 const stack = await Stack.getStack(server, stackName);
                 await stack.updateService(socket, serviceName);
+                runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
                     msg: {
@@ -905,4 +900,3 @@ function parseStackFileConfig(config : unknown) : StackFileConfig {
         secretBindings: parseSecretBindings(raw.secretBindings),
     };
 }
-

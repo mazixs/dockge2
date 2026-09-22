@@ -90,6 +90,11 @@ export async function recordScan(
     signal? : AbortSignal,
 ) : Promise<number> {
     let written = 0;
+    for (const [ key, previous ] of lastStatus) {
+        if (now - previous.at > MAX_SCAN_GAP_MS) {
+            lastStatus.delete(key);
+        }
+    }
 
     for (const stack of stacks) {
         // Every stack is a separate write with a wait in front of it, so a shutdown can
@@ -187,6 +192,31 @@ export async function readChanges(stackName : string, endpoint : string, windowM
 export async function readAvailability(stackName : string, endpoint : string, windowMs : number, now = Date.now()) : Promise<Availability> {
     const changes = await readChanges(stackName, endpoint, windowMs, now);
     return computeAvailability(changes, windowMs, now);
+}
+
+/** Read one endpoint's selected stacks in bounded SQL batches, including the left-edge interval. */
+export async function readAvailabilityBatch(names : readonly string[], endpoint : string, windowMs : number, now = Date.now()) : Promise<Map<string, Availability>> {
+    const changes = new Map(names.map(name => [ name, [] as StatusChange[] ]));
+    const knex = Database.getKnex();
+    for (let offset = 0; offset < names.length; offset += 400) {
+        const rows = await knex("stack_observation")
+            .select("stack_name", "status", "observed_at", "observed_until")
+            .where({ endpoint })
+            .whereIn("stack_name", names.slice(offset, offset + 400))
+            .andWhere("observed_until", ">=", now - windowMs)
+            .orderBy("observed_at", "asc");
+        for (const row of rows) {
+            changes.get(row.stack_name)?.push({ status: Number(row.status),
+                at: Number(row.observed_at),
+                until: Number(row.observed_until) });
+        }
+    }
+    return new Map([ ...changes ].map(([ name, rows ]) => [ name, computeAvailability(rows, windowMs, now) ]));
+}
+
+/** Release disappeared stacks without deleting their historical observations. */
+export function forgetObservation(stackName : string, endpoint = "") : void {
+    lastStatus.delete(keyOf(stackName, endpoint));
 }
 
 /**

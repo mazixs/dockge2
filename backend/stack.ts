@@ -43,10 +43,12 @@ import {
 } from "../common/util-common";
 import { InteractiveTerminal, Terminal } from "./terminal";
 import { spawn } from "./child-process";
-import { readStackSource, type StackSource } from "./stack-source";
+import { discardStackGitPreviews } from "./stack-git";
+import { clearStackSourceCache, readStackSource, type StackSource } from "./stack-source";
 import { composeArgs } from "./compose-args";
 import { removeStackContainers } from "./stack-delete";
-import { readAvailability } from "./observations";
+import { readAvailabilityBatch, forgetObservation } from "./observations";
+import { mapConcurrent } from "../common/map-concurrent";
 import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
 import { withStackLock } from "./stack-lock";
@@ -772,6 +774,9 @@ export class Stack {
             await fsAsync.rm(this.path, { recursive: true,
                 force: true });
             await StackConfig.removeQuiet(this.name);
+            clearStackSourceCache(this.path);
+            discardStackGitPreviews(this.path);
+            forgetObservation(this.name);
             return 0;
         });
     }
@@ -915,27 +920,24 @@ export class Stack {
     /**
      * Fill the availability of every stack over the last day.
      *
-     * One query per stack is enough here: the history holds only status changes, so a
-     * stack that has been running for a month answers with a single row. The queries
-     * are started together rather than one after the other - they do not depend on each
-     * other, and awaiting each in turn made the first screen wait for as many database
-     * round trips as there are stacks.
+     * Read bounded SQL batches instead of two independent queries per stack.
      * @param stackList Stacks of this scan
      * @returns void
      */
     static async fillAvailability(stackList : Map<string, Stack>) : Promise<void> {
         const day = 24 * 3_600_000;
 
-        await Promise.all([ ...stackList.values() ].map(async (stack) => {
-            try {
-                stack._availability = await readAvailability(stack.name, "", day);
-            } catch (e) {
-                // No history is a normal answer, an error here must not drop the list
-                if (e instanceof Error) {
-                    log.debug("getStackList", `Cannot read the history of ${stack.name}: ${e.message}`);
-                }
+        try {
+            const readings = await readAvailabilityBatch([ ...stackList.keys() ], "", day);
+            for (const stack of stackList.values()) {
+                stack._availability = readings.get(stack.name) ?? null;
             }
-        }));
+        } catch (error) {
+            log.debug("getStackList", "Cannot read stack availability");
+            for (const stack of stackList.values()) {
+                stack._availability = null;
+            }
+        }
     }
 
     /**
@@ -949,9 +951,8 @@ export class Stack {
      * @returns void
      */
     protected static async fillStackDetails(stackList : Map<string, Stack>) : Promise<void> {
-        // Started together for the same reason as the availability above: every stack
-        // is described from its own directory and none of them waits on another
-        await Promise.all([ ...stackList.values() ].map(async (stack) => {
+        // A cold metadata cache must not start Git processes for every stack at once.
+        await mapConcurrent([ ...stackList.values() ], 4, async (stack) => {
             if (!stack.isManagedByDockge) {
                 return;
             }
@@ -972,7 +973,7 @@ export class Stack {
                     log.debug("getStackList", `Cannot describe ${stack.name}: ${e.message}`);
                 }
             }
-        }));
+        });
     }
 
     /**

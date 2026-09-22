@@ -9,6 +9,7 @@ interface SentRequest {
     eventName : string;
     args : unknown[];
     ack : (response : never) => void;
+    timeoutMs : number;
 }
 
 /**
@@ -18,10 +19,11 @@ interface SentRequest {
  */
 function requester(defaultTimeoutMs = 50) : { requests : AgentRequests, sent : SentRequest[] } {
     const sent : SentRequest[] = [];
-    const requests = new AgentRequests((endpoint, eventName, args, ack) => {
+    const requests = new AgentRequests((endpoint, eventName, args, ack, timeoutMs) => {
         sent.push({ endpoint,
             eventName,
             args: [ ...args ],
+            timeoutMs,
             ack: ack as (response : never) => void });
     }, defaultTimeoutMs);
 
@@ -44,6 +46,7 @@ test("an answer ends the request and stops it being counted as waiting", async (
 
     assert.equal(requests.waiting, 1);
     assert.deepEqual(sent[0]?.args, [ "app" ]);
+    assert.equal(sent[0]?.timeoutMs, 50, "the transport must expire its acknowledgement at the same deadline");
     answer(sent[0] as SentRequest, { ok: true,
         inventory: { files: [],
             secrets: [] } } as never);
@@ -113,6 +116,8 @@ test("the deadline of one request does not end another", async () => {
     const slow = requests.request("", "updateStack", [ "app" ], { timeoutMs: 20 });
     const waiting = requests.request("", "getStack", [ "app" ]);
     const slowResponse = await slow;
+    assert.equal(sent[0]?.timeoutMs, 20);
+    assert.equal(sent[1]?.timeoutMs, 5000);
 
     assert.equal(slowResponse.ok, false);
     assert.equal(requests.waiting, 1);

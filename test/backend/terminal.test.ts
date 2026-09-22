@@ -5,6 +5,7 @@ import { AgentSocket } from "../../common/agent-socket";
 import { TerminalSocketHandler } from "../../backend/agent-socket-handlers/terminal-socket-handler";
 import type { DockgeServer } from "../../backend/dockge-server";
 import { InteractiveTerminal, Terminal } from "../../backend/terminal";
+import { Stack } from "../../backend/stack";
 import type { DockgeSocket } from "../../backend/util-server";
 
 /**
@@ -265,4 +266,71 @@ test("leaving a shared stack terminal does not end it", async () => {
     assert.equal(Terminal.getTerminal(name), terminal);
 
     terminal.kill();
+});
+
+test("a real PTY burst reaches the live client while replay remains bounded", async (context) => {
+    const size = 4 * 1024 * 1024;
+    let received = 0;
+    const socket = makeSocket("burst-client");
+    socket.emitAgent = (event, ...args) => {
+        if (event === "terminalWrite") {
+            received += Buffer.byteLength(String(args[1]));
+        }
+    };
+    const terminal = new Terminal({ stacksDir: os.tmpdir() } as DockgeServer, "test-burst", process.execPath, [
+        "-e", `process.stdout.write("x".repeat(${size}), () => process.stdout.write("BURST-END", () => process.exit(0)));`,
+    ], os.tmpdir());
+    context.after(() => terminal.kill());
+    let exit : number | undefined;
+    terminal.onExit(code => {
+        exit = code;
+    });
+    terminal.join(socket);
+    terminal.start();
+    assert.ok(await waitFor(() => exit !== undefined));
+    assert.equal(exit, 0);
+    assert.equal(received, size + "BURST-END".length, "live output must not use the truncated replay");
+    const replay = terminal.getBuffer();
+    assert.match(replay, /^\[Earlier terminal output omitted\]/);
+    assert.ok(replay.endsWith("BURST-END"));
+    assert.ok(Buffer.byteLength(replay) <= 1024 * 1024 + 64);
+    assert.equal(Terminal.getTerminal("test-burst"), undefined);
+});
+
+test("leaving logs cancels a delayed join and a fresh join survives a delayed leave", async (context) => {
+    const server = { stacksDir: os.tmpdir() } as DockgeServer;
+    const socket = makeSocket("log-race-client");
+    const handlers = new AgentSocket();
+    new TerminalSocketHandler().create(socket, server, handlers);
+    let joins = 0;
+    let leaves = 0;
+    const stack = { isManagedByDockge: true,
+        joinCombinedTerminal: async () => {
+            joins++;
+        },
+        leaveCombinedTerminal: async () => {
+            leaves++;
+        } } as unknown as Stack;
+    const pending : ((value : Stack) => void)[] = [];
+    context.mock.method(Stack, "getStack", () => new Promise<Stack>(resolve => pending.push(resolve)));
+    const call = (event : string) => new Promise<Record<string, unknown>>(resolve => {
+        handlers.call(event, "fixture", (response : Record<string, unknown>) => resolve(response));
+    });
+    const oldJoin = call("joinCombinedTerminal");
+    const leave = call("leaveCombinedTerminal");
+    pending[1]!(stack);
+    assert.equal((await leave).ok, true);
+    pending[0]!(stack);
+    assert.equal((await oldJoin).ok, true);
+    assert.equal(joins, 0);
+    assert.equal(leaves, 1);
+
+    const oldLeave = call("leaveCombinedTerminal");
+    const freshJoin = call("joinCombinedTerminal");
+    pending[3]!(stack);
+    assert.equal((await freshJoin).ok, true);
+    pending[2]!(stack);
+    assert.equal((await oldLeave).ok, true);
+    assert.equal(joins, 1);
+    assert.equal(leaves, 1);
 });

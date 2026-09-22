@@ -196,6 +196,19 @@ export class GitSocketHandler extends AgentSocketHandler {
                 callbackError(safeError(error), callback);
             }
         });
+        agentSocket.on("gitDiscardPreview", async (stackName: unknown, previewId: unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (typeof stackName !== "string" || typeof previewId !== "string" || previewId.length > 100) {
+                    throw new StackGitError("gitApplyInvalidParameters");
+                }
+                const dir = Stack.getSafePath(server, stackName);
+                getStackGitWorkflow(server).discard(dir, previewId);
+                callbackResult({ ok: true }, callback);
+            } catch (error) {
+                callbackError(safeError(error), callback);
+            }
+        });
         agentSocket.on("gitApplyUpdate", async (payload: unknown, callback) => {
             try {
                 const input = payload as GitApplyInput;

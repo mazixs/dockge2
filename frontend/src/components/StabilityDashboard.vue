@@ -46,16 +46,18 @@
         </details>
 
         <!-- Сервер - панель, стеки внутри нее - группы строк под тонкими линиями -->
-        <section v-for="host in hosts" :key="host.endpoint" class="panel host" :aria-label="host.label">
+        <section v-for="host in pagedHosts" :key="host.endpoint" class="panel host" :aria-label="host.label">
             <div class="panel-bar">
                 <h2 class="panel-title"><InterfaceIcon name="server" />{{ host.label }}</h2>
                 <span v-if="!host.online" class="panel-meta host-warning">{{ $t("stabilityAgentOffline") }}</span>
-                <span v-else-if="host.overview?.observedAt" class="panel-meta">{{ $t("stabilityObservedAt", [ dateTime(host.overview.observedAt) ]) }}</span>
+                <span v-else-if="host.overview?.observedAt" class="panel-meta">
+                    <span v-if="hostIsStale(host)">{{ $t("stabilityNoFreshData") }} · </span>{{ $t("stabilityObservedAt", [ dateTime(host.overview.observedAt) ]) }}
+                </span>
             </div>
 
             <p v-if="host.loading && !host.overview" class="panel-body host-message" role="status">{{ $t("stabilityLoading") }}</p>
 
-            <div v-else-if="host.error || host.overview?.error || hostIsStale(host)" class="panel-body host-message" role="status">
+            <div v-else-if="host.error || host.overview?.error || !host.online" class="panel-body host-message" role="status">
                 <span>{{ hostMessage(host) }}</span>
                 <button v-if="host.online && hostCanRetry(host)" class="btn btn-sm btn-normal" type="button" :disabled="host.loading" @click="loadHost(host.endpoint)">{{ $t("stabilityRetry") }}</button>
             </div>
@@ -65,6 +67,11 @@
             <!-- Один сервер - одна таблица: колонки называются один раз и стоят
                  на общей сетке, а стек становится строкой-заголовком внутри нее.
                  Отдельные таблицы на каждый стек ломали эту сетку -->
+            <nav v-if="host.page.pages > 1" class="container-pages" :aria-label="$t('stabilityPagination')">
+                <button type="button" class="btn btn-sm btn-normal" :disabled="host.page.current === 1" @click="pages[host.endpoint] = host.page.current - 1">{{ $t("stabilityPreviousPage") }}</button>
+                <span role="status">{{ $t("stabilityPage", [host.page.current, host.page.pages]) }}</span>
+                <button type="button" class="btn btn-sm btn-normal" :disabled="host.page.current === host.page.pages" @click="pages[host.endpoint] = host.page.current + 1">{{ $t("stabilityNextPage") }}</button>
+            </nav>
             <div v-if="(host.overview?.stacks ?? []).length > 0" class="container-table-wrap">
                 <table class="container-table">
                     <caption class="visually-hidden">{{ $t("stabilityHostTableCaption", [ host.label ]) }}</caption>
@@ -77,13 +84,13 @@
                             <th scope="col">{{ $t("stabilityAvailability") }}</th>
                         </tr>
                     </thead>
-                    <tbody v-for="stack in host.overview?.stacks ?? []" :key="stack.name" class="stack-group">
+                    <tbody v-for="stack in host.page.groups" :key="stack.name" class="stack-group">
                         <tr class="group-row">
                             <th colspan="5" scope="colgroup">
                                 <span class="group-name">
                                     <router-link v-if="stack.managed" :to="stackRoute(stack.name, host.endpoint)">{{ stack.name }}</router-link>
                                     <span v-else>{{ stack.standalone ? $t("stabilityStandalone") : stack.name }}</span>
-                                    <span class="group-count">{{ $t("pagesContainers", [stack.containers.length]) }}</span>
+                                    <span class="group-count">{{ $t("pagesContainers", [stack.totalContainers]) }}</span>
                                 </span>
                             </th>
                         </tr>
@@ -112,7 +119,7 @@
                                     <small>{{ $t("stabilityCoverage", [ percent(container.availability.coveredMs / container.availability.windowMs) ]) }}</small>
                                 </div>
                                 <div class="container-history" role="img" :aria-label="historyLabel(container)">
-                                    <span v-for="(bucket, index) in container.history" :key="index" class="history-bucket" :title="bucketLabel(bucket)">
+                                    <span v-for="(bucket, index) in container.history" :key="index" class="history-bucket" :title="bucketLabels.get(bucket)">
                                         <i :class="`history-${bucket.state}`" :style="{ width: `${bucket.coverage * 100}%` }"></i>
                                     </span>
                                 </div>
@@ -126,7 +133,9 @@
 </template>
 
 <script lang="ts">
-import { defineComponent } from "vue";
+import { defineComponent, markRaw } from "vue";
+import { VisibleTask } from "../visible-task";
+import { stabilityPage } from "../stability-pages";
 import { formatDuration, formatPercent } from "../format";
 import { STABILITY_WINDOWS, STABILITY_STALE_MS, runtimeStatus, type StabilityOverview, type StabilityContainer, type StabilityHistoryBucket, type StabilityState, type StabilityWindow } from "../../../common/stability";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
@@ -153,17 +162,37 @@ export default defineComponent({
             windows: STABILITY_WINDOWS,
             states: [ "running", "attention", "stopped", "unknown" ] as StabilityState[],
             snapshots: {} as Record<string, StabilityOverview>,
+            pages: {} as Record<string, number>,
             pending: {} as Record<string, boolean>,
             errors: {} as Record<string, boolean>,
             requestIds: {} as Record<string, number>,
-            requestTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
-            refreshTimer: null as ReturnType<typeof setInterval> | null,
-            clockTimer: null as ReturnType<typeof setInterval> | null,
+            refreshTask: null as VisibleTask | null,
+            clockTask: null as VisibleTask | null,
+            pendingWindows: {} as Record<string, number>,
             now: Date.now(),
             disposed: false,
         };
     },
     computed: {
+        dateFormatter() : Intl.DateTimeFormat {
+            return new Intl.DateTimeFormat(this.$i18n.locale, { month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit" });
+        },
+        bucketLabels() : Map<StabilityHistoryBucket, string> {
+            const labels = new Map<StabilityHistoryBucket, string>();
+            for (const host of this.pagedHosts) {
+                for (const stack of host.page.groups) {
+                    for (const container of stack.containers) {
+                        for (const bucket of container.history) {
+                            labels.set(bucket, this.bucketLabel(bucket));
+                        }
+                    }
+                }
+            }
+            return labels;
+        },
         connections() {
             const endpoints = new Set([ "", ...Object.values(this.$root.agentList ?? {}).map((agent) => agent.endpoint) ]);
             return [ ...endpoints ].filter(endpoint => this.$root.selectedEndpoint === null || endpoint === this.$root.selectedEndpoint).map((endpoint) => ({ endpoint,
@@ -181,6 +210,10 @@ export default defineComponent({
         },
         activeFilter() : string {
             return String(this.$route.query.filter ?? "");
+        },
+        pagedHosts() {
+            return this.hosts.map(host => ({ ...host,
+                page: stabilityPage(host.overview?.stacks ?? [], this.pages[host.endpoint]) }));
         },
         loading() : boolean {
             return Object.values(this.pending).some(Boolean);
@@ -212,26 +245,23 @@ export default defineComponent({
         },
     },
     mounted() {
-        this.reload();
-        this.refreshTimer = setInterval(() => this.reload(), 30_000);
-        this.clockTimer = setInterval(() => {
+        this.refreshTask = markRaw(new VisibleTask(document, 30_000, () => this.reload()));
+        this.clockTask = markRaw(new VisibleTask(document, 5_000, () => {
             this.now = Date.now();
-        }, 5_000);
+        }));
+        this.refreshTask.start();
+        this.clockTask.start();
     },
     beforeUnmount() {
         this.disposed = true;
-        if (this.refreshTimer) {
-            clearInterval(this.refreshTimer);
-        }
-        if (this.clockTimer) {
-            clearInterval(this.clockTimer);
-        }
-        for (const timer of Object.values(this.requestTimers)) {
-            clearTimeout(timer);
-        }
+        this.refreshTask?.stop();
+        this.clockTask?.stop();
     },
     methods: {
         reload() {
+            if (document.hidden || this.disposed) {
+                return;
+            }
             for (const { endpoint, online } of this.connections) {
                 if (online) {
                     this.loadHost(endpoint);
@@ -239,29 +269,20 @@ export default defineComponent({
             }
         },
         loadHost(endpoint : string) {
+            if (document.hidden || this.disposed || (this.pending[endpoint] && this.pendingWindows[endpoint] === this.windowHours)) {
+                return;
+            }
+            this.pendingWindows[endpoint] = this.windowHours;
             const requestId = (this.requestIds[endpoint] ?? 0) + 1;
             this.requestIds[endpoint] = requestId;
-            const previousTimer = this.requestTimers[endpoint];
-            if (previousTimer) {
-                clearTimeout(previousTimer);
-            }
             this.pending[endpoint] = true;
-            this.errors[endpoint] = false;
-            this.requestTimers[endpoint] = setTimeout(() => {
-                if (!this.disposed && this.requestIds[endpoint] === requestId) {
-                    this.pending[endpoint] = false;
-                    this.errors[endpoint] = true;
-                    this.requestIds[endpoint] = requestId + 1;
-                }
-            }, 10_000);
-            this.$root.emitAgent(endpoint, "stabilityOverview", this.windowHours, (response) => {
+            this.$root.emitAgentRequest(endpoint, "stabilityOverview", [ this.windowHours ], { timeoutMs: 10_000 }).then((response) => {
                 if (this.disposed || this.requestIds[endpoint] !== requestId) {
                     return;
                 }
-                clearTimeout(this.requestTimers[endpoint]);
                 this.pending[endpoint] = false;
                 if (response.ok) {
-                    this.snapshots[endpoint] = response.overview;
+                    this.snapshots[endpoint] = markRaw(response.overview);
                     this.errors[endpoint] = false;
                 } else {
                     this.errors[endpoint] = true;
@@ -296,7 +317,7 @@ export default defineComponent({
          * @returns Истина, если повтор запроса имеет смысл
          */
         hostCanRetry(host : HostView) : boolean {
-            return host.overview?.error !== "noObservation";
+            return host.error || host.overview?.error === "dockerUnavailable";
         },
         hostIsStale(host : HostView) : boolean {
             return !host.online || host.error || !host.overview || host.overview.stale || !host.overview.observedAt || this.now - host.overview.observedAt > STABILITY_STALE_MS;
@@ -346,10 +367,7 @@ export default defineComponent({
             return formatPercent(ratio, this.$i18n.locale, true);
         },
         dateTime(timestamp : number) : string {
-            return new Date(timestamp).toLocaleString(this.$i18n.locale, { month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit" });
+            return this.dateFormatter.format(timestamp);
         },
         historyLabel(container : StabilityContainer) : string {
             return this.$t("stabilityHistoryLabel", [ container.name, this.$t(`availabilityWindow${this.windowHours}`), this.availabilityLabel(container), this.percent(container.availability.coveredMs / container.availability.windowMs) ]);
@@ -376,6 +394,15 @@ export default defineComponent({
 <style scoped lang="scss">
 .stability-dashboard {
     color: var(--text-strong);
+}
+
+.container-pages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gap-sm);
+    padding: var(--gap-md);
 }
 
 .actions .control-label {

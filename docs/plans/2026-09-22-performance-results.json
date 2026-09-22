@@ -1,0 +1,824 @@
+{
+    "schemaVersion": 1,
+    "date": "2026-09-22",
+    "baseCommit": "d1003358dc5c231997d64da0fad80856b829bdfc",
+    "applicationVersion": "0.0.7",
+    "status": "local uncommitted implementation; no release or deployment",
+    "navigation": {
+        "date": "2026-09-22T08:26:42.944Z",
+        "node": "v22.23.2",
+        "browser": "151.0.7922.34",
+        "stackCount": 50,
+        "cycles": 100,
+        "cpuThrottling": false,
+        "serverLimits": {
+            "MemoryCurrent": "195686400",
+            "MemoryPeak": "274182144",
+            "CPUUsageNSec": "19961405000",
+            "TasksCurrent": "39",
+            "CPUQuotaPerSecUSec": "1s",
+            "MemoryMax": "1073741824"
+        },
+        "productionBuild": true,
+        "pageErrors": [],
+        "existingWorkloadsModified": false,
+        "measurements": [
+            {
+                "label": "overview-initial",
+                "heapMiB": 6.377437591552734,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 1804,
+                    "jsEventListeners": 138
+                },
+                "elements": 915,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "overview-warmed",
+                "heapMiB": 12.394229888916016,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 2428,
+                    "jsEventListeners": 223
+                },
+                "elements": 927,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-20-files-roundtrips",
+                "heapMiB": 14.180362701416016,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 4564,
+                    "jsEventListeners": 239
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-40-files-roundtrips",
+                "heapMiB": 14.63968276977539,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 4564,
+                    "jsEventListeners": 239
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-60-files-roundtrips",
+                "heapMiB": 15.424690246582031,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 5168,
+                    "jsEventListeners": 317
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-80-files-roundtrips",
+                "heapMiB": 15.05133056640625,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 4564,
+                    "jsEventListeners": 239
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-100-files-roundtrips",
+                "heapMiB": 15.838054656982422,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 5168,
+                    "jsEventListeners": 317
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "settled",
+                "heapMiB": 15.291252136230469,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 4564,
+                    "jsEventListeners": 239
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "inspector-only-control",
+                "heapMiB": 14.901859283447266,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 4644,
+                    "jsEventListeners": 225
+                },
+                "elements": 2808,
+                "editors": 0,
+                "terminals": 0
+            }
+        ]
+    },
+    "largeOverviewBeforePaginationCpu4": {
+        "date": "2026-09-22T08:45:40.023Z",
+        "node": "v22.23.2",
+        "browser": "151.0.7922.34",
+        "stackCount": 50,
+        "cycles": 1,
+        "syntheticContainers": 500,
+        "viewers": null,
+        "clock": {
+            "intervalMs": 6000,
+            "formatCalls": 1,
+            "longTasksMs": [
+                292
+            ]
+        },
+        "filterToSecondFrameMs": [
+            371.5,
+            380.2999999821186,
+            381,
+            389.09999999403954,
+            390,
+            390.90000000596046,
+            398.2999999821186,
+            400.30000001192093,
+            409.59999999403954,
+            409.80000001192093,
+            415.19999998807907,
+            418.09999999403954,
+            428.59999999403954,
+            429.30000001192093,
+            431.69999998807907,
+            437.60000002384186,
+            448.69999998807907,
+            470.89999997615814,
+            510.80000001192093,
+            638.4000000059605
+        ],
+        "cpuThrottling": 4,
+        "serverLimits": null,
+        "productionBuild": true,
+        "pageErrors": [],
+        "existingWorkloadsModified": false,
+        "measurements": [
+            {
+                "label": "overview-initial",
+                "heapMiB": 27.397464752197266,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 65483,
+                    "jsEventListeners": 1190
+                },
+                "elements": 57501,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "overview-warmed",
+                "heapMiB": 34.28800964355469,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 67258,
+                    "jsEventListeners": 1326
+                },
+                "elements": 58107,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-1-files-roundtrips",
+                "heapMiB": 34.09467697143555,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 67258,
+                    "jsEventListeners": 1326
+                },
+                "elements": 58107,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "settled",
+                "heapMiB": 35.08267593383789,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 67258,
+                    "jsEventListeners": 1326
+                },
+                "elements": 58107,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "inspector-only-control",
+                "heapMiB": 35.13675308227539,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 66650,
+                    "jsEventListeners": 1246
+                },
+                "elements": 58107,
+                "editors": 0,
+                "terminals": 0
+            }
+        ]
+    },
+    "largeOverviewAfterPaginationCpu4": {
+        "date": "2026-09-22T08:48:33.729Z",
+        "node": "v22.23.2",
+        "browser": "151.0.7922.34",
+        "stackCount": 50,
+        "cycles": 1,
+        "syntheticContainers": 500,
+        "viewers": null,
+        "clock": {
+            "intervalMs": 6000,
+            "formatCalls": 1,
+            "longTasksMs": []
+        },
+        "filterToSecondFrameMs": [
+            45.599999994039536,
+            47.10000002384186,
+            48.5,
+            48.60000002384186,
+            51.19999998807907,
+            52,
+            53,
+            53.19999998807907,
+            54.400000005960464,
+            61.099999994039536,
+            70.2000000178814,
+            81.2000000178814,
+            82.5,
+            85.2000000178814,
+            87.69999998807907,
+            95.10000002384186,
+            102.2999999821186,
+            105.09999999403954,
+            108.90000000596046,
+            133.90000000596046
+        ],
+        "cpuThrottling": 4,
+        "serverLimits": null,
+        "productionBuild": true,
+        "pageErrors": [],
+        "existingWorkloadsModified": false,
+        "measurements": [
+            {
+                "label": "overview-initial",
+                "heapMiB": 9.714946746826172,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 6836,
+                    "jsEventListeners": 197
+                },
+                "elements": 5935,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "overview-warmed",
+                "heapMiB": 16.689105987548828,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 8611,
+                    "jsEventListeners": 333
+                },
+                "elements": 6541,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "after-1-files-roundtrips",
+                "heapMiB": 16.463375091552734,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 8611,
+                    "jsEventListeners": 333
+                },
+                "elements": 6541,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "settled",
+                "heapMiB": 16.554561614990234,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 8611,
+                    "jsEventListeners": 333
+                },
+                "elements": 6541,
+                "editors": 0,
+                "terminals": 0
+            },
+            {
+                "label": "inspector-only-control",
+                "heapMiB": 16.289920806884766,
+                "dom": {
+                    "documents": 2,
+                    "nodes": 8003,
+                    "jsEventListeners": 253
+                },
+                "elements": 6541,
+                "editors": 0,
+                "terminals": 0
+            }
+        ]
+    },
+    "pagination": {
+        "keyboardNext": true,
+        "previousRestored": true,
+        "maximumRows": 50
+    },
+    "localViewerScaling": {
+        "one": {
+            "intervalMs": 30001,
+            "counts": {
+                "compose-list": 3,
+                "instances": 3,
+                "runtime-ids": 1,
+                "inspect-batch": 1
+            }
+        },
+        "five": {
+            "intervalMs": 30005,
+            "counts": {
+                "compose-list": 3,
+                "instances": 3
+            }
+        },
+        "remoteAgents": 0
+    },
+    "simulatedVisibility": {
+        "simulatedVisibility": true,
+        "overview": {
+            "hiddenMs": 35000,
+            "hidden": [],
+            "resumed": [
+                "stabilityOverview"
+            ],
+            "resumedSynchronously": true
+        },
+        "inspector": {
+            "hiddenMs": 12000,
+            "hidden": [],
+            "resumed": [
+                "dockerStats",
+                "serviceStatusList",
+                "stackAvailability"
+            ],
+            "resumedSynchronously": true
+        }
+    },
+    "historyAlgorithm": {
+        "before": {
+            "containers": 100,
+            "changesPerContainer": 5000,
+            "buckets": 48,
+            "samplesMs": [
+                281.47912699999995,
+                234.37559200000004,
+                229.26596900000004,
+                231.577319,
+                236.54576700000007,
+                230.45685600000002
+            ]
+        },
+        "after": {
+            "containers": 100,
+            "changesPerContainer": 5000,
+            "buckets": 48,
+            "samplesMs": [
+                25.92843000000002,
+                14.145477999999997,
+                14.192636000000022,
+                14.262147999999996,
+                13.862105999999983,
+                15.996297999999996
+            ]
+        }
+    },
+    "bundle": {
+        "entryRawKiB": 675.46,
+        "entryGzipKiB": 221.8,
+        "rawLimitKiB": 780,
+        "gzipLimitKiB": 250
+    },
+    "limitations": [
+        "Different baseline navigation harness; no exact memory improvement percentage",
+        "Navigation/soak precede final transport deadline and demand-driven log refinements",
+        "CPU x4 is not a physical low-memory client",
+        "One local endpoint; no remote agent qualification",
+        "No 24 hour soak or dedicated VPS image install/update",
+        "Git budget is retained payload accounting, not total process RSS",
+        "No sustained multi-viewer stream backpressure benchmark"
+    ],
+    "constrainedScreen": {
+        "completed": true,
+        "processExitCode": 0,
+        "durationMs": 1800000,
+        "scope": "backend and CLI children only",
+        "profile": "50 undeployed stacks, host read-only Docker discovery, one mostly idle overview after 100 navigation cycles",
+        "samples": [
+            {
+                "elapsedMs": 2,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "195948544",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "19962569000",
+                    "TasksCurrent": "39",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 60011,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "154423296",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "20832368000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 120020,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "154914816",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "21368233000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 180029,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "155189248",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "21959202000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 240037,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "156913664",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "22456992000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 300045,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "158035968",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "22950194000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 360053,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "158609408",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "23459859000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 420061,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159805440",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "23968777000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 480069,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160047104",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "24542191000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 540076,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160714752",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "25020835000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 600083,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160030720",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "25511542000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 660091,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "158441472",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "26065969000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 720099,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "158842880",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "26584492000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 780109,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159088640",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "27133128000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 840118,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159223808",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "27616269000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 900126,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159760384",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "28197130000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 960136,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159969280",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "28715577000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1020144,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159739904",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "29280491000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1080153,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160034816",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "29844071000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1140162,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160776192",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "30405467000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1200170,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160083968",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "30924067000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1260179,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160526336",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "31429694000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1320187,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "159969280",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "31926214000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1380197,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160243712",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "32504266000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1440205,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160575488",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "33035916000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1500214,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160882688",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "33516020000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1560222,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160350208",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "34048415000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1620231,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "161198080",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "34596464000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1680239,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160178176",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "35109452000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            },
+            {
+                "elapsedMs": 1740257,
+                "healthy": true,
+                "resources": {
+                    "MemoryCurrent": "160686080",
+                    "MemoryPeak": "274182144",
+                    "CPUUsageNSec": "35681034000",
+                    "TasksCurrent": "25",
+                    "CPUQuotaPerSecUSec": "1s",
+                    "MemoryMax": "1073741824"
+                }
+            }
+        ]
+    },
+    "checks": {
+        "fullCheck": {
+            "tests": 571,
+            "passed": 571,
+            "failed": 0,
+            "status": "passed",
+            "lineCoveragePercent": 88.27,
+            "branchCoveragePercent": 85.36,
+            "coverageFloors": "passed",
+            "lintWarning": "preexisting extra blank line in CreateStackSheet.vue"
+        },
+        "e2e": {
+            "passed": 17,
+            "status": "passed",
+            "note": "Complete six-spec group; test-created e2e-files container/network manually cleaned after teardown could not parse its intentionally changed Compose environment"
+        },
+        "productionBuild": "passed",
+        "bundle": "passed",
+        "updaterDryRun": "passed; no update executed",
+        "paginationKeyboard": "passed",
+        "visibilityInjection": "passed",
+        "diffWhitespace": "passed"
+    }
+}

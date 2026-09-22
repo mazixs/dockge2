@@ -2,6 +2,7 @@ import { promises as fs, constants } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID, createHash } from "node:crypto";
+import { BoundedCache } from "./bounded-cache";
 import { runGit } from "./git-command";
 import { clearStackSourceCache } from "./stack-source";
 import type { GitApplyInput, GitCloneInput, GitPreviewFile, GitUpdatePreview } from "../common/types/stack-git";
@@ -16,11 +17,15 @@ const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_FILES = 1000;
 const PREVIEW_MS = 10 * 60 * 1000;
 const MAX_BRANCHES = 500;
+// Two 20 MiB trees plus UTF-16 comparison text and a bounded index fit one preview.
+const PREVIEW_BUDGET = 128 * 1024 * 1024;
+let buildingPreview = false;
 
 type FileState = { bytes: Buffer; mode: number };
 type FileTree = Map<string, FileState>;
 
 interface StoredPreview {
+    owner: symbol;
     dir: string;
     createdAt: number;
     public: GitUpdatePreview;
@@ -28,6 +33,39 @@ interface StoredPreview {
     target: FileTree;
     config: StackFileConfig;
     index: Buffer;
+}
+
+const storedPreviews = new BoundedCache<StoredPreview>(PREVIEW_BUDGET, 10, PREVIEW_MS);
+
+/** Release retained comparisons when their directory is deleted. */
+export function discardStackGitPreviews(dir: string): void {
+    for (const [ id, item ] of storedPreviews.entries()) {
+        if (item.dir === dir) {
+            storedPreviews.delete(id);
+        }
+    }
+}
+
+/** A valid bounded working tree cannot need an unbounded Git index allocation. */
+async function readIndex(dir: string): Promise<Buffer> {
+    const handle = await fs.open(path.join(dir, ".git/index"), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+        const buffer = Buffer.alloc(2 * 1024 * 1024 + 1);
+        let size = 0;
+        while (size < buffer.length) {
+            const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
+            if (bytesRead === 0) {
+                break;
+            }
+            size += bytesRead;
+        }
+        if (size === buffer.length) {
+            throw new StackGitError("gitRepositoryTooLarge");
+        }
+        return Buffer.from(buffer.subarray(0, size));
+    } finally {
+        await handle.close();
+    }
 }
 
 export interface GitWorkflowOptions {
@@ -297,7 +335,8 @@ function previewFile(name: string, before: FileState | undefined, after: FileSta
 
 /** Immutable, bounded previews and file selection without checkout/reset/stash. */
 export class StackGitWorkflow {
-    private previews = new Map<string, StoredPreview>();
+    private previews = storedPreviews;
+    private owner = Symbol();
 
     constructor(private options: GitWorkflowOptions) {}
 
@@ -469,63 +508,87 @@ export class StackGitWorkflow {
     /** Fetch a branch, keep working files untouched and bind decisions to exact bytes. */
     async preview(dir: string, config: StackFileConfig): Promise<GitUpdatePreview> {
         return this.exclusive(dir, async () => {
-            await this.assertRepository(dir);
-            const remote = (await this.git(dir, [ "remote", "get-url", "origin" ])).toString().trim();
-            validateGitRepository(remote, this.options.allowLocalTransport);
-            const branch = await this.branch(dir);
-            await this.git(dir, [ "check-ref-format", `refs/heads/${branch}` ]);
-            const currentCommit = await this.commit(dir);
+            if (buildingPreview) {
+                throw new StackGitError("gitBusyElsewhere");
+            }
+            buildingPreview = true;
             try {
-                await this.git(dir, [ "diff-index", "--cached", "--quiet", "HEAD", "--" ]);
-            } catch {
-                throw new StackGitError("gitStagedChangesPresent");
-            }
-            await this.git(dir, [ "fetch", "--no-tags", "--no-recurse-submodules", "--", remote, `refs/heads/${branch}:refs/remotes/origin/${branch}` ]);
-            const targetCommit = (await this.git(dir, [ "rev-parse", `refs/remotes/origin/${branch}` ])).toString().trim();
-            try {
-                await this.git(dir, [ "merge-base", "--is-ancestor", currentCommit, targetCommit ]);
-            } catch {
-                throw new StackGitError("gitBranchesDiverged");
-            }
-            const before = await snapshot(dir);
-            const target = await this.tree(dir, targetCommit);
-            const tracked = await this.tree(dir, currentCommit);
-            const files: GitPreviewFile[] = [];
-            for (const name of [ ...new Set([ ...tracked.keys(), ...target.keys() ]) ].sort()) {
-                if (!equalFile(before.get(name), target.get(name))) {
-                    files.push(previewFile(name, before.get(name), target.get(name), config));
+                await this.assertRepository(dir);
+                const remote = (await this.git(dir, [ "remote", "get-url", "origin" ])).toString().trim();
+                validateGitRepository(remote, this.options.allowLocalTransport);
+                const branch = await this.branch(dir);
+                await this.git(dir, [ "check-ref-format", `refs/heads/${branch}` ]);
+                const currentCommit = await this.commit(dir);
+                try {
+                    await this.git(dir, [ "diff-index", "--cached", "--quiet", "HEAD", "--" ]);
+                } catch {
+                    throw new StackGitError("gitStagedChangesPresent");
                 }
-            }
-            clearStackSourceCache(dir);
-            const preview: GitUpdatePreview = { id: randomUUID(),
-                branch,
-                currentCommit,
-                targetCommit,
-                files };
-            for (const [ id, item ] of this.previews) {
-                if (Date.now() - item.createdAt > PREVIEW_MS || item.dir === dir) {
-                    this.previews.delete(id);
+                await this.git(dir, [ "fetch", "--no-tags", "--no-recurse-submodules", "--", remote, `refs/heads/${branch}:refs/remotes/origin/${branch}` ]);
+                const targetCommit = (await this.git(dir, [ "rev-parse", `refs/remotes/origin/${branch}` ])).toString().trim();
+                try {
+                    await this.git(dir, [ "merge-base", "--is-ancestor", currentCommit, targetCommit ]);
+                } catch {
+                    throw new StackGitError("gitBranchesDiverged");
                 }
+                const before = await snapshot(dir);
+                const target = await this.tree(dir, targetCommit);
+                const tracked = await this.tree(dir, currentCommit);
+                const files: GitPreviewFile[] = [];
+                for (const name of [ ...new Set([ ...tracked.keys(), ...target.keys() ]) ].sort()) {
+                    if (!equalFile(before.get(name), target.get(name))) {
+                        files.push(previewFile(name, before.get(name), target.get(name), config));
+                    }
+                }
+                clearStackSourceCache(dir);
+                const preview: GitUpdatePreview = { id: randomUUID(),
+                    branch,
+                    currentCommit,
+                    targetCommit,
+                    files };
+                for (const [ id, item ] of this.previews.entries()) {
+                    if (Date.now() - item.createdAt > PREVIEW_MS || item.dir === dir && item.owner === this.owner) {
+                        this.previews.delete(id);
+                    }
+                }
+                const indexPath = path.join(dir, ".git/index");
+                if ((await fs.stat(indexPath)).size > 2 * 1024 * 1024) {
+                    throw new StackGitError("gitRepositoryTooLarge");
+                }
+                const stored: StoredPreview = { dir,
+                    owner: this.owner,
+                    createdAt: Date.now(),
+                    public: preview,
+                    before,
+                    target,
+                    config: structuredClone(config),
+                    index: await readIndex(dir) };
+                const bytes = stored.index.length
+                + [ ...before.values(), ...target.values() ].reduce((sum, file) => sum + file.bytes.length, 0)
+                + files.reduce((sum, file) => sum + 2 * ((file.serverText?.length ?? 0) + (file.gitText?.length ?? 0) + file.path.length), 0);
+                if (!this.previews.set(preview.id, stored, bytes)) {
+                    throw new StackGitError("gitRepositoryTooLarge");
+                }
+                return structuredClone(preview);
+            } finally {
+                buildingPreview = false;
             }
-            if (this.previews.size >= 10) {
-                this.previews.delete(this.previews.keys().next().value!);
-            }
-            this.previews.set(preview.id, { dir,
-                createdAt: Date.now(),
-                public: preview,
-                before,
-                target,
-                config: structuredClone(config),
-                index: await fs.readFile(path.join(dir, ".git/index")) });
-            return structuredClone(preview);
         });
+    }
+
+    /** Release a comparison abandoned by its view; applying already owns its local reference. */
+    discard(dir: string, id: string): void {
+        const preview = this.previews.get(id);
+        if (preview?.dir === dir && preview.owner === this.owner) {
+            this.previews.delete(id);
+        }
     }
 
     /** Validate the selected result, recheck every file and restore bytes if a write fails. */
     async apply(dir: string, input: GitApplyInput, config: StackFileConfig): Promise<{ filesHash: string }> {
         return this.exclusive(dir, async () => {
             const preview = this.previews.get(input.previewId);
-            if (!preview || preview.dir !== dir || Date.now() - preview.createdAt > PREVIEW_MS) {
+            if (!preview || preview.owner !== this.owner || preview.dir !== dir || Date.now() - preview.createdAt > PREVIEW_MS) {
                 throw new StackGitError("gitComparisonExpired");
             }
             assertChoices(preview, input);
@@ -580,7 +643,7 @@ export class StackGitWorkflow {
         const written: string[] = [];
         let indexUpdated = false;
         try {
-            if (await this.commit(dir) !== preview.public.currentCommit || await this.branch(dir) !== preview.public.branch || !sameTree(await snapshot(dir), preview.before) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
+            if (await this.commit(dir) !== preview.public.currentCommit || await this.branch(dir) !== preview.public.branch || !sameTree(await snapshot(dir), preview.before) || !(await readIndex(dir)).equals(preview.index)) {
                 throw new StackGitError("gitChangedSinceComparison");
             }
             // Build Git metadata separately; the real index stays locked and unchanged until all files succeed.
@@ -595,7 +658,7 @@ export class StackGitWorkflow {
                 written.push(name);
             }
             // Validation covers unchanged inputs too: detect edits made during our writes.
-            if (!sameTree(await snapshot(dir), result) || !(await fs.readFile(path.join(dir, ".git/index"))).equals(preview.index)) {
+            if (!sameTree(await snapshot(dir), result) || !(await readIndex(dir)).equals(preview.index)) {
                 throw new StackGitError("gitChangedWhileApplying");
             }
             await fs.rename(temporaryIndex, path.join(dir, ".git/index"));

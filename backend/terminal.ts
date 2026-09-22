@@ -2,7 +2,7 @@ import { DockgeServer } from "./dockge-server";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
-import { LimitQueue } from "./utils/limit-queue";
+import { TerminalBuffer } from "./utils/terminal-buffer";
 import { sleep } from "../common/util-common";
 import { DockgeSocket } from "./util-server";
 import {
@@ -31,7 +31,7 @@ export class Terminal {
 
     protected _ptyProcess? : pty.IPty;
     protected server : DockgeServer;
-    protected buffer : LimitQueue<string> = new LimitQueue(100);
+    protected buffer = new TerminalBuffer();
     protected _name : string;
 
     protected file : string;
@@ -251,10 +251,7 @@ export class Terminal {
      * Get the terminal output string
      */
     getBuffer() : string {
-        if (this.buffer.length === 0) {
-            return "";
-        }
-        return this.buffer.join("");
+        return this.buffer.read();
     }
 
     close() {
