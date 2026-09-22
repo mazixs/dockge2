@@ -56,3 +56,12 @@ AGENTS.md
 CLAUDE.md
 CONTRIBUTING.md
 SECURITY.md
+
+# Private, versioned deployment state and stopped-data snapshots
+.dockge2/
+*.dockge-failed-*
+*.dockge-restore-*
+
+# Local browser sessions and environment variants must not be published.
+.playwright-cli/
+.env.*

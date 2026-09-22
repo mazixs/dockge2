@@ -41,7 +41,9 @@ interface AgentMessageFields {
 export interface AgentErrorResponse extends AgentMessageFields {
     ok : false;
     /** Set for a rejected argument, so the screen can tell it from a failure */
-    type? : string;
+    type? : string | number;
+    /** Stable command failure category, independent of the translated message. */
+    code? : "busy" | "interrupted" | "spawn" | "pull" | "build" | "apply";
     /** True when no answer arrived at all, so the caller may not say it failed */
     unknown? : boolean;
 }

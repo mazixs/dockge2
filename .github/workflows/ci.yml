@@ -63,10 +63,7 @@ jobs:
       - name: Check the first load against its budget
         run: npm run check:bundle
 
-      - name: Check update command (dry run)
-        run: npm run update-docker -- --dry-run
-
-      - name: Installer against a docker stub
+      - name: Verified updater and bootstrap contracts
         run: npm run test:install
 
   docker-integration:

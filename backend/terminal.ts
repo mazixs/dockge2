@@ -1,3 +1,4 @@
+import { OperationError } from "./operation-error";
 import { DockgeServer } from "./dockge-server";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
@@ -53,6 +54,9 @@ export class Terminal {
 
     /** True once the process of this terminal exited */
     protected _exited : boolean = false;
+
+    private executionError : OperationError | undefined;
+    private commandExecution = false;
 
     constructor(server : DockgeServer, name : string, file : string, args : string | string[], cwd : string) {
         this.server = server;
@@ -140,6 +144,11 @@ export class Terminal {
         }
 
         try {
+            if (this.commandExecution && !commandExistsSync(this.file)) {
+                this.executionError = new OperationError("spawn", "operationSpawnFailed");
+                this.exit({ exitCode: 1 });
+                return;
+            }
             this._ptyProcess = pty.spawn(this.file, this.args, {
                 name: this.name,
                 cwd: this.cwd,
@@ -167,7 +176,8 @@ export class Terminal {
                 clearInterval(this.keepAliveInterval);
 
                 log.error("Terminal", "Failed to start terminal: " + error.message);
-                const exitCode = Number(error.message.split(" ").pop());
+                this.executionError = new OperationError("spawn", "operationSpawnFailed");
+                const exitCode = 1;
                 this.exit({
                     exitCode,
                 });
@@ -199,6 +209,9 @@ export class Terminal {
         clearInterval(this.kickDisconnectedClientsInterval);
 
         if (this.callback) {
+            if (!this.executionError && (this.ending || res.signal)) {
+                this.executionError = new OperationError("interrupted", "operationInterrupted", true);
+            }
             this.callback(res.exitCode);
         }
     };
@@ -255,6 +268,9 @@ export class Terminal {
     }
 
     close() {
+        if (this.commandExecution) {
+            this.executionError = new OperationError("interrupted", "operationInterrupted", true);
+        }
         clearInterval(this.keepAliveInterval);
         clearInterval(this.kickDisconnectedClientsInterval);
         // Send Ctrl+C to the terminal
@@ -267,6 +283,9 @@ export class Terminal {
      * process inside the container, so end() is the method to use for those.
      */
     kill() {
+        if (this.commandExecution) {
+            this.executionError = new OperationError("interrupted", "operationInterrupted", true);
+        }
         clearInterval(this.keepAliveInterval);
         clearInterval(this.kickDisconnectedClientsInterval);
 
@@ -278,8 +297,10 @@ export class Terminal {
             }
         }
 
-        // The exit handler removes the entry as well, this covers a process that never started
-        this.forgetSelf();
+        // Command executions remain locked until their exit is observed.
+        if (!this.commandExecution || !this._ptyProcess) {
+            this.forgetSelf();
+        }
     }
 
     /**
@@ -300,9 +321,11 @@ export class Terminal {
         clearInterval(this.keepAliveInterval);
         clearInterval(this.kickDisconnectedClientsInterval);
 
-        // Taken out of the registry right away, so a client that reconnects during the
-        // grace period gets a fresh session instead of one that is about to die
-        this.forgetSelf();
+        // Interactive sessions allow a fresh reconnect during shutdown. A command
+        // keeps its stack locked until the old process has actually exited.
+        if (!this.commandExecution) {
+            this.forgetSelf();
+        }
 
         if (!this._ptyProcess) {
             return;
@@ -369,11 +392,12 @@ export class Terminal {
         return new Promise((resolve, reject) => {
             // check if terminal exists
             if (Terminal.terminalMap.has(terminalName)) {
-                reject("Another operation is already running, please try again later.");
+                reject(new OperationError("busy", "operationBusy"));
                 return;
             }
 
             let terminal = new Terminal(server, terminalName, file, args, cwd);
+            terminal.commandExecution = true;
             terminal.rows = PROGRESS_TERMINAL_ROWS;
 
             if (socket) {
@@ -381,7 +405,11 @@ export class Terminal {
             }
 
             terminal.onExit((exitCode : number) => {
-                resolve(exitCode);
+                if (terminal.executionError) {
+                    reject(terminal.executionError);
+                } else {
+                    resolve(exitCode);
+                }
             });
             terminal.start();
         });

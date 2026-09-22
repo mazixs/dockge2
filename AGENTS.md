@@ -33,7 +33,7 @@ npm run lint           # ESLint over **/*.{ts,vue}; npm run fmt fixes what it ca
 npm run check-ts       # tsc --noEmit (strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes)
 npm run test           # c8 + node:test, coverage floor 70%
 npm run test:unit      # the same tests without coverage
-npm run test:install   # install.sh against a docker stub, no container is touched
+npm run test:install   # updater, release and bootstrap contracts; no container is touched
 npm run test:docker-integration   # needs a live Docker Compose
 npm run test:e2e       # Playwright, a real Chromium and real containers
 npm run test:visual    # reference screenshots; :approve re-approves them deliberately
@@ -47,7 +47,7 @@ node --import tsx --test --test-name-pattern "envsubst" test/common/util-common.
 threshold to make a check pass.
 
 An application change needs lint, TypeScript, tests for the behaviour it touched, and a build. CI
-also runs coverage, Docker, the browser suite and `npm run update-docker -- --dry-run`. For a
+also runs coverage, Docker, the browser suite and the updater and bootstrap contract tests. For a
 documentation change pick checks in proportion, and never report a check you did not run.
 
 Isolate data through `DOCKGE_DATA_DIR`, `DOCKGE_STACKS_DIR` and the E2E parameters. Never run tests
@@ -76,7 +76,7 @@ someone else's stacks: do not touch them while testing.
 | `frontend/src/i18n.ts`, `frontend/src/lang/` | the language list and the catalogues; see `frontend/src/lang/README.md` |
 | `test/backend`, `test/common`, `test/frontend` | unit tests against real files and processes; `test/helpers/database.ts` has `withDatabase()` |
 | `test/docker/`, `test/e2e/`, `test/visual/` | Docker integration, Playwright, reference screenshots |
-| `extra/` | scripts: `reset-account.ts`, `update-dockge.ts`, `deploy-stack.ts`, `seed-review.ts` |
+| `extra/` | scripts: `reset-account.ts`, `update-dockge.sh`, `updater/`, `deploy-stack.ts`, `seed-review.ts` |
 | `docker/`, `.github/workflows/` | images and CI |
 | `docs/` | see the documentation map below |
 
@@ -186,13 +186,14 @@ require recovery from `.git/dockge-recovery-*`.
   server needs Docker and nothing else. Do not reintroduce a base image that lives only in a
   registry - it makes a fresh install depend on someone having pushed it.
 - The image is published by `.github/workflows/release.yml` on a `v*` tag, to
-  `ghcr.io/mazixs/dockge2` with the built-in token. Docker Hub is optional and skipped without
-  credentials. `latest` is only moved by a tag without a dash in it.
+  `ghcr.io/mazixs/dockge2` with the built-in token. `latest` is promoted only after the signed
+  stable candidate passes the release gates and cannot move backwards.
 - Memory is the reason the image is published at all: the frontend bundler peaks near 1 GB and no
-  flag brings it under about 900 MB, while running the panel takes about 200 MB. Installs and
-  updates download the image and build only when there is none, so a 1 GB server stays usable.
-- `build:docker` and the release scripts push to a registry. They are not a routine check: read the
-  command before running it.
+  flag brings it under about 900 MB, while running the panel takes about 200 MB. Release installs and
+  updates verify a signed descriptor and download its image by digest. A failed download never
+  falls back to a build; development builds require an explicit ref. See `docs/self-updates.md`.
+- Direct `build:docker` and npm release scripts refuse publication. Publishing goes through the
+  tagged release workflow; a local image build is a separate, explicitly chosen action.
 
 ## Documentation map
 
@@ -201,6 +202,7 @@ require recovery from `.git/dockge-recovery-*`.
 | `README.md` | install, update, rollback, reverse proxy, FAQ |
 | `CONTRIBUTING.md` | what kind of change is accepted and how to submit it |
 | `SECURITY.md` | how to report a vulnerability |
+| `docs/self-updates.md` | release verification, migration, updater state and recovery |
 | `docs/authentication.md` | accounts, sessions, proxy configuration |
 | `docs/mcp.md` | the MCP contract, limits and verified clients |
 | `docs/design-system.md` | tokens and the current layout |

@@ -334,3 +334,27 @@ test("leaving logs cancels a delayed join and a fresh join survives a delayed le
     assert.equal(joins, 1);
     assert.equal(leaves, 1);
 });
+
+test("busy commands are acknowledged and interruption cannot become a successful exit", async (context) => {
+    const server = { stacksDir: os.tmpdir() } as DockgeServer;
+    const name = "compose-interruption-test";
+    const command = Terminal.exec(server, undefined, name, process.execPath, [
+        "-e", "process.on('SIGINT', () => process.exit(0)); console.log('READY'); setInterval(() => {}, 1000);",
+    ], os.tmpdir());
+    // Attach the rejection handler before sending a signal to the real process.
+    const interrupted = assert.rejects(command, { code: "interrupted",
+        unknown: true });
+    const terminal = Terminal.getTerminal(name)!;
+    context.after(() => terminal.kill());
+    assert.ok(await waitFor(() => terminal.getBuffer().includes("READY")));
+    await assert.rejects(Terminal.exec(server, undefined, name, "true", [], os.tmpdir()), { code: "busy" });
+    await terminal.end(1000);
+    await interrupted;
+    assert.equal(Terminal.getTerminal(name), undefined);
+});
+
+test("a missing executable reports a spawn failure and releases the terminal", async () => {
+    const server = { stacksDir: os.tmpdir() } as DockgeServer;
+    await assert.rejects(Terminal.exec(server, undefined, "missing-command-test", "/does-not-exist/dockge-command", [], os.tmpdir()), { code: "spawn" });
+    assert.equal(Terminal.getTerminal("missing-command-test"), undefined);
+});

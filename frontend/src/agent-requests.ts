@@ -107,7 +107,12 @@ export class AgentRequests {
             const timer = setTimeout(() => settle(unknown()), timeoutMs);
 
             this.waitingList.set(id, settle as (response : AgentErrorResponse) => void);
-            this.send(endpoint, eventName, args, (response) => settle(response ?? unknown()), timeoutMs);
+            try {
+                this.send(endpoint, eventName, args, (response) => settle(response ?? unknown()), timeoutMs);
+            } catch {
+                // Transport code can throw after dispatch. Never infer that no write happened.
+                settle(unknown());
+            }
         });
     }
 

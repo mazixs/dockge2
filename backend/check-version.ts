@@ -1,3 +1,4 @@
+import { UPDATE_CHECK_MESSAGES, type UpdateCheckError } from "../common/update-check";
 import { log } from "./log";
 import { runInBackground } from "./background";
 import compareVersions from "compare-versions";
@@ -11,7 +12,7 @@ const UPDATE_CHECKER_INTERVAL_MS = 1000 * 60 * 60 * 48;
 // обновление, которого для этой панели не существует. Запрос уходит только
 // когда владелец включил проверку - по умолчанию она выключена, и установка
 // не сообщает о себе никому
-const CHECK_URL = "https://api.github.com/repos/mazixs/dockge2/releases?per_page=20";
+const CHECK_URL = "https://api.github.com/repos/mazixs/dockge2/releases?per_page=100";
 
 // Сколько ждать ответа реестра. `fetch` сам по себе не сдается: запрос к машине,
 // которая приняла соединение и молчит, висит столько, сколько позволит система, и
@@ -22,9 +23,19 @@ interface Release {
     tag_name? : unknown;
     draft? : unknown;
     prerelease? : unknown;
+    assets? : { name? : unknown, state? : unknown }[];
 }
 
-export type UpdateCheckResult = { ok: true; latestVersion: string; updateAvailable: boolean } | { ok: false };
+export type UpdateCheckResult = { ok: true; latestVersion: string; updateAvailable: boolean } | { ok: false; code: UpdateCheckError; msg: string; msgi18n: true };
+
+/** Classify only documented HTTP signals, never a message scraped from the response body.
+ * @param response GitHub response
+ * @returns Safe failure category
+ */
+function registryFailure(response : Response) : UpdateCheckError {
+    const limited = response.status === 429 || (response.status === 403 && (response.headers?.get("x-ratelimit-remaining") === "0" || response.headers?.has("retry-after")));
+    return limited ? "rateLimited" : "registry";
+}
 
 class CheckVersion {
     version = packageJSON.version;
@@ -33,6 +44,9 @@ class CheckVersion {
     // difference is what lets "the registry was never asked" be written back
     latestVersion : string | undefined;
     interval : NodeJS.Timeout | undefined;
+    lastCheckedAt : string | undefined;
+    checkFailed = false;
+    checkError : UpdateCheckError | undefined;
     private inFlight : Promise<UpdateCheckResult | undefined> | undefined;
 
     /**
@@ -65,13 +79,17 @@ class CheckVersion {
                 continue;
             }
 
+            const assets = new Set(Array.isArray(release.assets) ? release.assets.filter(asset => asset.state === "uploaded").map(asset => asset.name) : []);
+            if (![ "release.json", "release.json.sigstore.json", "docker-compose.yml", "install.sh", "dockge2-update-linux-amd64", "dockge2-update-linux-arm64", "dockge2-update-linux-amd64.sigstore.json", "dockge2-update-linux-arm64.sigstore.json" ].every(name => assets.has(name))) {
+                continue;
+            }
             const version = release.tag_name.replace(/^v/, "");
 
-            if (!compareVersions.validate(version)) {
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version) || !compareVersions.validate(version)) {
                 continue;
             }
 
-            const key = release.prerelease === true ? "beta" : "stable";
+            const key = release.prerelease === true || version.includes("-") ? "beta" : "stable";
             const known = result[key];
 
             if (!known || compareVersions.compare(version, known, ">")) {
@@ -132,15 +150,37 @@ class CheckVersion {
 
         // Срок жизни запроса принадлежит панели, а не сети: по нему же его обрывает
         // остановка процесса, и обе причины выглядят одинаково - проверка не удалась
-        const deadline = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+        let timedOut = false;
+        let failure : UpdateCheckError = "network";
+        const deadline = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, CHECK_TIMEOUT_MS);
 
         try {
-            const res = await fetch(CHECK_URL, { headers: { "accept": "application/vnd.github+json" },
-                signal: controller.signal });
-            if (!res.ok) {
-                throw new Error("Release registry request failed");
+            const payload : unknown[] = [];
+            for (let page = 1; page <= 10; page++) {
+                failure = "network";
+                const res = await fetch(`${CHECK_URL}&page=${page}`, { headers: { "accept": "application/vnd.github+json" },
+                    signal: controller.signal });
+                if (!res.ok) {
+                    failure = registryFailure(res);
+                    throw new Error("Release registry request failed");
+                }
+                failure = "invalidResponse";
+                const releases : unknown = await res.json();
+                if (!Array.isArray(releases)) {
+                    throw new Error("Invalid release list");
+                }
+                payload.push(...releases);
+                if (releases.length < 100) {
+                    break;
+                }
+                if (page === 10) {
+                    throw new Error("Release pagination limit reached");
+                }
             }
-            const { stable, beta } = this.parseReleases(await res.json());
+            const { stable, beta } = this.parseReleases(payload);
 
             // The answer can arrive just as the panel stops, and what follows reads a
             // setting - that is the database, which is being released at that moment
@@ -148,25 +188,36 @@ class CheckVersion {
                 return;
             }
 
-            // For debug
-            const slow = process.env.TEST_CHECK_VERSION === "1" ? "1000.0.0" : stable;
+            failure = "internal";
 
             const includeBeta = await Settings.get("checkBeta") === true;
             if (this.stopped) {
                 return;
             }
-            const latest = includeBeta && beta && (!slow || compareVersions.compare(beta, slow, ">")) ? beta : slow;
+            const latest = includeBeta && beta && (!stable || compareVersions.compare(beta, stable, ">")) ? beta : stable;
             if (!latest) {
+                failure = "noRelease";
                 throw new Error("Release registry returned no matching releases");
             }
             this.latestVersion = latest;
+            this.lastCheckedAt = new Date().toISOString();
+            this.checkFailed = false;
+            this.checkError = undefined;
             return { ok: true,
                 latestVersion: latest,
                 updateAvailable: this.updateAvailable };
 
         } catch {
+            if (this.stopped) {
+                return;
+            }
+            this.checkFailed = true;
+            this.checkError = timedOut ? "timeout" : failure;
             log.info("update-checker", "Failed to check for new versions");
-            return { ok: false };
+            return { ok: false,
+                code: this.checkError,
+                msg: UPDATE_CHECK_MESSAGES[this.checkError],
+                msgi18n: true };
         } finally {
             clearTimeout(deadline);
 
@@ -196,7 +247,7 @@ class CheckVersion {
             return;
         }
 
-        if (result?.ok) {
+        if (result) {
             await onChecked().catch(error => log.error("update-checker", error));
         }
         if (this.stopped) {
@@ -205,7 +256,7 @@ class CheckVersion {
         this.interval = setInterval(() => {
             runInBackground("version check", async () => {
                 const next = await this.check();
-                if (next?.ok && !this.stopped) {
+                if (next && !this.stopped) {
                     await onChecked();
                 }
             });

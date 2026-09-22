@@ -200,7 +200,7 @@ export default {
         },
 
         failed() {
-            return this.outcome === "failed" || this.stepFailed;
+            return this.outcome ? this.outcome === "failed" : this.stepFailed;
         },
 
         /**
@@ -209,11 +209,11 @@ export default {
          * @returns {boolean} Итог команды остался неизвестным
          */
         resultUnknown() {
-            return this.outcome === "unknown" && !this.stepFailed;
+            return this.outcome === "unknown";
         },
 
         finished() {
-            return !this.running && this.outcome === "ok" && !this.stepFailed;
+            return !this.running && this.outcome === "ok";
         },
 
         /** Шаг, о котором строка говорит сейчас: сначала провал, потом работа */

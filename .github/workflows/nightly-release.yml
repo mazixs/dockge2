@@ -1,67 +1,12 @@
-name: Nightly Release
-
-# Nothing is published on its own: this fork does not ship images, and a
-# schedule would push a nightly build from the very first day on GitHub.
-# Started by hand, when a publish is actually wanted.
+name: Nightly release retired
 on:
   workflow_dispatch:
-
 permissions: {}
-
 jobs:
-  release-nightly:
+  instructions:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      packages: write
-    env:
-      # `secrets` is not available in a step `if`, but it is in the job `env`.
-      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      # The built-in token is enough for ghcr in this repository, so there is
-      # no separate secret to create, rotate or leak.
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Docker Hub is a shop window, not a dependency. With no credentials the
-      # step is skipped and the nightly goes out to ghcr alone.
-      - name: Login to Docker Hub
-        if: env.HAS_DOCKERHUB == 'true'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Work out where to push
-        id: where
-        run: |
-          TAGS="-t ghcr.io/${GITHUB_REPOSITORY,,}:nightly"
-          [ "$HAS_DOCKERHUB" = "true" ] && TAGS="$TAGS -t mazixs/dockge2:nightly"
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-
-      # The frontend is built inside the image, so the runner needs no Node and
-      # no `npm ci` - only Docker.
-      - name: Build and push the nightly image
-        run: |
-          docker buildx build \
-              --platform linux/amd64,linux/arm64 \
-              ${{ steps.where.outputs.tags }} \
-              --target nightly \
-              -f ./docker/Dockerfile . \
-              --push
+      - run: |
+          echo "Use a vX.Y.Z-rc.N tag and the Release workflow."
+          echo "Every published update must pass the same artifact and upgrade gates."
+          exit 1

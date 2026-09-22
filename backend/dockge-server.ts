@@ -50,6 +50,7 @@ import { AUTH_BASE_PATH, CLIENT_IP_HEADER, countUsers, getAuth, initAuth, resolv
 import { runInBackground } from "./background";
 import { ResourceOwner, DEFAULT_STOP_TIMEOUT_MS, type ResourceStopReport } from "./resource-owner";
 import { installFatalErrorHandlers } from "./fatal-error";
+import { Readiness } from "./readiness";
 import { SharedReading } from "./shared-reading";
 
 /** How long cleanup may take when the process is leaving after an unhandled error */
@@ -197,6 +198,7 @@ export class DockgeServer {
      * timers, terminals, agent connections and the database, in that order
      */
     resources = new ResourceOwner();
+    readiness = new Readiness();
 
     /** Host statistics, read once for everyone who asks at about the same time */
     protected dockerStatsReading = new SharedReading(() => this.readDockerStats(), DOCKER_STATS_CACHE_MS);
@@ -607,6 +609,8 @@ export class DockgeServer {
             log.info("server", "No account yet, the UI will ask to create one");
         }
 
+        this.readiness.initialized = true;
+
         // Listen
         this.httpServer.listen(this.config.port, this.config.hostname, () => {
             if (this.config.hostname) {
@@ -673,6 +677,9 @@ export class DockgeServer {
         let versionProperty;
         let latestVersionProperty;
         let updateAvailableProperty;
+        let lastUpdateCheck;
+        let updateCheckFailed;
+        let updateCheckError;
         let isContainer;
         let agentProtocolProperty;
 
@@ -685,6 +692,9 @@ export class DockgeServer {
             // from telling three different stories about one setting
             const noticeAllowed = await Settings.get("checkUpdate") === true;
 
+            lastUpdateCheck = noticeAllowed ? checkVersion.lastCheckedAt : undefined;
+            updateCheckFailed = noticeAllowed && checkVersion.checkFailed;
+            updateCheckError = noticeAllowed ? checkVersion.checkError : undefined;
             latestVersionProperty = noticeAllowed ? checkVersion.latestVersion : undefined;
             // Said separately from the version itself: the newest release is also the
             // answer "you are up to date", and only the comparison tells them apart
@@ -700,6 +710,9 @@ export class DockgeServer {
             version: versionProperty,
             latestVersion: latestVersionProperty,
             updateAvailable: updateAvailableProperty,
+            lastUpdateCheck,
+            updateCheckFailed,
+            updateCheckError,
             agentProtocol: agentProtocolProperty,
             isContainer,
             primaryHostname: await Settings.get("primaryHostname"),
@@ -1019,6 +1032,7 @@ export class DockgeServer {
      * @returns What was stopped and what refused to
      */
     async stop(timeoutMs : number = DEFAULT_STOP_TIMEOUT_MS) : Promise<ResourceStopReport> {
+        this.readiness.initialized = false;
         const report = await this.resources.stop(timeoutMs);
 
         log.info("server", `Stopped in ${report.durationMs}ms: ${report.stopped.join(", ") || "nothing to stop"}`);

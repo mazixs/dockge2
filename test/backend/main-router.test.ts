@@ -2,6 +2,9 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import express from "express";
 import type { AddressInfo } from "node:net";
+import { Readiness } from "../../backend/readiness";
+import { Database } from "../../backend/database";
+import { withDatabase } from "../helpers/database";
 import { MainRouter } from "../../backend/routers/main-router";
 import type { DockgeServer } from "../../backend/dockge-server";
 
@@ -13,7 +16,11 @@ import type { DockgeServer } from "../../backend/dockge-server";
  */
 async function request(path : string, indexHTML = "<!doctype html><title>Dockge</title>") : Promise<{ status : number, body : string, cacheControl : string | null, contentType : string | null }> {
     const app = express();
-    const server = { indexHTML } as unknown as DockgeServer;
+    const readiness = new Readiness();
+    readiness.initialized = true;
+    const server = { indexHTML,
+        readiness,
+        resources: { stopping: false } } as unknown as DockgeServer;
 
     app.use(new MainRouter().create(app, server));
 
@@ -50,4 +57,17 @@ test("the panel asks search engines to stay away", async () => {
     assert.equal(robots.status, 200);
     assert.equal(robots.body, "User-agent: *\nDisallow: /");
     assert.match(robots.contentType ?? "", /text\/plain/);
+});
+
+test("readiness uses the real application and auth database and fails when it is closed", async () => {
+    await withDatabase(async () => {
+        const ready = await request("/health/ready");
+        assert.equal(ready.status, 200);
+        assert.equal(JSON.parse(ready.body).ready, true);
+        assert.equal(ready.cacheControl, "no-store");
+        await Database.close();
+        const closed = await request("/health/ready");
+        assert.equal(closed.status, 503);
+        assert.equal(JSON.parse(closed.body).ready, false);
+    });
 });

@@ -1,3 +1,4 @@
+import { OperationError } from "./operation-error";
 import { DockgeServer } from "./dockge-server";
 import fs, { promises as fsAsync } from "fs";
 import { log } from "./log";
@@ -709,6 +710,10 @@ export class Stack {
                 timeoutMs: 60_000,
             });
         } catch (e) {
+            const process = e as { code? : unknown; signal? : unknown; killed? : boolean };
+            if (typeof process.code !== "number" || process.code <= 0 || process.signal || process.killed) {
+                throw new OperationError("spawn", "operationValidationUnavailable");
+            }
             const stderr = (e as { stderr? : string | Buffer }).stderr?.toString().trim() ?? "";
             const reason = stderr === "" ? (e instanceof Error ? e.message : String(e)) : stderr;
 
@@ -1120,14 +1125,14 @@ export class Stack {
         if (action === "update") {
             // Для собираемых сервисов `pull` тянуть нечего, и он их пропускает,
             // а вот базовый образ из их Dockerfile обновляет только `build --pull`
-            const pullCode = await execute(this.getComposeOptions("pull"), this.path);
+            const pullCode = await execute(this.getComposeOptions("pull", ...(builds ? [ "--ignore-buildable" ] : [])), this.path);
             if (pullCode !== 0) {
-                throw new Error("Stack image update failed; check the operation output.");
+                throw new OperationError("pull", "operationPullFailed");
             }
             if (builds) {
                 const buildCode = await execute(this.getComposeOptions("build", "--pull"), this.path);
                 if (buildCode !== 0) {
-                    throw new Error("Stack image update failed; check the operation output.");
+                    throw new OperationError("build", "operationBuildFailed");
                 }
             }
             // The local images are now the ones the registry served, so an answer read
@@ -1146,7 +1151,7 @@ export class Stack {
             : [ "start", "deploy", "update" ].includes(action) ? upOptions : this.getComposeOptions(action);
         const exitCode = await execute(options, this.path);
         if (exitCode !== 0) {
-            throw new Error("Stack control failed; check the operation output.");
+            throw new OperationError("apply", "operationApplyFailed");
         }
         return exitCode;
     }
@@ -1455,12 +1460,12 @@ export class Stack {
             ? await this.execServiceCommand(socket, "build", serviceName, "--pull")
             : await this.execServiceCommand(socket, "pull", serviceName);
         if (code !== 0) {
-            throw new Error("Service image update failed; check the operation output.");
+            throw new OperationError(builds ? "build" : "pull", builds ? "operationBuildFailed" : "operationPullFailed");
         }
         clearImageUpdateCache(readComposeImages(this.composeYAML));
         const exitCode = await this.execServiceCommand(socket, "up", serviceName, "-d", "--no-deps", "--force-recreate");
         if (exitCode !== 0) {
-            throw new Error("Service update failed; check the operation output.");
+            throw new OperationError("apply", "operationApplyFailed");
         }
         return exitCode;
     }

@@ -1,74 +1,83 @@
-/*
- * If changed, have to run `npm run build:healthcheck`.
- * This script should be run after a period of time (180s), because the server may need some time to prepare.
- */
+// The start period belongs to Docker; the probe reports actual readiness on every run.
 package main
 
 import (
 	"crypto/tls"
-	"io/ioutil"
-	"log"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 )
 
-func main() {
-	// Is K8S + "dockge" as the container name
-	// See https://github.com/louislam/uptime-kuma/pull/2083
-	isK8s := strings.HasPrefix(os.Getenv("DOCKGE_PORT"), "tcp://")
-
-	// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
-		InsecureSkipVerify: true,
+func validateReadiness(response *http.Response, version string) error {
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("not ready: HTTP %d", response.StatusCode)
 	}
-
-	client := http.Client{
-		Timeout: 28 * time.Second,
+	data, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	if err != nil {
+		return err
 	}
-
-	sslKey := os.Getenv("DOCKGE_SSL_KEY")
-	sslCert := os.Getenv("DOCKGE_SSL_CERT")
-
-	hostname := os.Getenv("DOCKGE_HOST")
-	if len(hostname) == 0 {
-		hostname = "127.0.0.1"
+	if len(data) > 4096 {
+		return errors.New("oversized readiness response")
 	}
-
-	port := ""
-	// DOCKGE_PORT is override by K8S unexpectedly,
-	if !isK8s {
-		port = os.Getenv("DOCKGE_PORT")
+	var status struct {
+		Service  string `json:"service"`
+		Protocol int    `json:"protocol"`
+		Ready    bool   `json:"ready"`
+		Version  string `json:"version"`
 	}
-	if len(port) == 0 {
+	if err = json.Unmarshal(data, &status); err != nil {
+		return errors.New("invalid readiness response")
+	}
+	if status.Service != "dockge2" || status.Protocol != 1 || !status.Ready || status.Version != version || version == "" {
+		return errors.New("readiness contract mismatch")
+	}
+	return nil
+}
+func probe() error {
+	data, err := os.ReadFile("/app/package.json")
+	if err != nil {
+		return err
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err = json.Unmarshal(data, &pkg); err != nil {
+		return err
+	}
+	host := os.Getenv("DOCKGE_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := os.Getenv("DOCKGE_PORT")
+	if port == "" || strings.HasPrefix(port, "tcp://") {
 		port = "5001"
 	}
-
-	protocol := ""
-	if len(sslKey) != 0 && len(sslCert) != 0 {
+	protocol := "http"
+	if os.Getenv("DOCKGE_SSL_KEY") != "" && os.Getenv("DOCKGE_SSL_CERT") != "" {
 		protocol = "https"
-	} else {
-		protocol = "http"
 	}
-
-	url := protocol + "://" + hostname + ":" + port
-
-	log.Println("Checking " + url)
-	resp, err := client.Get(url)
-
+	// The in-container endpoint may have a private/self-signed certificate.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	client := http.Client{Timeout: 5 * time.Second, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("readiness redirect refused") }}
+	response, err := client.Get(protocol + "://" + net.JoinHostPort(host, port) + "/health/ready")
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
-
-	defer resp.Body.Close()
-
-	_, err = ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		log.Fatalln(err)
+	return validateReadiness(response, pkg.Version)
+}
+func main() {
+	if err := probe(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-
-	log.Printf("Health Check OK [Res Code: %d]\n", resp.StatusCode)
-
+	fmt.Println("Dockge2 ready")
 }

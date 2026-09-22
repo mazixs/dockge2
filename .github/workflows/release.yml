@@ -1,146 +1,128 @@
 name: Release
-
-# Publishes the image the panel installs from. Without it `install.sh` has to
-# build on the server, and building the frontend asks for about a gigabyte of
-# memory: on a small VPS that is the difference between an install and an
-# out-of-memory kill.
-#
-# Runs on a tag like v0.0.1 or v0.0.2-rc.1, or by hand for a tag already pushed.
 on:
   push:
     tags: [ "v*" ]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "The tag to publish, for example v0.0.1"
-        required: true
-        type: string
-
+# Select an existing tag in the dispatch UI. A branch cannot obtain a release identity.
 permissions: {}
-
+concurrency:
+  group: dockge2-release-publication
+  cancel-in-progress: false
 jobs:
-  image:
-    name: Build and publish
+  release:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: write
       packages: write
+      id-token: write
     env:
-      # `github.ref_name` is the tag on a push and the branch on a manual run,
-      # so the tag is settled once here and everything below reads it.
-      TAG: ${{ inputs.tag || github.ref_name }}
-      # ghcr sits next to the repository: publishing needs no separate account
-      # and no secret in the settings, only the token the run already has.
-      GHCR_IMAGE: ghcr.io/${{ github.repository }}
-      # `secrets` is not available in a step `if`, but it is in the job `env`.
-      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-
+      TAG: ${{ github.ref_name }}
+      GHCR_IMAGE: ghcr.io/mazixs/dockge2
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout the tag
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-          persist-credentials: false
-
-      # The base stage installs packages for each architecture, so emulation is
-      # needed. The frontend and the healthcheck do not depend on it:
-      # docker/Dockerfile builds both on the build machine and copies the result.
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Docker Hub is a shop window, not a dependency. With no credentials the
-      # step is skipped and the release goes out to ghcr alone.
-      - name: Login to Docker Hub
-        if: env.HAS_DOCKERHUB == 'true'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Work out where to push
-        id: where
-        run: |
-          {
-              echo "images<<EOF"
-              echo "$GHCR_IMAGE"
-              [ "$HAS_DOCKERHUB" = "true" ] && echo "mazixs/dockge2"
-              echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          # A dash in the tag means a pre-release: v0.0.2-rc.1 must not become
-          # `latest`, or every machine that installs by default gets a candidate.
-          case "$TAG" in
-              *-*) echo "stable=false" >> "$GITHUB_OUTPUT" ;;
-              *)   echo "stable=true"  >> "$GITHUB_OUTPUT" ;;
-          esac
-
-      # `value` is spelled out because a manual run happens on a branch, where
-      # the semver patterns would otherwise find no tag to read.
-      - name: Work out the tags
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ steps.where.outputs.images }}
-          # `latest` is decided below, by whether the tag is a pre-release. Left on
-          # auto, the action adds its own on top and the tag is pushed twice.
-          flavor: latest=false
-          tags: |
-            type=semver,pattern={{version}},value=${{ env.TAG }}
-            type=semver,pattern={{major}},value=${{ env.TAG }},enable=${{ steps.where.outputs.stable == 'true' }}
-            type=raw,value=latest,enable=${{ steps.where.outputs.stable == 'true' }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          target: release
-          # node:24.x is published for amd64, arm64 and ppc64le only. armv7 came
-          # from upstream, which was on an older Node, and a build for it fails at
-          # the first FROM with "no match for platform in manifest".
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Create the GitHub release
+      - name: Require a tag identity
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: test "$REF_TYPE" = tag
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - name: Resolve an existing immutable publication
+        id: publication
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-              echo "Release $TAG already exists, leaving it alone."
-              exit 0
-          fi
-          if [ "${{ steps.where.outputs.stable }}" = "true" ]; then
-              gh release create "$TAG" --title "$TAG" --generate-notes
-          else
-              gh release create "$TAG" --title "$TAG" --generate-notes --prerelease
-          fi
-
-      # A ghcr package is created private even when the repository is public,
-      # and then a server gets 401 instead of an image. This is switched once
-      # per repository, by hand, in the package settings.
-      - name: Say what is left to do by hand
+          node -e 'const p=require("./package.json");if(process.env.TAG!=="v"+p.version)process.exit(1)'
+          gh api --paginate --slurp repos/mazixs/dockge2/releases > "$RUNNER_TEMP/releases.json"
+          node --input-type=module -e 'import fs from "node:fs"; const releases=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/releases.json")).flat();const old=releases.find(r=>r.tag_name===process.env.TAG);if(old?.draft)throw Error("Inspect incomplete draft before retrying");fs.appendFileSync(process.env.GITHUB_OUTPUT,"reuse="+Boolean(old)+"\n")'
+      - name: Check the tagged source
         run: |
-          echo "Published:"
-          echo "${{ steps.meta.outputs.tags }}"
-          echo
-          echo "The package inherits the repository's visibility, so a public repository"
-          echo "needs nothing done by hand. Check what an anonymous machine sees with:"
-          echo "  curl -s \"https://ghcr.io/token?scope=repository:${{ github.repository }}:pull&service=ghcr.io\""
-          echo "  # then GET https://ghcr.io/v2/${{ github.repository }}/manifests/latest with that token"
-          echo
-          echo "If it is private after all, that is where it is changed:"
-          echo "  https://github.com/users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/settings"
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run test:install
+          npm run build:frontend
+          npm run check:bundle
+          npm run test:docker-integration
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Authenticate the candidate publisher
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build the candidate once
+        if: steps.publication.outputs.reuse != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          docker buildx build --platform linux/amd64,linux/arm64 --target release -f docker/Dockerfile . \
+            --tag "$GHCR_IMAGE:candidate-$GITHUB_SHA-$GITHUB_RUN_ID" --push --provenance=mode=max --sbom=true \
+            --label "org.opencontainers.image.version=${TAG#v}" --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --metadata-file "$RUNNER_TEMP/build.json"
+          DIGEST=$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/build.json")
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          docker buildx imagetools inspect "$GHCR_IMAGE@$DIGEST" --raw > "$RUNNER_TEMP/index.json"
+          cp docker-compose.yml install.sh "$RUNNER_TEMP/release/"
+          for arch in amd64 arm64; do
+            (cd extra/updater && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$RUNNER_TEMP/release/dockge2-update-linux-$arch" .)
+          done
+          node extra/release/manifest.mjs "$RUNNER_TEMP/release" "$GHCR_IMAGE" "$DIGEST" "$RUNNER_TEMP/index.json" "$TAG"
+      - name: Install the pinned verifier
+        run: bash extra/release/verifier.sh
+      - name: Load the existing release without rebuilding or replacing it
+        if: steps.publication.outputs.reuse == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/release"
+          test "$(jq -er .commit "$RUNNER_TEMP/release/release.json")" = "$GITHUB_SHA"
+          test "$(jq -er .version "$RUNNER_TEMP/release/release.json")" = "${TAG#v}"
+          echo "DIGEST=$(jq -er .digest "$RUNNER_TEMP/release/release.json")" >> "$GITHUB_ENV"
+          chmod 700 "$RUNNER_TEMP/release/"dockge2-update-linux-*
+      - name: Sign the immutable release contract and host binaries
+        if: steps.publication.outputs.reuse != 'true'
+        run: |
+          for file in release.json dockge2-update-linux-amd64 dockge2-update-linux-arm64; do
+            cosign sign-blob --yes --bundle "$RUNNER_TEMP/release/$file.sigstore.json" "$RUNNER_TEMP/release/$file"
+            cosign verify-blob --bundle "$RUNNER_TEMP/release/$file.sigstore.json" \
+              --certificate-identity "https://github.com/mazixs/dockge2/.github/workflows/release.yml@refs/tags/$TAG" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$RUNNER_TEMP/release/$file"
+          done
+      - name: Verify existing artifacts before executing any of them
+        if: steps.publication.outputs.reuse == 'true'
+        run: |
+          for file in release.json dockge2-update-linux-amd64 dockge2-update-linux-arm64; do
+            cosign verify-blob --bundle "$RUNNER_TEMP/release/$file.sigstore.json" \
+              --certificate-identity "https://github.com/mazixs/dockge2/.github/workflows/release.yml@refs/tags/$TAG" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$RUNNER_TEMP/release/$file"
+          done
+      - name: Test anonymous access and upgrade/restore on both image architectures
+        run: |
+          PREVIOUS=$(node extra/release/previous.mjs "$RUNNER_TEMP/releases.json" "${TAG#v}")
+          for arch in amd64 arm64; do
+            DOCKER_DEFAULT_PLATFORM="linux/$arch" bash test/install/docker.sh "$RUNNER_TEMP/release" "$arch" "$RUNNER_TEMP/cosign"
+            if [[ -n "$PREVIOUS" ]]; then
+              DOCKER_DEFAULT_PLATFORM="linux/$arch" bash test/install/managed.sh "$RUNNER_TEMP/release" "$arch" "$RUNNER_TEMP/cosign" "$PREVIOUS"
+            fi
+          done
+      - name: Sign and publish the tested version without moving stable
+        if: steps.publication.outputs.reuse != 'true'
+        run: |
+          cosign sign --yes "$GHCR_IMAGE@$DIGEST"
+          docker buildx imagetools create --prefer-index=false --tag "$GHCR_IMAGE:${TAG#v}" "$GHCR_IMAGE@$DIGEST"
+          test "$(docker buildx imagetools inspect "$GHCR_IMAGE:${TAG#v}" --format '{{json .Manifest}}' | jq -er .digest)" = "$DIGEST"
+          extra=()
+          [[ "$TAG" == *-* ]] && extra+=(--prerelease)
+          notes=(--generate-notes)
+          [[ -f "docs/releases/${TAG#v}.md" ]] && notes=(--notes-file "docs/releases/${TAG#v}.md")
+          gh release create "$TAG" "$RUNNER_TEMP/release/"* --verify-tag --title "$TAG" "${notes[@]}" --latest=false "${extra[@]}"
+      - name: Verify public assets before advertising stable
+        run: |
+          mkdir "$RUNNER_TEMP/public-release"
+          for file in "$RUNNER_TEMP/release/"*; do
+            name=$(basename "$file")
+            curl --proto '=https' --proto-redir '=https' -fsSL --max-time 180 "https://github.com/mazixs/dockge2/releases/download/$TAG/$name" -o "$RUNNER_TEMP/public-release/$name"
+            cmp "$file" "$RUNNER_TEMP/public-release/$name"
+          done
+          node extra/release/promotion.mjs "$RUNNER_TEMP/release/release.json"

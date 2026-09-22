@@ -30,130 +30,54 @@ been rewritten. Do not report issues of this fork upstream.
 
 ## Requirements
 
-- Linux on `amd64` or `arm64` - the architectures the published image is built for.
-  Debian/Raspbian Bullseye or newer, Ubuntu, Fedora, CentOS, ArchLinux. Windows is not supported.
-- [Docker](https://docs.docker.com/engine/install/) 20+ with the Compose V2 plugin, or Podman with
-  `podman-docker`. The installer offers to install Docker when it is missing.
-- `git` and `curl`. Nothing else: the image builds its own frontend, so the server needs no Node.
-- About 200 MB of memory for the running panel, with the stacks themselves on top. The figure moves
-  with the room it is given, because V8 grows its heap to fit: 172 MB under a hard 800 MB limit,
-  219 MB on a 6 GB server with no limit at all. Neither is a leak, and a small server does not need
-  a bigger one - set `mem_limit` on the service and the panel settles lower.
-  Building the image is the expensive part, about 1 GB: the bundler
-  holds the whole module graph, and no flag brings that under roughly 900 MB. The installer
-  downloads a published image when there is one, so a 1 GB server only has to run the panel, not
-  build it; below about 1.2 GB of memory and swap the installer says so before it starts a build
-  that the out-of-memory killer would end halfway.
+- Linux amd64 or arm64, Docker Engine 24+ and Docker Compose 2.20+ on the same host.
+  Remote Docker contexts and Podman are not supported by the transactional updater.
+- Bash, curl, sha256sum and permission to manage Docker and read/write the panel data directory.
+  Run as root when the existing data is root-owned. No Node, Git or local build is required.
+- About 200 MB RAM for the panel, plus your stacks. Updates download a published image.
+  Reserve disk space for the new image, the previous image, a complete data snapshot and recovery
+  tools. Building development sources separately needs about 1 GB RAM.
 
 ## Install
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/mazixs/dockge2/main/install.sh -o install.sh
-less install.sh          # it runs as root, so read it first
-bash install.sh
-```
-
-The script installs what is missing, asks for the port and the directories, downloads the image and
-starts the panel. It ends with the address and a one-use setup code: open the address, and the
-first visit asks for that code together with the owner account.
-
-Before anything is written, the answers are shown as a numbered list. Enter accepts them, a number
-asks that one again, `q` leaves the machine as it was.
-
-To skip the questions and take every default:
+Download the bootstrap **from a release**, review it, then run it on the Docker host:
 
 ```bash
-bash install.sh --yes
+curl --proto '=https' --proto-redir '=https' -fsSL \
+  https://github.com/mazixs/dockge2/releases/latest/download/install.sh -o /tmp/dockge2-install.sh
+less /tmp/dockge2-install.sh
+sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --dry-run
+sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --yes
 ```
 
-Or say it all upfront:
+The verified installer is supported from `0.0.9`, with `release.json`, signatures and host updater
+binaries attached to the release. Older releases, including `0.0.8`, do not have this contract.
+For an existing installation, follow [the migration instructions](docs/self-updates.md#legacy-import).
+
+The bootstrap downloads a pinned Cosign verifier, checks its embedded SHA-256, then verifies the
+updater's signature for this repository's tagged release workflow. The updater verifies a signed
+release descriptor before using its Compose file or other assets. The image is installed by digest.
+An unavailable registry, bad signature or missing asset stops installation; it never builds `main`.
+The reviewed bootstrap and GitHub HTTPS are the initial trust root; see
+[release trust and recovery](docs/self-updates.md).
+
+Defaults are port `5001`, `/opt/stacks`, and `<installation>/data`. To choose them explicitly:
 
 ```bash
-bash install.sh --yes --port 8080 --stacks-dir /srv/stacks --dir /opt/dockge2
+sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --port 8080 \
+  --data-dir /var/lib/dockge2/data --stacks-dir /srv/stacks --yes
 ```
 
-On a public server the panel answers over plain HTTP until you put it behind
-[a reverse proxy](#behind-a-reverse-proxy) or reach it through an SSH tunnel. The installer does not
-open the firewall for you.
+Open `http://SERVER:PORT`. Read the one-use setup code from `bootstrap-token` in the selected data
+directory; do not publish that file. Put public installations behind
+[a reverse proxy](#behind-a-reverse-proxy). The installer does not open firewall ports.
 
-<details>
-<summary><b>All options</b></summary>
-
-| Option | Default | What it is |
-|---|---|---|
-| `--port` | `5001` | The port the panel answers on. A port already taken is refused, and another is offered. |
-| `--stacks-dir` | `/opt/stacks` | Where your stacks live. Absolute path only. |
-| `--dir` | `/opt/dockge2` | Where this repository is checked out. |
-| `--data-dir` | `<install dir>/data` | SQLite database, settings and secrets. |
-| `--branch` | `main` | Branch to install from. On an update, the branch the checkout is already on. |
-| `--image` | `ghcr.io/mazixs/dockge2:latest` | The published image to run. Given by hand, the installer stops rather than quietly building something else. |
-| `--build` | - | Build from the sources instead of downloading. This is how you install a branch rather than the last release, and the one case that needs the full gigabyte of memory. |
-| `--update` | - | Update the installation the script lives in, without asking for the directories again. |
-| `--yes` | - | Take the defaults and ask nothing. Required where there is no terminal, such as in cron. |
-
-An option given on the command line wins over the existing `.env` and is written into it, so
-`--port 8080` on a second run really moves the panel.
-
-</details>
-
-<details>
-<summary><b>What it will and will not do</b></summary>
-
-It writes only inside the install, stacks and data directories, and never stops or changes a
-container it did not create. Sudo is used only where it is actually needed - not at all when you
-are in the `docker` group and the directories are yours.
-
-Nothing is decided silently. Without a terminal the installer stops and asks for `--yes` rather
-than agreeing to install Docker or to rebuild a running panel on your behalf. An interrupted first
-install removes the half-written directory instead of leaving one the next run would refuse.
-
-When a build fails, or the panel never becomes healthy, it prints the container state, the last log
-lines, and the two commands that put back the image and the commit that were running before. The
-previous image is tagged `dockge2:rollback-<date>` before a rebuild, and only the newest such tag
-is kept, so updates do not pile images up on a small disk.
-
-Local changes in the checkout are never reset, stashed or overwritten: an update only
-fast-forwards, and says so when it cannot. After a rollback the checkout stands on a commit rather
-than a branch, and the next `--update` says so and stops until you are back on the branch
-(`git checkout main`).
-
-</details>
-
-### By hand
-
-The script does nothing magic, and the same thing without it is:
-
-```bash
-sudo mkdir -p /opt/stacks
-git clone https://github.com/mazixs/dockge2.git /opt/dockge2
-cd /opt/dockge2
-cp .env.example .env     # ports, paths, proxy settings - read the comments
-docker compose -f docker-compose.yml up -d --pull always --wait
-```
-
-That runs the published image, which `.env.example` already names. To build from the sources
-instead - a branch, or a change of your own - set `DOCKGE_IMAGE=dockge2:latest` in the `.env` so the
-result keeps a local name, and swap the last line for
-`docker compose -f docker-compose.yml up -d --build --wait`. Building needs about 1 GB of memory;
-see [requirements](#requirements).
-
-`docker-compose.yml` is the production configuration and it is documented line by line inside the
-file. Three settings deserve attention before the first start:
-
-- `DOCKGE_STACKS_DIR` (default `/opt/stacks`): an absolute path, and the path on the host and inside
-  the container must be identical. The panel runs `docker compose` inside the container, but the
-  daemon that executes it lives on the host and will be given exactly that path.
-  Correct: `/my-stacks:/my-stacks`. Wrong: `/docker:/my-stacks`.
-- `DOCKGE_DATA_DIR` (default `./data`): SQLite database, settings and secrets. Keep it on a local
-  disk - SQLite and a network filesystem do not go together - and outside the Git checkout in
-  production, for example `/var/lib/dockge2/data`.
-- `PUID` and `PGID` set the owner of the stack files the panel creates. Both must be set, otherwise
-  the files belong to `root`.
-
-A proxy in front of the panel needs two more variables - see
-[behind a reverse proxy](#behind-a-reverse-proxy). Updating means rebuilding the image from the
-checkout, and the previous image stays on the host for a rollback - see
-[how to update](#how-to-update).
+The stack directory must have the same absolute path on the host and in the container. Keep the
+panel data on a local filesystem, separate from the stack directory and `.dockge2` updater state.
+Existing bind mounts, `.env` bytes and Git checkout are preserved during updates. Put custom Compose
+settings in explicitly named `--compose-override /absolute/file.yml` files. Implicit `COMPOSE_FILE`
+and `compose.override.yaml` discovery are not used. Mount changes require a separate migration.
+`PUID` and `PGID` must both be set when stack files should be created for a different owner.
 
 ## Development
 
@@ -256,154 +180,95 @@ rather than configuring it, so it is the last resort, not the first.
 
 ## How to Update
 
-The panel can say when there is something to update to. Switch "Show update if available" on in
-Settings -> About: the newer release is then named on that screen and marked on the account button.
-Until then nothing is asked of anybody - the check is off by default, and all it ever does is read
-the list of releases. Installing is the command below, run on the server by you.
+Settings -> About checks only when the owner asks or enables automatic checks. It lists complete
+releases, separates failed/stale checks from current results, and names an exact version in the
+installation command. Including prereleases in discovery does not change your installation channel.
 
-The deployment is a Git checkout, so updating fast-forwards it and then puts the new image in
-place - downloaded when there is one published, built when there is not. The installer does exactly
-that and needs nothing else on the host:
+After installing with the verified updater:
 
 ```bash
 cd /opt/dockge2
-./install.sh --update
+sudo .dockge2/update --dry-run
+sudo .dockge2/update --yes
+# Select an exact release, including a prerelease:
+sudo .dockge2/update --version X.Y.Z-rc.1 --yes
 ```
 
-`--update` works on the checkout the script itself lives in, so an installation made with `--dir`
-updates from its own directory without naming it again.
+`latest` resolves once to the stable release. An explicit version tag stays selected; a configured
+mirror is retained and must serve the signed digest. `--image REPOSITORY:TAG` explicitly changes
+that choice. An unknown custom/local image requires an explicit choice; `--yes` never authorizes a
+source switch. The desired channel and installed digest are recorded separately. After import, change the channel
+with `--image`; editing `DOCKGE_IMAGE` in the preserved `.env` does not override that record.
 
-### By hand, without the installer
+The current versions of `bash install.sh --update --dir /opt/dockge2` and `npm run update-docker -- --dry-run` call this
+same engine. npm is optional and does not require installing TypeScript dependencies to update.
+Updates never fetch, reset or switch the user's Git checkout. A broken or newer `main` cannot change
+the selected release's image, Compose file or updater.
 
-An update is three things: the checkout catches up, the image is replaced, the container is
-recreated. Nothing else happens, so the same update is four commands with `git` and `docker`
-alone - no `npm`, which a server running the published image does not have:
+Downloads, signature verification and configuration validation precede downtime. The updater locks
+the Docker project, retains the actual running image, stops only the panel, copies and verifies its
+data, then starts the selected digest. Compose waits up to 180 seconds; readiness checks database
+and auth initialization, the reported application version and a further 10 seconds of stable runtime.
+Managed stack containers are not restarted. A no-op preserves the previous distinct deployment.
+
+### Migrating an older installation
+
+**Do not run the old checkout's installer or npm updater as the migration step. After migration, continue using `.dockge2/update`; the preserved old checkout
+still contains its old entry points.** Download and review
+the new released bootstrap using the installation instructions, then run:
+
+```bash
+sudo bash /tmp/dockge2-install.sh --update --dir /opt/dockge2 --version X.Y.Z --dry-run
+sudo bash /tmp/dockge2-install.sh --update --dir /opt/dockge2 --version X.Y.Z --yes
+```
+
+Replace `X.Y.Z` with the published release version. The initial import contract covers `0.0.8` with
+its original vendor Compose file and a running panel. A dirty checkout is allowed. The updater
+checks the running version, mounts and environment, and refuses an ambiguous identity or edited
+vendor file. Preserve local Compose edits in an explicit override after comparing them with the
+original released base; never discard edits to satisfy the importer. `--compose-file` selects a
+matching legacy base under a different filename; `--project` identifies a custom Compose project.
+Local-build installations must explicitly choose `--image ghcr.io/mazixs/dockge2:latest` to migrate
+to published releases. Unknown legacy versions stop before cutover.
+
+### Rollback and interruptions
 
 ```bash
 cd /opt/dockge2
-git pull --ff-only origin main                                  # the checkout
-docker compose -f docker-compose.yml pull                       # the image named in .env
-docker compose -f docker-compose.yml up -d --wait --wait-timeout 180
-docker compose -f docker-compose.yml ps                         # healthy is the answer to look for
+sudo .dockge2/update --rollback --dry-run
+sudo .dockge2/update --rollback --yes
+# Only when panel data restoration is intended:
+sudo .dockge2/update --rollback --restore-data --yes
 ```
 
-Built here rather than downloaded (`DOCKGE_IMAGE=dockge2:latest` in `.env`), the middle two become
-`docker compose -f docker-compose.yml up -d --build --wait --wait-timeout 180`. The health check
-starts 60 seconds after the container does, so anything shorter than a minute reports a panel that
-is merely still starting.
+Rollback uses the recorded local image ID and exact previous configuration, without a network pull
+or a branch checkout. If the schema contract changed, `--restore-data` is required: it restores the
+stopped-data snapshot and discards subsequent panel writes from the active database. The newer data
+is retained beside it as `*.dockge-failed-<operation>`. Stack files and stack volumes are not restored.
+Schema identity conservatively includes application migrations, auth code and the dependency lock.
 
-Take a copy of the data directory first when the release notes mention a migration:
+Before the target has started, or with an unchanged schema, a failed update attempts to restart and
+verify the previous panel. Other failures remain `recovery-required`, with the failed target stopped.
+After a crash, inspect `.dockge2/update --status`; a new update cannot overwrite an unfinished one.
+Use `--resume` to retry a recorded target after fixing an external problem, or `--rollback` to recover.
+The installed recovery tool survives application startup failure. A failed first installation has
+no previous deployment; preserve its data and journal for diagnosis instead of deleting them blindly.
+
+Snapshots and retained images are not automatically pruned. Review disk use and keep the currently
+recorded recovery set; never run a global prune as part of updating. See
+[the detailed recovery procedure](docs/self-updates.md).
+
+### Explicit development deployment
+
+Development builds are separate from release updates and require Git and enough memory to build:
 
 ```bash
-cd /opt/dockge2
-docker compose -f docker-compose.yml stop
-tar czf ~/dockge2-data-$(date +%Y%m%d).tar.gz data
+sudo .dockge2/update --development --ref YOUR_REF --yes
 ```
 
-<details>
-<summary><b>When the checkout cannot be fast-forwarded</b></summary>
-
-`git pull --ff-only` refuses when the checkout has commits of its own, or when the branch it
-follows was rewritten upstream. The installer stops there as well, and says the same as this:
-
-```bash
-cd /opt/dockge2
-git fetch --prune origin
-git log --oneline --left-right HEAD...origin/main   # what each side has
-git diff --stat HEAD origin/main                    # whether the files differ at all
-```
-
-Commits of your own are yours to keep: rebase or merge them. When the files match and only the
-history is different, take the branch as it is - after a copy of the data and a name for the
-commit you are leaving, so that going back needs nothing but that name:
-
-```bash
-cp -a data data.backup-$(date +%Y%m%d)
-git branch before-update-$(date +%Y%m%d) HEAD
-git reset --hard origin/main
-./install.sh --update
-```
-
-`reset --hard` throws away uncommitted changes to files that are in the repository; `.env`, `data`
-and your stacks are not in it and are not touched.
-
-</details>
-
-<details>
-<summary><b>When Git cannot be used at all</b></summary>
-
-The panel runs from an image, and the checkout only holds the compose file and `.env`. So the
-image can be updated on its own - when the host cannot reach GitHub, when the checkout stands on a
-commit after a rollback, or while a diverged branch is waiting to be sorted out:
-
-```bash
-cd /opt/dockge2
-./install.sh --image-only          # pull the image, recreate the container, leave Git alone
-```
-
-Or without the installer:
-
-```bash
-cd /opt/dockge2
-docker compose -f docker-compose.yml pull
-docker compose -f docker-compose.yml up -d --wait --wait-timeout 180
-```
-
-The compose file and `.env` are then the ones of the old checkout. That is fine across a patch
-release and is not a promise across a larger one: if the panel does not come up healthy, the
-rollback below puts the previous image back.
-
-</details>
-
-<details>
-<summary><b>The same thing as a bundled command</b></summary>
-
-`npm run update-docker` runs the same sequence and prints what it will do first. It needs `npm` on
-the host, which an installation running the published image has no other use for. It is fixed and
-non-destructive - `git pull --ff-only`, `docker compose config --quiet`, then either
-`docker compose pull` and `docker compose up -d --wait --wait-timeout 180`, or
-`docker compose up -d --build --wait --wait-timeout 180`. The health check starts after 60 seconds
-and repeats every 60, so a minute is not enough:
-
-```bash
-cd /opt/dockge2
-npm run update-docker -- --dry-run   # prints the commands and changes nothing
-npm run update-docker
-```
-
-Which of the two it is comes from `DOCKGE_IMAGE` in your `.env`: a name with a registry in it
-(`ghcr.io/mazixs/dockge2:latest`) is downloaded, a plain one (`dockge2:latest`) was built here and
-is built again. `--pull` and `--build` say it outright. Downloading is what keeps an update inside
-the memory a small server has; building needs about 1 GB, see [requirements](#requirements).
-
-It fast-forwards `origin/main` by default; a deployment that tracks another branch names it with
-`npm run update-docker -- --branch=release/2.0`.
-
-</details>
-
-### Rollback
-
-`DOCKGE_IMAGE` is one fixed tag, and `docker compose up --build` re-points it at the image it has
-just built, so the image you are running right now loses its only name during an update. Give it a
-name of its own first, and then a rollback needs no rebuild:
-
-```bash
-cd /opt/dockge2
-docker image tag dockge2:latest "dockge2:$(git describe --tags --always)"   # before updating
-npm run update-docker
-```
-
-Going back to it:
-
-```bash
-docker image ls dockge2          # the tag you came from
-cd /opt/dockge2
-git checkout <previous tag>
-DOCKGE_IMAGE=dockge2:<previous tag> docker compose -f docker-compose.yml up -d --wait
-```
-
-The data directory is not touched by any of this. A migration that changed the database schema is the
-one case where a rollback needs a database copy taken before the update.
+This fetches the named ref into temporary staging and records its resolved commit. It never falls
+back to a build because a release download failed. An existing unknown local deployment must first
+be imported through a supported release. For day-to-day source development use `./local.sh`.
 
 ### Updating one stack from Git
 
@@ -419,20 +284,7 @@ The command stops when the stack directory has local changes, never runs `git re
 and `--skip-git` deploys a stack that is not a checkout. As above, this is a local administrative
 command, not a browser action.
 
-- `docker compose up` already recreates the container when the image or configuration changed, and it
-  keeps attached volumes and bind mounts.
-- `--force-recreate` (`npm run update-docker -- --force-recreate`) forces recreation without deleting
-  attached data.
-- `docker compose config --quiet` validates the configuration before anything is restarted, and
-  `--wait --wait-timeout 180` fails instead of leaving the update in an undefined state.
-- The command refuses to run with a dirty working copy, and it never runs `docker compose down -v`,
-  `docker volume prune`, `git reset --hard` or `git clean -fdx`.
-- Keep `./data` outside the Git checkout in production, for example `/var/lib/dockge2/data`, so that even
-  a mistaken `git clean` cannot touch the database.
-- The image is built from this checkout, so `git pull` alone changes nothing inside the running
-  container until the image is rebuilt - which is exactly what `npm run update-docker` does.
-- Updating is a local, administrative action. There is intentionally no Socket.IO event for it, because
-  that would give the browser a remote `git pull` plus Docker control.
+Updating is a local administrative action. The browser does not expose a self-update shell command.
 
 ## Community and contribution
 

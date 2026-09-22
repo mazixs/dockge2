@@ -100,7 +100,7 @@ ENV UV_USE_IO_URING=0
 
 VOLUME /app/data
 EXPOSE 5001
-HEALTHCHECK --interval=60s --timeout=30s --start-period=60s --retries=5 CMD extra/healthcheck
+HEALTHCHECK --interval=10s --timeout=6s --start-period=60s --retries=3 CMD extra/healthcheck
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "--import", "tsx", "./backend/index.ts"]
 

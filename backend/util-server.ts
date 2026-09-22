@@ -1,3 +1,4 @@
+import { OperationError } from "./operation-error";
 import { Socket } from "socket.io";
 import { Terminal } from "./terminal";
 import { log } from "./log";
@@ -86,7 +87,13 @@ export function callbackError(error : unknown, callback : unknown) {
         return;
     }
 
-    if (error instanceof ValidationError) {
+    if (error instanceof OperationError) {
+        callback({ ok: false,
+            code: error.code,
+            unknown: error.unknown,
+            msg: error.message,
+            msgi18n: true });
+    } else if (error instanceof ValidationError) {
         callback({
             ok: false,
             type: ERROR_TYPE_VALIDATION,
@@ -101,6 +108,9 @@ export function callbackError(error : unknown, callback : unknown) {
         });
     } else {
         log.debug("console", "Unknown error: " + error);
+        callback({ ok: false,
+            msg: "operationUnexpectedError",
+            msgi18n: true });
     }
 }
 

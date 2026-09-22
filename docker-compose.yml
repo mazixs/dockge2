@@ -9,18 +9,14 @@ name: dockge2
 
 services:
   dockge:
-    # Форк отличается от upstream, поэтому образ либо берется из реестра этого
-    # репозитория (ghcr.io/mazixs/dockge2), либо собирается здесь же.
-    # Что именно - решает DOCKGE_IMAGE: имя с реестром скачивается
-    # (up -d --pull always), имя без реестра собирается (up -d --build).
-    # Сборка фронтенда просит около 1 ГБ памяти, запуск панели около 200 МБ:
-    # V8 растит heap под доступную память, поэтому на большом сервере цифра выше,
-    # а под mem_limit панель укладывается меньше. Это не утечка.
+    # The verified updater stages this file from the selected release, replaces
+    # the image with its signed digest and removes build from the managed snapshot.
+    # Building this checkout is an explicit development action, never a fallback.
     build:
       context: .
       dockerfile: docker/Dockerfile
       target: release
-    image: ${DOCKGE_IMAGE:-dockge2:latest}
+    image: ${DOCKGE_IMAGE:-ghcr.io/mazixs/dockge2:latest}
     # Панель обязана вернуться после падения процесса и после перезагрузки хоста.
     restart: unless-stopped
     # Драйвер json-file по умолчанию не ограничен ничем: панель работает месяцами,

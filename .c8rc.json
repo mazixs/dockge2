@@ -5,7 +5,6 @@
         "common/**/*.ts",
         "frontend/src/**/*.ts",
         "extra/deploy-stack.ts",
-        "extra/update-dockge.ts",
         "extra/check-coverage.ts",
         "extra/check-bundle.ts"
     ],

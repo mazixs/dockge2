@@ -588,6 +588,9 @@ function fakeSocket(withError = false) : object {
         timeout() {
             return fakeSocket(true);
         },
+        emitWithAck(event : string) {
+            return new Promise(resolve => setTimeout(() => resolve(socketAnswer(event)), 80));
+        },
         emit(event : string, ...args : unknown[]) {
             const callback = args.at(-1);
             if (typeof callback !== "function") {

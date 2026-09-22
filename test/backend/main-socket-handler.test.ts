@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import type { DockgeServer } from "../../backend/dockge-server";
+import { releaseAssets } from "../helpers/releases";
 import checkVersion from "../../backend/check-version";
 import { MainSocketHandler, stripGeneratedProjectName } from "../../backend/socket-handlers/main-socket-handler";
 import { Settings } from "../../backend/settings";
@@ -235,7 +236,8 @@ test("turning the update check on answers on the screen that turned it on", { ti
         context.mock.method(globalThis, "fetch", async (url : unknown) => {
             asked.push(String(url));
             return { ok: true,
-                json: async () => [{ tag_name: "v9999.0.0" }] } as Response;
+                json: async () => [{ tag_name: "v9999.0.0",
+                    assets: releaseAssets }] } as Response;
         });
 
         let informed : () => void = () => undefined;
@@ -307,7 +309,8 @@ test("only the owner can manually check updates, without changing the automatic 
         let requests = 0;
         context.mock.method(globalThis, "fetch", async () => {
             requests++;
-            return Response.json([{ tag_name: "v9999.0.0" }]);
+            return Response.json([{ tag_name: "v9999.0.0",
+                assets: releaseAssets }]);
         });
         const server = Object.assign(createServer(stacksDir), { sendInfoToAll: async () => {} });
         new MainSocketHandler().create(socket as unknown as DockgeSocket, server);

@@ -1,3 +1,4 @@
+import { OperationError } from "../../backend/operation-error";
 import { strict as assert } from "node:assert";
 import { mkdir, mkdtemp, readFile, symlink, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -50,6 +51,9 @@ test("server utilities validate login and serialize callback results and errors"
             msgi18n: true },
         { ok: false,
             msg: "failed",
+            msgi18n: true },
+        { ok: false,
+            msg: "operationUnexpectedError",
             msgi18n: true },
     ]);
 
@@ -309,9 +313,58 @@ test("a stack that builds its own image is deployed with a build", async () => {
             [ "build" ],
             [ "up" ],
         ]);
+        assert.ok(updateCommands[0]!.includes("--ignore-buildable"));
         assert.ok(updateCommands[1]!.includes("--pull"), "the base image of a Dockerfile is only refreshed by build --pull");
     } finally {
         await rm(stacksDir, { recursive: true,
+            force: true });
+    }
+});
+
+test("update failure categories stop at the failed command boundary", async (context) => {
+    const server = { stacksDir: os.tmpdir() } as never;
+    for (const failedStage of [ "pull", "build", "up" ]) {
+        const stack = new Stack(server, "boundary-test", "services:\n  app:\n    build: .\n", "", true);
+        context.mock.method(stack, "validateComposeConfig", async () => {});
+        context.mock.method(stack, "updateStatus", async () => {});
+        (stack as unknown as { _status : number })._status = RUNNING;
+        const commands : string[] = [];
+        await assert.rejects(stack.control("update", async (args) => {
+            const stage = args.find(arg => [ "pull", "build", "up" ].includes(arg))!;
+            commands.push(stage);
+            return stage === failedStage ? 1 : 0;
+        }), (error : unknown) => {
+            assert.ok(error instanceof OperationError);
+            assert.equal(error.code, failedStage === "up" ? "apply" : failedStage);
+            const replies : unknown[] = [];
+            callbackError(error, (response : unknown) => replies.push(response));
+            assert.deepEqual(replies, [{ ok: false,
+                code: error.code,
+                unknown: false,
+                msg: error.message,
+                msgi18n: true }]);
+            return true;
+        });
+        assert.equal(commands.at(-1), failedStage);
+    }
+});
+
+test("an unavailable Compose executable is not reported as invalid user configuration", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "dockge-missing-compose-"));
+    const savedPath = process.env.PATH;
+    try {
+        await mkdir(path.join(root, "fixture"));
+        const stack = new Stack({ stacksDir: root } as never, "fixture", "services: {}", "", true);
+        process.env.PATH = "";
+        await assert.rejects(stack.validateComposeConfig(), { code: "spawn",
+            message: "operationValidationUnavailable" });
+    } finally {
+        if (savedPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = savedPath;
+        }
+        await rm(root, { recursive: true,
             force: true });
     }
 });

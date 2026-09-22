@@ -128,3 +128,13 @@ test("the deadline of one request does not end another", async () => {
 
     assert.equal(waitingResponse.ok, true);
 });
+
+test("a transport exception settles as unknown and releases the pending request", async () => {
+    const requests = new AgentRequests(() => {
+        throw new Error("transport closed");
+    });
+    const result = await requests.request("", "updateStack", [ "fixture" ]);
+    assert.equal(result.ok, false);
+    assert.equal(!result.ok && result.unknown, true);
+    assert.equal(requests.waiting, 0);
+});

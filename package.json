@@ -1,6 +1,6 @@
 {
     "name": "dockge2",
-    "version": "0.0.8",
+    "version": "0.0.9",
     "type": "module",
     "engines": {
         "node": "22.23.2 || 24.19.0"
@@ -23,20 +23,21 @@
         "dev": "concurrently -k -r \"wait-on tcp:5000 && npm run dev:backend\" \"npm run dev:frontend\"",
         "dev:backend": "cross-env NODE_ENV=development tsx watch --inspect ./backend/index.ts",
         "dev:frontend": "cross-env NODE_ENV=development vite --host --config ./frontend/vite.config.ts",
-        "release-final": "tsx ./extra/test-docker.ts && tsx extra/update-version.ts && npm run build:docker",
-        "release-beta": "tsx ./extra/test-docker.ts && tsx extra/update-version.ts && npm run build:docker-beta",
+        "release-final": "bash ./extra/release-only.sh",
+        "release-beta": "bash ./extra/release-only.sh",
         "build:frontend": "vite build --config ./frontend/vite.config.ts",
-        "build:docker": "node ./extra/env2arg.js docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t ghcr.io/mazixs/dockge2:latest -t ghcr.io/mazixs/dockge2:$VERSION --target release -f ./docker/Dockerfile . --push",
-        "build:docker-beta": "node ./extra/env2arg.js docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t ghcr.io/mazixs/dockge2:beta -t ghcr.io/mazixs/dockge2:$VERSION --target release -f ./docker/Dockerfile . --push",
-        "release-nightly": "docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t ghcr.io/mazixs/dockge2:nightly --target nightly -f ./docker/Dockerfile . --push",
+        "build:docker": "bash ./extra/release-only.sh",
+        "build:docker-beta": "bash ./extra/release-only.sh",
+        "release-nightly": "bash ./extra/release-only.sh",
         "start-docker": "docker run --rm -p 5001:5001 --name dockge2 ghcr.io/mazixs/dockge2:latest",
         "mark-as-nightly": "tsx ./extra/mark-as-nightly.ts",
         "reset-account": "tsx ./extra/reset-account.ts",
-        "update-docker": "tsx ./extra/update-dockge.ts",
+        "update-docker": "bash ./extra/update-dockge.sh",
         "deploy-stack": "tsx ./extra/deploy-stack.ts",
         "test:e2e": "playwright test",
         "test:visual": "playwright test --config playwright-visual.config.ts",
-        "test:visual:approve": "playwright test --config playwright-visual.config.ts --update-snapshots=changed"
+        "test:visual:approve": "playwright test --config playwright-visual.config.ts --update-snapshots=changed",
+        "test:updater": "cd extra/updater && go test -race ./..."
     },
     "dependencies": {
         "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",

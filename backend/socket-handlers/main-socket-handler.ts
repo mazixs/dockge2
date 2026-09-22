@@ -72,12 +72,12 @@ export class MainSocketHandler extends SocketHandler {
                     throw new ValidationError("authPermissionDenied");
                 }
                 const result = await checkVersion.check(true);
-                callbackResult(result?.ok ? result : {
+                callbackResult(result ?? {
                     ok: false,
                     msg: "updateCheckFailed",
                     msgi18n: true,
                 }, callback);
-                if (result?.ok) {
+                if (result) {
                     runInBackground("server info", () => server.sendInfoToAll());
                 }
             } catch (error) {

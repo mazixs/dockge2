@@ -34,3 +34,12 @@ test("the newest release is only news when it is newer than this one", () => {
     assert.equal(updateNotice({ latestVersion: "0.0.6",
         updateAvailable: true }, true), "available");
 });
+
+test("failed and stale checks do not claim the installation is current", () => {
+    assert.equal(updateNotice({ latestVersion: "0.0.8",
+        updateCheckFailed: true }, true), "failed");
+    assert.equal(updateNotice({ latestVersion: "0.0.8",
+        lastUpdateCheck: "2000-01-01T00:00:00Z" }, true), "stale");
+    assert.equal(updateNotice({ latestVersion: "0.0.8",
+        lastUpdateCheck: new Date().toISOString() }, true), "current");
+});

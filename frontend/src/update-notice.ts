@@ -1,3 +1,5 @@
+import type { UpdateCheckError } from "../../common/update-check";
+
 /** What the panel can honestly say about updates right now */
 export type UpdateNotice =
     /** The owner never turned the check on, so nothing was ever asked */
@@ -7,7 +9,9 @@ export type UpdateNotice =
     /** The registry answered, and nothing newer exists */
     | "current"
     /** A newer release exists */
-    | "available";
+    | "available"
+    | "failed"
+    | "stale";
 
 /** The part of the server's answer this decision needs */
 export interface VersionInfo {
@@ -15,6 +19,9 @@ export interface VersionInfo {
     latestVersion? : string;
     /** Whether that release is newer than the running one */
     updateAvailable? : boolean;
+    lastUpdateCheck? : string;
+    updateCheckFailed? : boolean;
+    updateCheckError? : UpdateCheckError;
 }
 
 /**
@@ -32,6 +39,12 @@ export function updateNotice(info : VersionInfo | undefined, checkEnabled : unkn
         return "off";
     }
 
+    if (info?.updateCheckFailed) {
+        return "failed";
+    }
+    if (info?.lastUpdateCheck && Date.now() - Date.parse(info.lastUpdateCheck) > 49 * 60 * 60 * 1000) {
+        return "stale";
+    }
     const latest = typeof info?.latestVersion === "string" ? info.latestVersion : "";
 
     if (!latest) {

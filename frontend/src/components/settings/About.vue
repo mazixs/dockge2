@@ -45,16 +45,18 @@
 
                 <div class="update-result" role="status" aria-live="polite" aria-atomic="true">
                     <p v-if="checking" class="update-state">{{ $t("updateChecking") }}</p>
-                    <p v-else-if="checkFailed" class="text-danger">{{ $t("updateCheckFailed") }}</p>
+                    <p v-else-if="checkFailed || notice === 'failed'" class="text-danger">{{ $t(checkErrorKey) }}</p>
                     <p v-else-if="notice === 'available'" class="update-news">
                         <font-awesome-icon icon="arrow-alt-circle-up" />
                         <span>{{ $t("newUpdate") }}: {{ versionInfo.latestVersion }}</span>
                     </p>
+                    <p v-else-if="notice === 'stale'" class="update-state">{{ $t("updateCheckStale") }}</p>
                     <p v-else-if="notice === 'current'" class="update-state">{{ $t("updateCurrent") }}</p>
                     <p v-else class="update-state">{{ $t("updateNotChecked") }}</p>
                 </div>
+                <p v-if="versionInfo.lastUpdateCheck" class="update-state">{{ $t("updateLastChecked") }}: {{ new Date(versionInfo.lastUpdateCheck).toLocaleString() }}</p>
                 <p v-if="!checking && !checkFailed && notice === 'available'" class="update-how">
-                    {{ $t("updateHow") }} <code>./install.sh --update</code>
+                    {{ $t("updateHow") }} <code>.dockge2/update --version {{ versionInfo.latestVersion }}</code>
                 </p>
             </div>
         </div>
@@ -68,6 +70,7 @@
 <script>
 import BrandMark from "../BrandMark.vue";
 import InterfaceIcon from "../InterfaceIcon.vue";
+import { UPDATE_CHECK_MESSAGES } from "../../../../common/update-check";
 import { updateNotice } from "../../update-notice";
 
 export default {
@@ -78,11 +81,16 @@ export default {
             checking: false,
             saving: false,
             checkFailed: false,
+            manualErrorKey: "",
             disposed: false,
             manualInfo: /** @type {import("../../update-notice").VersionInfo | null} */ (null),
         };
     },
     computed: {
+        checkErrorKey() {
+            const code = this.versionInfo.updateCheckError;
+            return this.manualErrorKey || (code && UPDATE_CHECK_MESSAGES[code]) || "updateCheckFailed";
+        },
         busy() {
             return this.checking || this.saving;
         },
@@ -112,6 +120,7 @@ export default {
         async checkNow() {
             this.checking = true;
             this.checkFailed = false;
+            this.manualErrorKey = "";
             this.manualInfo = null;
             try {
                 const result = await this.$root.getSocket().timeout(15000).emitWithAck("checkForUpdates");
@@ -119,12 +128,18 @@ export default {
                     return;
                 }
                 if (result?.ok && typeof result.latestVersion === "string") {
-                    this.manualInfo = result;
+                    this.manualInfo = { ...result,
+                        lastUpdateCheck: new Date().toISOString(),
+                        updateCheckFailed: false };
                 } else {
                     this.checkFailed = true;
+                    this.manualErrorKey = result?.msg === "authPermissionDenied" || result?.msg === "You are not logged in."
+                        ? "authPermissionDenied"
+                        : UPDATE_CHECK_MESSAGES[/** @type {keyof typeof UPDATE_CHECK_MESSAGES} */ (result?.code)] || "updateCheckFailed";
                 }
             } catch {
                 this.checkFailed = true;
+                this.manualErrorKey = "updateCheckConnection";
             } finally {
                 this.checking = false;
             }
@@ -134,6 +149,7 @@ export default {
             this.saving = true;
             this.manualInfo = null;
             this.checkFailed = false;
+            this.manualErrorKey = "";
             try {
                 const result = await this.$root.getSocket().timeout(15000).emitWithAck("setSettings", this.settings, undefined);
                 if (!this.disposed) {
