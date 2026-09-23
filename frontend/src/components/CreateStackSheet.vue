@@ -1045,7 +1045,6 @@ textarea {
     }
 }
 
-
 footer {
     display: flex;
     align-items: center;
