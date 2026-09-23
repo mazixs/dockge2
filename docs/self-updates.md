@@ -164,6 +164,61 @@ its bytes are checked against the signed import contract. Put understood customi
 overrides. Do not replace or reset the user's working copy to pass this check. After rollback to a
 legacy installation, the same import choices may be needed again.
 
+### From 0.0.7 to 0.0.10
+
+There is no direct `0.0.7` import contract in `0.0.10`. First run the published `0.0.8` image
+with the original `0.0.7` Compose file, then import that running panel with the signed `0.0.10`
+bootstrap. The released `0.0.7` and `0.0.8` Compose files have identical bytes. This route was
+checked with an isolated `0.0.7` installation and an existing owner account; the `0.0.8` to
+`0.0.10` migration and restore are release gates on both architectures.
+
+Before changing the image, record the actual Compose project, data and stack paths. Back up the
+panel data while its container is stopped, along with `.env` and `docker-compose.yml`. The panel
+data can be root-owned even when Docker commands work without sudo. Keep the backup outside the
+data directory and preserve its permissions. The commands below assume `/opt/dockge2` and the
+original vendor Compose file; use the real installation directory and project name if different.
+The signed updater requires Docker Engine 24+ and Compose 2.20+.
+
+```bash
+cd /opt/dockge2
+sha256sum docker-compose.yml
+# Expected 0.0.7/0.0.8 vendor hash:
+# baa4b0b12dd7abca6ba22a5f9485013fe80f59cecfb452e79ec6b08b9a033cba
+docker compose -f docker-compose.yml exec -T dockge node -p "require('/app/package.json').version"
+# Confirm 0.0.7, then stop only this panel and back up its actual data path.
+docker compose -f docker-compose.yml stop dockge
+sudo install -d -m 700 /secure/backup
+sudo cp -a /actual/panel/data /secure/backup/dockge-data-before-0.0.8
+sudo cp -a .env docker-compose.yml /secure/backup/
+```
+
+In the existing `.env`, change only `DOCKGE_IMAGE` to the published `0.0.8` image index digest
+`ghcr.io/mazixs/dockge2@sha256:5c050694a1949cadf65e99f8aad9e9a845c82575bf9ba6e8b4618f9fbcd5deea`.
+Keep the data, stack paths, port and other settings. Then:
+
+```bash
+docker pull ghcr.io/mazixs/dockge2@sha256:5c050694a1949cadf65e99f8aad9e9a845c82575bf9ba6e8b4618f9fbcd5deea
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml up -d --no-build --pull never --wait --wait-timeout 180
+docker compose -f docker-compose.yml exec -T dockge node -p "require('/app/package.json').version"
+# Confirm 0.0.8 and sign in with the existing account before continuing.
+curl --proto '=https' --proto-redir '=https' -fsSL \
+  https://github.com/mazixs/dockge2/releases/download/v0.0.10/install.sh \
+  -o /tmp/dockge2-install-0.0.10.sh
+less /tmp/dockge2-install-0.0.10.sh
+sudo bash /tmp/dockge2-install-0.0.10.sh --update --dir /opt/dockge2 \
+  --version 0.0.10 --image ghcr.io/mazixs/dockge2:latest --dry-run
+sudo bash /tmp/dockge2-install-0.0.10.sh --update --dir /opt/dockge2 \
+  --version 0.0.10 --image ghcr.io/mazixs/dockge2:latest --yes
+```
+
+Use the same Docker daemon and installation owner for both signed-updater commands. The explicit
+`--image` selects the release channel after the temporary `0.0.8` digest pin in `.env`; the old file is
+not rewritten. If the vendor Compose hash differs, or the panel was built locally, do not replace
+its files to pass this check. Preserve the custom configuration and establish an explicit legacy
+base/override before importing. If the `0.0.8` step fails, recover the stopped-data backup and
+the saved `.env`/Compose file before restarting the old image.
+
 ## Publishing and acceptance
 
 `release.yml` runs only with a tag identity and serializes publication. It checks package/tag

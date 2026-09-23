@@ -231,6 +231,9 @@ matching legacy base under a different filename; `--project` identifies a custom
 Local-build installations must explicitly choose `--image ghcr.io/mazixs/dockge2:latest` to migrate
 to published releases. Unknown legacy versions stop before cutover.
 
+For a `0.0.7` installation, use the verified [two-step migration through the released `0.0.8`
+image](docs/self-updates.md#from-007-to-0010). Direct `0.0.7` import into `0.0.10` is refused.
+
 ### Rollback and interruptions
 
 ```bash
