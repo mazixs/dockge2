@@ -167,7 +167,7 @@ require recovery from `.git/dockge-recovery-*`.
 - **Never add an event that lets the browser run arbitrary git, shell or Docker commands.** Stack
   file names are safe relative paths only: no `..`, no absolute paths, no symlinks.
 - Never commit keys, passwords, local data or test sessions. Leave other people's uncommitted work
-  alone. Report vulnerabilities through `SECURITY.md`, not a public issue.
+  alone. Report vulnerabilities through `.github/SECURITY.md`, not a public issue.
 
 ## Docker and local data
 
@@ -199,11 +199,18 @@ require recovery from `.git/dockge-recovery-*`.
 
 | File | What it records |
 | --- | --- |
-| `README.md` | install, update, rollback, reverse proxy, FAQ |
-| `CONTRIBUTING.md` | what kind of change is accepted and how to submit it |
-| `SECURITY.md` | how to report a vulnerability |
-| `docs/self-updates.md` | release verification, migration, updater state and recovery |
-| `docs/authentication.md` | accounts, sessions, proxy configuration |
+| `README.md` | what the product is, the changes from Dockge, short install, update and uninstall, license |
+| `docs/README.md` | the index of the user guides |
+| `docs/installation.md`, `docs/updating.md` | install, mounts, uninstall; update, rollback, migration of older installations |
+| `docs/configuration.md` | environment variables, reverse proxy, HTTPS |
+| `docs/git-stacks.md` | stacks from Git, private repositories, `deploy-stack` |
+| `docs/development.md` | running from source, the test suites, performance checks |
+| `docs/faq.md` | frequent questions |
+| `docs/assets/screenshots/` | README screenshots of the English interface, invented data only |
+| `.github/CONTRIBUTING.md` | what kind of change is accepted and how to submit it |
+| `.github/SECURITY.md` | how to report a vulnerability |
+| `docs/self-updates.md` | release verification, migration, updater state and recovery in depth |
+| `docs/authentication.md` | accounts, roles, two-factor authentication, recovery, sessions, proxy configuration |
 | `docs/mcp.md` | the MCP contract, limits and verified clients |
 | `docs/design-system.md` | tokens and the current layout |
 | `frontend/src/lang/README.md` | which languages, and how to translate |

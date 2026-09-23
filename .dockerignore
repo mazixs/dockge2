@@ -54,8 +54,6 @@ playwright-visual.config.ts
 .github
 AGENTS.md
 CLAUDE.md
-CONTRIBUTING.md
-SECURITY.md
 
 # Private, versioned deployment state and stopped-data snapshots
 .dockge2/

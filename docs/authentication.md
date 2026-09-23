@@ -8,15 +8,16 @@ on the server, including on the first start.
 
 Starting with no accounts creates a `bootstrap-token` file in `DOCKGE_DATA_DIR` with permissions
 `0600`. Read it on the server and enter it in the setup form together with a username, an email and
-a password. In a container with the standard data directory:
+a password. With a release installation the container is `dockge2-dockge-1`:
 
 ```sh
-docker exec <container-name> cat /app/data/bootstrap-token
+sudo docker exec dockge2-dockge-1 cat /app/data/bootstrap-token
 ```
 
-Substitute your own container name and data directory. Do not put the code in a chat, an open log or
-a repository. The alternative is to pass `DOCKGE_BOOTSTRAP_TOKEN`, at least 32 characters, through
-whatever protected mechanism configures your environment.
+For another setup, substitute your own container name, or read the file in the data directory on
+the host. Do not put the code in a chat, an open log or a repository. The alternative is to pass
+`DOCKGE_BOOTSTRAP_TOKEN`, at least 32 characters, through whatever protected mechanism configures
+your environment.
 
 Once the owner exists the file is deleted and that route refuses to create another. A code from the
 environment also stops being accepted after setup; remove it from the environment at the next
@@ -49,6 +50,28 @@ suspended or moved to another role.
 Rights are checked on the server for every Socket.IO request and every nested agent operation. A new
 event is denied until it is explicitly allowed. A viewer receives a separate, safe set of stack list
 fields. Account settings and one's own two factor setup are available to every role.
+
+## Two-factor authentication
+
+Every account can switch on a second factor under Settings -> Security: scan the code with an
+authenticator app, enter one code to confirm, and save the backup codes that are shown once. From
+then on a login asks for a six-digit code or one of the backup codes as well as the password. Setup
+that is not finished leaves two-factor authentication off.
+
+## A lost owner password
+
+Another owner can reset it under Settings -> Users. When no owner can sign in, reset the accounts on
+the host:
+
+```sh
+sudo docker exec -it dockge2-dockge-1 npm run reset-account
+sudo docker restart dockge2-dockge-1
+sudo docker exec dockge2-dockge-1 cat /app/data/bootstrap-token
+```
+
+The command asks before it removes **all accounts and their sessions**. Stacks, settings and agents
+stay. After the restart the panel shows the setup screen again, and the new setup code creates a
+replacement owner.
 
 ## HTTPS and a reverse proxy
 
