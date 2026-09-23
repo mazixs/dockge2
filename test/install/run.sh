@@ -6,7 +6,7 @@ cd "$root"
 (cd extra/updater && go test -race -count=1 ./...)
 go test extra/healthcheck.go extra/healthcheck_test.go
 node --test test/install/release.test.mjs test/install/bootstrap.test.mjs test/install/privacy.test.mjs
-for script in install.sh extra/update-dockge.sh extra/release-only.sh extra/release/verifier.sh test/install/docker.sh test/install/managed.sh; do bash -n "$script"; done
+for script in install.sh extra/update-dockge.sh extra/release-only.sh extra/release/verifier.sh test/install/docker.sh test/install/managed.sh test/install/unmanaged.sh; do bash -n "$script"; done
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 mkdir -p "$work/deployment/.dockge2" "$work/bin"

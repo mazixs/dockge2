@@ -308,8 +308,9 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		if readErr != nil {
 			return readErr
 		}
-		if active == nil && fileHash(vendor) != "baa4b0b12dd7abca6ba22a5f9485013fe80f59cecfb452e79ec6b08b9a033cba" {
-			return errors.New("legacy Compose base is not the recognized 0.0.8 release; preserve edits and supply the matching --compose-file")
+		if active == nil && fileHash(vendor) != "baa4b0b12dd7abca6ba22a5f9485013fe80f59cecfb452e79ec6b08b9a033cba" &&
+			fileHash(vendor) != "adeb402bd932e0eaf19930bbd5ba3b24e482a2376707c32e03e43645986a187f" {
+			return errors.New("legacy Compose base is not a recognized release; preserve edits and supply the matching --compose-file")
 		}
 		if active != nil {
 			b, readErr := readRegular(filepath.Join(active.ReleaseDir, "release.json"), maxMetadata)

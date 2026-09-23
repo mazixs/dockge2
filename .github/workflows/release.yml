@@ -105,6 +105,7 @@ jobs:
             if [[ -n "$PREVIOUS" ]]; then
               DOCKER_DEFAULT_PLATFORM="linux/$arch" bash test/install/managed.sh "$RUNNER_TEMP/release" "$arch" "$RUNNER_TEMP/cosign" "$PREVIOUS"
             fi
+            DOCKER_DEFAULT_PLATFORM="linux/$arch" bash test/install/unmanaged.sh "$RUNNER_TEMP/release" "$arch" "$RUNNER_TEMP/cosign"
           done
       - name: Sign and publish the tested version without moving stable
         if: steps.publication.outputs.reuse != 'true'

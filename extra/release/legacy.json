@@ -2,5 +2,9 @@
   "0.0.8": {
     "composeHash": "baa4b0b12dd7abca6ba22a5f9485013fe80f59cecfb452e79ec6b08b9a033cba",
     "schema": "cf0c0e6448335d9a6f290ede1ca8452055ed0ecc01262b005ab4d9cb38a6d758"
+  },
+  "0.0.10": {
+    "composeHash": "adeb402bd932e0eaf19930bbd5ba3b24e482a2376707c32e03e43645986a187f",
+    "schema": "cf0c0e6448335d9a6f290ede1ca8452055ed0ecc01262b005ab4d9cb38a6d758"
   }
 }

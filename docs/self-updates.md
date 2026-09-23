@@ -164,6 +164,34 @@ its bytes are checked against the signed import contract. Put understood customi
 overrides. Do not replace or reset the user's working copy to pass this check. After rollback to a
 legacy installation, the same import choices may be needed again.
 
+### Unmanaged 0.0.10 installations
+
+An old checkout script can pull the published `0.0.10` image without creating `.dockge2` updater
+state. The panel runs, but the `0.0.10` signed updater cannot import that version as a legacy
+installation. The `0.0.11` release adds a tested import contract for this exact condition. It
+requires the running `0.0.10` package, the published image's registry digest and source revision,
+matching schema-bearing files, the exact released `0.0.10` vendor Compose bytes, unchanged mounts,
+environment and ports, and an accessible local data directory. A same-version local rebuild or a
+modified vendor Compose file is refused before downtime. Preserve edits and provide the original
+vendor file explicitly with `--compose-file` if needed; do not replace the active checkout.
+
+For an installation at `/opt/dockge2` with the released vendor file and `DOCKGE_IMAGE` pointing to
+the published repository, use the released `0.0.11` bootstrap, always naming the directory:
+
+```bash
+curl --proto '=https' --proto-redir '=https' -fsSL \
+  https://github.com/mazixs/dockge2/releases/download/v0.0.11/install.sh \
+  -o /tmp/dockge2-install-0.0.11.sh
+sudo bash /tmp/dockge2-install-0.0.11.sh --update --dir /opt/dockge2 --version 0.0.11 --dry-run
+sudo bash /tmp/dockge2-install-0.0.11.sh --update --dir /opt/dockge2 --version 0.0.11 --yes
+```
+
+An already managed `0.0.10` installation instead uses its installed `.dockge2/update` executable
+with `--dir /opt/dockge2 --update --version 0.0.11` and first checks `--dry-run`. Both paths keep
+the existing accounts, data and stack files; a stopped-data snapshot is made before cutover. The
+release gate exercises import and rollback of the unmanaged image, plus the managed self-update,
+on both image architectures.
+
 ### From 0.0.7 to 0.0.10
 
 There is no direct `0.0.7` import contract in `0.0.10`. First run the published `0.0.8` image

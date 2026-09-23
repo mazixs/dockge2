@@ -222,8 +222,10 @@ sudo bash /tmp/dockge2-install.sh --update --dir /opt/dockge2 --version X.Y.Z --
 sudo bash /tmp/dockge2-install.sh --update --dir /opt/dockge2 --version X.Y.Z --yes
 ```
 
-Replace `X.Y.Z` with the published release version. The initial import contract covers `0.0.8` with
-its original vendor Compose file and a running panel. A dirty checkout is allowed. The updater
+Replace `X.Y.Z` with the published release version. The import contract covers `0.0.8` with
+its original vendor Compose file and a running panel. From `0.0.11`, it also accepts an unmanaged,
+published `0.0.10` image with its exact digest, source revision and vendor Compose file. A dirty
+checkout is allowed. The updater
 checks the running version, mounts and environment, and refuses an ambiguous identity or edited
 vendor file. Preserve local Compose edits in an explicit override after comparing them with the
 original released base; never discard edits to satisfy the importer. `--compose-file` selects a
@@ -233,6 +235,9 @@ to published releases. Unknown legacy versions stop before cutover.
 
 For a `0.0.7` installation, use the verified [two-step migration through the released `0.0.8`
 image](docs/self-updates.md#from-007-to-0010). Direct `0.0.7` import into `0.0.10` is refused.
+If an older script already pulled the released `0.0.10` image without creating `.dockge2` state,
+use the [verified unmanaged `0.0.10` import](docs/self-updates.md#unmanaged-0010-installations)
+available from `0.0.11`. Do not downgrade panel data to regain the `0.0.8` path.
 
 ### Rollback and interruptions
 

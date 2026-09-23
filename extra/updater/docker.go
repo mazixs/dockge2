@@ -229,9 +229,10 @@ type containerInfo struct {
 	} `json:"Mounts"`
 }
 type imageInfo struct {
-	Architecture string `json:"Architecture"`
-	OS           string `json:"Os"`
-	ID           string `json:"Id"`
+	Architecture string   `json:"Architecture"`
+	OS           string   `json:"Os"`
+	ID           string   `json:"Id"`
+	RepoDigests  []string `json:"RepoDigests"`
 	Config       struct {
 		Labels map[string]string `json:"Labels"`
 	} `json:"Config"`

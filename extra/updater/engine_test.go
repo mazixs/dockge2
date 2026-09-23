@@ -18,6 +18,8 @@ type deploymentFixture struct {
 	dir, data, state, assets, verifier                              string
 	release                                                         Release
 	oldID, targetID, image, containerID                             string
+	oldVersion, oldCommit, oldDigest                                string
+	oldRepoDigests                                                  []string
 	running                                                         bool
 	pullFailure, startFailure, snapshotFailure, crashAt, crashPhase string
 	stops, starts                                                   int
@@ -28,7 +30,7 @@ func newDeployment(t *testing.T) *deploymentFixture {
 	t.Helper()
 	r, assets := fixture(t)
 	dir := t.TempDir()
-	w := &deploymentFixture{t: t, dir: dir, data: filepath.Join(dir, "data"), state: filepath.Join(dir, ".dockge2"), assets: assets, release: r, oldID: "sha256:" + strings.Repeat("1", 64), targetID: "sha256:" + strings.Repeat("2", 64), containerID: "oldcontainer", running: true}
+	w := &deploymentFixture{t: t, dir: dir, data: filepath.Join(dir, "data"), state: filepath.Join(dir, ".dockge2"), assets: assets, release: r, oldID: "sha256:" + strings.Repeat("1", 64), targetID: "sha256:" + strings.Repeat("2", 64), containerID: "oldcontainer", running: true, oldVersion: "0.0.8"}
 	w.image = w.oldID
 	must(t, os.Mkdir(w.data, 0700))
 	must(t, os.WriteFile(filepath.Join(w.data, "dockge.db"), []byte("old fixture data"), 0600))
@@ -108,7 +110,10 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 		return nil, nil
 	case "exec":
 		if a[2] == "node" {
-			v := "0.0.8"
+			if a[3] == "-e" {
+				return []byte(w.release.Schema), nil
+			}
+			v := w.oldVersion
 			if w.image == w.targetID {
 				v = w.release.Version
 			}
@@ -129,7 +134,9 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 		i.Config.Labels = map[string]string{"org.opencontainers.image.version": w.release.Version, "org.opencontainers.image.revision": w.release.Commit}
 		if ref == w.oldID {
 			i.ID = w.oldID
-			i.Config.Labels["org.opencontainers.image.version"] = "0.0.8"
+			i.Config.Labels["org.opencontainers.image.version"] = w.oldVersion
+			i.Config.Labels["org.opencontainers.image.revision"] = w.oldCommit
+			i.RepoDigests = w.oldRepoDigests
 		}
 		return encoded([]imageInfo{i})
 	case "compose":
@@ -213,6 +220,61 @@ func TestPreviewAndPullFailureKeepDeployment(t *testing.T) {
 				if strings.Contains(call, "git ") || strings.Contains(call, "docker build ") {
 					t.Fatal(call)
 				}
+			}
+		})
+	}
+}
+
+func unmanagedRelease(t *testing.T) *deploymentFixture {
+	t.Helper()
+	w := newDeployment(t)
+	w.oldVersion = "0.0.10"
+	w.oldCommit = "f6bdbfb2f907fd78ba3737edd836f5b5c1e2d822"
+	w.oldDigest = "sha256:edf9bd51346f47c9c89d65b6bbe9c1da3d2d028dbcb45109dfc895164871d71b"
+	w.oldRepoDigests = []string{"ghcr.io/mazixs/dockge2@" + w.oldDigest}
+	w.release.Version = "0.0.11"
+	base, err := os.ReadFile(filepath.Join("..", "..", "docker-compose.yml"))
+	must(t, err)
+	if fileHash(base) != "adeb402bd932e0eaf19930bbd5ba3b24e482a2376707c32e03e43645986a187f" {
+		t.Fatal("unmanaged import fixture is not the 0.0.10 vendor file")
+	}
+	must(t, atomicWrite(filepath.Join(w.dir, "docker-compose.yml"), base, 0600))
+	w.release.Legacy = map[string]Legacy{w.oldVersion: {ComposeHash: fileHash(base), Schema: w.release.Schema}}
+	must(t, writeJSON(filepath.Join(w.assets, "release.json"), w.release))
+	must(t, os.Remove(filepath.Join(w.state, "active.json")))
+	return w
+}
+
+func TestUnmanagedPublishedReleaseCanBeImported(t *testing.T) {
+	w := unmanagedRelease(t)
+	must(t, w.execute(func(o *options) { o.dryRun = true }))
+	if w.stops != 0 || w.starts != 0 {
+		t.Fatal("preview changed deployment")
+	}
+	must(t, w.execute(nil))
+	var active installed
+	data, err := os.ReadFile(filepath.Join(w.state, "active.json"))
+	must(t, err)
+	must(t, json.Unmarshal(data, &active))
+	if active.Version != "0.0.11" || active.Mode != "release" || w.starts != 1 {
+		t.Fatal("unmanaged release was not adopted")
+	}
+}
+
+func TestUnmanagedImportRejectsUnverifiedImage(t *testing.T) {
+	for _, kind := range []string{"missing digest", "wrong revision", "wrong vendor"} {
+		t.Run(kind, func(t *testing.T) {
+			w := unmanagedRelease(t)
+			switch kind {
+			case "missing digest":
+				w.oldRepoDigests = nil
+			case "wrong revision":
+				w.oldCommit = strings.Repeat("c", 40)
+			case "wrong vendor":
+				must(t, atomicWrite(filepath.Join(w.dir, "docker-compose.yml"), []byte("modified vendor"), 0600))
+			}
+			if err := w.execute(func(o *options) { o.dryRun = true }); err == nil || w.stops != 0 {
+				t.Fatal("unverified image or vendor was accepted")
 			}
 		})
 	}

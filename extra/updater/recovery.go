@@ -151,6 +151,26 @@ func (e *engine) validatePrevious(ctx context.Context, d docker, c *containerInf
 	if fileHash(vendor) != legacy.ComposeHash {
 		return nil, errors.New("local Compose edits need an explicit override and the matching released base file; nothing was changed")
 	}
+	// Keep the descriptor readable by the installed 0.0.10 updater. The new,
+	// signed binary pins the additional identity required for unmanaged import.
+	if version == "0.0.10" {
+		const publishedDigest = "sha256:edf9bd51346f47c9c89d65b6bbe9c1da3d2d028dbcb45109dfc895164871d71b"
+		const publishedCommit = "f6bdbfb2f907fd78ba3737edd836f5b5c1e2d822"
+		image, inspectErr := d.image(ctx, c.Image)
+		if inspectErr != nil {
+			return nil, inspectErr
+		}
+		found := false
+		for _, ref := range image.RepoDigests {
+			if ref == r.Image+"@"+publishedDigest {
+				found = true
+			}
+		}
+		if image.ID != c.Image || !found || image.Config.Labels["org.opencontainers.image.version"] != version ||
+			image.Config.Labels["org.opencontainers.image.revision"] != publishedCommit {
+			return nil, errors.New("running legacy image differs from the signed release identity")
+		}
+	}
 	return &installed{Version: version, Schema: legacy.Schema, ImageID: c.Image, Project: d.project, DataDir: data, Mode: "legacy"}, nil
 }
 
