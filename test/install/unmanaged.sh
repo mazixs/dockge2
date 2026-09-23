@@ -19,7 +19,9 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$deployment" "$work/stacks" "$work/data"
 mkdir "$work/prior"
-gh release download v0.0.10 --dir "$work/prior" --pattern release.json >/dev/null
+curl --proto '=https' --proto-redir '=https' -fsSL --max-time 180 \
+    https://github.com/mazixs/dockge2/releases/download/v0.0.10/release.json \
+    -o "$work/prior/release.json"
 jq -e --slurpfile old "$work/prior/release.json" '.legacy["0.0.10"].schema == $old[0].schema and $old[0].digest == "sha256:edf9bd51346f47c9c89d65b6bbe9c1da3d2d028dbcb45109dfc895164871d71b" and $old[0].commit == "f6bdbfb2f907fd78ba3737edd836f5b5c1e2d822"' "$assets/release.json" >/dev/null
 git -C "$root" show v0.0.10:docker-compose.yml > "$deployment/docker-compose.yml"
 test "$(sha256sum "$deployment/docker-compose.yml" | cut -d' ' -f1)" = "$(jq -er '.legacy["0.0.10"].composeHash' "$assets/release.json")"

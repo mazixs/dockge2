@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 // This guard covers accidental documentation leaks, not every possible secret format.
 test("published documentation does not embed personal home paths or non-example email addresses", () => {
-    const files = [...new Set(execFileSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0"))].filter(file => file.endsWith(".md"));
+    const files = [...new Set(execFileSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0"))].filter(file => file.endsWith(".md") && existsSync(file));
     for (const file of files) {
         const text = readFileSync(file, "utf8");
         assert.doesNotMatch(text, /\/(?:home|Users)\/[^\s<>`]+/, `${file}: personal home path`);
