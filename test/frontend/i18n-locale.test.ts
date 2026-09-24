@@ -58,3 +58,79 @@ test("the application i18n instance runs in Composition API mode", async () => {
     assert.ok(languages.every((language) => typeof language.code === "string" && language.name.length > 0));
     assert.ok(languages.some((language) => language.code === "en"));
 });
+
+/**
+ * Runs a check with `localStorage` and `navigator` replaced, restoring the originals after
+ * @param storage Value to expose as `localStorage`
+ * @param language Browser language to expose as `navigator.language`
+ * @param check Assertions to run
+ */
+async function withBrowser(storage : unknown, language : string, check : () => Promise<void>) : Promise<void> {
+    const originals = {
+        localStorage: Object.getOwnPropertyDescriptor(globalThis, "localStorage"),
+        navigator: Object.getOwnPropertyDescriptor(globalThis, "navigator"),
+    };
+
+    Object.defineProperty(globalThis, "localStorage", { value: storage,
+        configurable: true,
+        writable: true });
+    Object.defineProperty(globalThis, "navigator", { value: { language },
+        configurable: true,
+        writable: true });
+
+    try {
+        await check();
+    } finally {
+        for (const [ name, descriptor ] of Object.entries(originals)) {
+            if (descriptor) {
+                Object.defineProperty(globalThis, name, descriptor);
+            } else {
+                delete (globalThis as Record<string, unknown>)[name];
+            }
+        }
+    }
+}
+
+test("English is the default language, whatever the browser language", async () => {
+    const { currentLocale } = await import("../../frontend/src/i18n");
+
+    // First run and cleared storage open in English even in a Russian browser
+    await withBrowser({}, "ru-RU", async () => {
+        assert.equal(currentLocale(), "en");
+    });
+
+    // An explicit choice is kept
+    await withBrowser({ locale: "ru" }, "en-US", async () => {
+        assert.equal(currentLocale(), "ru");
+    });
+
+    // A stored code the switcher no longer offers falls back to English, not to a blank selector
+    await withBrowser({ locale: "de" }, "de-DE", async () => {
+        assert.equal(currentLocale(), "en");
+    });
+
+    // Storage that throws (private mode, blocked site data) is not fatal
+    const blocked = new Proxy({}, { get() {
+        throw new Error("SecurityError");
+    } });
+    await withBrowser(blocked, "ru-RU", async () => {
+        assert.equal(currentLocale(), "en");
+    });
+});
+
+test("English leads the language list and Russian follows, whatever the browser locale", async () => {
+    const { availableLanguages } = await import("../../frontend/src/i18n");
+    const originalCompare = String.prototype.localeCompare;
+
+    // A browser in Russian collates Cyrillic before Latin when no locale is given
+    String.prototype.localeCompare = function (that : string, locales? : Intl.LocalesArgument, options? : Intl.CollatorOptions) {
+        return originalCompare.call(this, that, locales ?? "ru", options);
+    };
+
+    try {
+        const codes = availableLanguages().map((language) => language.code);
+        assert.deepEqual(codes.slice(0, 2), [ "en", "ru" ]);
+    } finally {
+        String.prototype.localeCompare = originalCompare;
+    }
+});

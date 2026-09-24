@@ -40,9 +40,11 @@ for (let lang in languageList) {
 const rtlLangs : string[] = [];
 
 /**
- * Locale to start with: the stored choice, then the browser language, then English.
- * Storage and navigator are read defensively, because this module is also loaded
- * outside a browser (tests, tooling) where neither exists.
+ * Locale to start with: the stored choice if it is still offered, otherwise English.
+ * The browser language is deliberately ignored: English is the default and every other
+ * language is an explicit choice, so a first run or cleared storage always opens in English.
+ * Storage is read defensively, because this module is also loaded outside a browser
+ * (tests, tooling) where it does not exist.
  * @returns Locale code
  */
 export const currentLocale = () => {
@@ -54,23 +56,7 @@ export const currentLocale = () => {
         stored = undefined;
     }
 
-    if (stored) {
-        return stored;
-    }
-
-    const browserLanguage = typeof navigator === "undefined" ? "" : navigator.language ?? "";
-
-    if (languageList[browserLanguage]) {
-        return browserLanguage;
-    }
-
-    const shortLanguage = browserLanguage.substring(0, 2);
-
-    if (languageList[shortLanguage]) {
-        return shortLanguage;
-    }
-
-    return "en";
+    return stored && messages[stored] ? stored : "en";
 };
 
 export const localeDirection = () => {
@@ -119,10 +105,25 @@ export const i18n = createI18n({
     },
 });
 
+// English is the source of truth and Russian the complete translation, so they lead the list
+const leadingLanguages = [ "en", "ru" ];
+
+/**
+ * Position of a language among the leading ones; everything else comes after them
+ * @param code Language code
+ * @returns Sort rank
+ */
+function languageRank(code : string) : number {
+    const index = leadingLanguages.indexOf(code);
+    return index === -1 ? leadingLanguages.length : index;
+}
+
 /**
  * Languages the UI can switch to, as code and display name.
  * Read from the local list instead of the i18n instance, so components do not depend
  * on whether `messages` is a plain object or a ref.
+ * The rest are collated as English: the browser's own collation would reorder scripts,
+ * and a Russian browser put "Русский" above "English".
  * @returns Language code and display name pairs
  */
 export function availableLanguages() : Array<{ code : string, name : string }> {
@@ -131,7 +132,7 @@ export function availableLanguages() : Array<{ code : string, name : string }> {
             code,
             name: (messages[code]?.languageName as string | undefined) ?? code,
         }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => languageRank(a.code) - languageRank(b.code) || a.name.localeCompare(b.name, "en"));
 }
 
 export { setI18nLocale };

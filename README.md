@@ -55,7 +55,8 @@ upstream.
 - **MCP access for AI clients**, off by default: individual expiring keys scoped to servers and
   stacks, with changes prepared and applied in two steps.
 - **A rewritten interface**, screen by screen, for keyboard use and narrow screens. English and
-  Russian are complete; the language menu shows only complete translations.
+  Russian are complete; the language menu shows only complete translations. The interface starts
+  in English and remembers another language once it is chosen, including on the sign-in screen.
 - **Upstream fixes included**: path traversal ([#994](https://github.com/louislam/dockge/issues/994)),
   saving `.env` ([#964](https://github.com/louislam/dockge/issues/964)), init containers
   ([#806](https://github.com/louislam/dockge/issues/806)) and `tmpfs` modes

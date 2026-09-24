@@ -2,9 +2,9 @@
     <!-- Выбор темы стоит и в форме настроек, и рядом с мелкими контролами шапки:
          это один и тот же контрол формы, компактный вид отличается только
          размером, а не видом -->
-    <label class="theme-picker" :class="{ compact }">
+    <label class="theme-picker">
         <span class="visually-hidden">{{ $t("Theme") }}</span>
-        <select v-model="$root.userTheme" class="form-select" :aria-label="$t('Theme')">
+        <select v-model="$root.userTheme" class="form-select" :class="{ 'form-select-compact': compact }" :aria-label="$t('Theme')">
             <option value="auto">{{ $t("familiarThemeSystem") }}</option>
             <option value="light">{{ $t("Light") }}</option>
             <option value="dark">{{ $t("Dark") }}</option>
@@ -32,13 +32,5 @@ export default {
     select {
         cursor: pointer;
     }
-}
-
-.theme-picker.compact select {
-    min-height: var(--control-height);
-    max-width: 160px;
-    padding: var(--gap-xs) var(--gap-sm);
-    color: var(--text-muted);
-    font-size: var(--text-sm);
 }
 </style>

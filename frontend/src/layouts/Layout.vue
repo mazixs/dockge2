@@ -13,7 +13,10 @@
                 <span v-if="$root.appReady" class="connection-state" :class="{ offline: !$root.socketIO.connected }">
                     <i aria-hidden="true"></i>{{ $t($root.socketIO.connected ? "familiarConnected" : "agentOffline") }}
                 </span>
-                <ThemePicker v-if="!$root.appReady" compact />
+                <div v-if="!$root.appReady" class="pre-login-controls">
+                    <LanguagePicker compact />
+                    <ThemePicker compact />
+                </div>
                 <div v-if="$root.appReady" class="dropdown">
                     <button class="profile-trigger" type="button" data-bs-toggle="dropdown" :aria-label="$root.info.updateAvailable ? $t('accountMenuWithUpdate') : $t('accountMenu')" aria-expanded="false">
                         <span class="profile-pic">{{ $root.usernameFirstChar }}</span>
@@ -68,6 +71,7 @@
 <script>
 import BrandMark from "../components/BrandMark.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
+import LanguagePicker from "../components/LanguagePicker.vue";
 import ThemePicker from "../components/ThemePicker.vue";
 import Login from "../components/Login.vue";
 import ServerSwitcher from "../components/ServerSwitcher.vue";
@@ -81,6 +85,7 @@ export default {
     components: {
         BrandMark,
         InterfaceIcon,
+        LanguagePicker,
         ThemePicker,
         ServerSwitcher,
         Login,
@@ -148,7 +153,8 @@ export default {
          * @returns {void}
          */
         onPaste(event) {
-            if (!this.$root.canManageStacks || this.isEditableTarget(event.target)) {
+            // A read-only editor cancels the paste itself; it is not a paste "anywhere in the list"
+            if (!this.$root.canManageStacks || event.defaultPrevented || this.isEditableTarget(event.target)) {
                 return;
             }
 
@@ -262,6 +268,7 @@ export default {
 .brand { display: inline-flex; gap: var(--gap-sm); align-items: center; color: var(--text-strong); text-decoration: none; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: var(--tracking-title); width: calc(var(--sidebar-width) - var(--gap-xl) * 2); flex-shrink: 0; }
 .brand-icon { font-size: var(--text-title-sm); color: var(--accent-text); }
 .header-right { margin-left: auto; display: flex; gap: var(--gap-xl); align-items: center; }
+.pre-login-controls { display: flex; gap: var(--gap-sm); align-items: center; }
 .connection-state { font-size: var(--text-sm); color: var(--text-muted); display: flex; align-items: center; gap: var(--gap-sm); white-space: nowrap; }
 .connection-state i { background: var(--state-running); width: 6px; height: 6px; border-radius: 50%; }
 .connection-state.offline i { background: var(--state-failed); }

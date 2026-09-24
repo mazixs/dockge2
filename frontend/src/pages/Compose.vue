@@ -88,7 +88,8 @@
                             </button>
                         </div>
 
-                        <!-- YAML editor -->
+                        <!-- YAML editor. "disabled" only stops typing; "readonly" is what
+                             CodeMirror checks for paste, drop and cut -->
                         <div class="editor-box" :class="{'edit-mode' : isEditMode}">
                             <code-mirror
                                 ref="composeEditor"
@@ -99,6 +100,7 @@
                                 dark
                                 tab
                                 :disabled="!isEditMode"
+                                :readonly="!isEditMode"
                                 @change="yamlCodeChange"
                             />
                         </div>
@@ -170,6 +172,7 @@
                                 dark
                                 tab
                                 :disabled="!isEditMode"
+                                :readonly="!isEditMode"
                                 @change="yamlCodeChange"
                             />
                         </div>

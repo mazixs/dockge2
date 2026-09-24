@@ -710,6 +710,18 @@ html {
     }
 }
 
+// Compact select for a row of dense header controls. The theme and language pickers
+// stand side by side before sign-in, so they share one rule instead of two copies
+.form-select.form-select-compact {
+    min-height: var(--control-height);
+    max-width: 160px;
+    // The right padding keeps the 16px arrow clear of the longest option
+    padding: var(--gap-xs) calc(var(--gap-sm) + 16px + var(--gap-xs)) var(--gap-xs) var(--gap-sm);
+    background-position: right var(--gap-sm) center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
 // Многострочное поле - уже панель, а не контрол: радиус и высота у него свои.
 textarea.form-control {
     border-radius: var(--radius-panel);

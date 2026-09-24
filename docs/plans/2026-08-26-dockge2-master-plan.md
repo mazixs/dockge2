@@ -232,6 +232,8 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 **Что сделано и закрыто.** `languageList` сокращен до одиннадцати языков: английский, русский, китайский упрощенный, испанский, арабский, французский, португальский, индонезийский, урду, немецкий, японский. Удалены 22 каталога, которых нет в списке, и два фантома (`mag`, `mai`), выбор которых бросал исключение. `test/frontend/i18n-catalogue.test.ts` не дает списку и файлам снова разойтись.
 
+**Порядок и выбор до входа (2026-09-24).** В переключателе первым стоит английский, вторым русский, остальные по названию в английской сортировке: сортировка по локали браузера в русском браузере ставила "Русский" выше "English". Язык выбирается и на экране входа, рядом с темой (`LanguagePicker`), чтобы сброшенный выбор не оставлял форму входа на чужом языке. Язык по умолчанию - английский: язык браузера больше не учитывается, первый запуск, очищенное хранилище и сохраненный код, которого нет в меню, открывают интерфейс на английском. Русский и остальные - только явный выбор.
+
 **Задача 1: доперевод. Объем измерим.** `en.json` - 750 ключей. Русский полный. Остальные девять - остатки upstream Dockge на 14-17%, то есть около 120 переведенных строк и 630 английских под видом локали. Это примерно 5700 строк перевода на все девять. Приоритет внутри набора логично вести по числу носителей: китайский, испанский, арабский, французский, португальский, индонезийский, урду, немецкий, японский.
 
 **Задача 2: хинди (`hi`) и бенгальский (`bn`).** Каталогов нет вообще. Намеренно не заведены файлы-заглушки: пункт меню, дающий стопроцентно английский экран, - обещание, которого продукт не выполняет. Заводить вместе с настоящим переводом, не раньше. Гэп записан в `frontend/src/lang/README.md`.
@@ -1472,3 +1474,11 @@ the selected period"; экраны ведут себя как прежде, ус
 - When Compose validation fails, recover containers using their recorded working-directory labels and immutable IDs, including stopped containers. Never infer ownership from a project name alone.
 - Recovery stops and removes containers without deleting Docker volumes. It leaves networks because their labels do not prove directory ownership. The stack directory is removed as stated in the existing confirmation.
 - A failed Docker query, stop or removal keeps the stack files. Deletion uses the shared operation progress and preserves failed/unknown outcomes on the current screen.
+
+
+## 2026-09-24: sign-in language and locked editors
+
+- The sign-in screen offers the language next to the theme. English is the default: the browser language is ignored, and a first run, cleared storage or a stored code the menu no longer offers opens in English. The menu lists English, then Russian, then the rest by name, independent of the browser collation.
+- A stack's compose and env editors outside edit mode took paste, drop and cut: `vue-codemirror6` maps `disabled` to `EditorView.editable` only, while CodeMirror gates those events on `EditorState.readOnly`. The text stayed in memory, survived "Edit" and was saved with the next edit. Both editors now pass `readonly` as well.
+- A compose file pasted into a locked editor also opened "new stack". The global paste handler now ignores a paste that an editor has already cancelled.
+- `test/visual/editor-lock.spec.ts` covers paste, cut, drop and the unchanged address on the real `Compose.vue`, and that an unlocked editor still takes a paste.
