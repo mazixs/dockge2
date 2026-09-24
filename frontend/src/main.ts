@@ -21,9 +21,10 @@ document.title = document.title + " - " + location.host;
 
 const app = createApp(rootApp());
 
+// No containerClassName "toast-container": Bootstrap owns that class and makes the
+// container absolute and click-through, so a sliding toast widened the page
 app.use(Vue3Toastify, {
     position: toast.POSITION.BOTTOM_RIGHT,
-    containerClassName: "toast-container",
     closeButton: true,
 });
 app.use(router);
