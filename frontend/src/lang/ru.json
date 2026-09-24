@@ -380,6 +380,8 @@
     "updatePreviewCurrent": "актуально",
     "updatePreviewUnknownNotPulled": "образ еще не скачан",
     "updatePreviewUnknownRegistry": "реестр не ответил",
+    "updatePreviewUnknownDenied": "реестр отказал в доступе: образ закрытый или имя неверное",
+    "updatePreviewUnknownMissing": "в реестре нет такого тега",
     "updatePreviewSteps": "Шаги: проверка конфигурации, загрузка образов и запуск сервисов с ожиданием готовности",
     "updatePreviewBuilds": "Образы собираются из Dockerfile: они будут пересобраны, и правки применятся",
     "updatePreviewStepsBuild": "Шаги: проверка конфигурации, загрузка и пересборка образов, запуск сервисов с ожиданием готовности",

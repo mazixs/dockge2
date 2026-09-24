@@ -1161,9 +1161,14 @@ export default {
                 return this.$t("updatePreviewCurrent");
             }
 
-            return item.reason === "notPulled"
-                ? this.$t("updatePreviewUnknownNotPulled")
-                : this.$t("updatePreviewUnknownRegistry");
+            /** @type {Record<string, string>} */
+            const reasons = {
+                notPulled: "updatePreviewUnknownNotPulled",
+                registryDenied: "updatePreviewUnknownDenied",
+                registryMissing: "updatePreviewUnknownMissing",
+            };
+
+            return this.$t(reasons[item.reason] ?? "updatePreviewUnknownRegistry");
         },
 
         /**

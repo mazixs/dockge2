@@ -150,7 +150,8 @@
 
                         <!-- Переменные окружения свернуты, пока их не попросят показать:
                              экран открывают при людях, и пароль в .env не должен
-                             появляться на нем сам собой -->
+                             появляться на нем сам собой. "Изменить" раскрывает их сразу:
+                             скрытое значение все равно не отредактировать -->
                         <p v-if="!envShown" class="panel-body env-hidden">
                             <span>{{ $t("envHidden") }}</span>
                             <button class="btn btn-sm btn-normal" type="button" @click="envRevealed = true">
@@ -1342,6 +1343,7 @@ export default {
 
         enableEditMode() {
             this.isEditMode = true;
+            this.envRevealed = true;
         },
 
         checkYAML() {

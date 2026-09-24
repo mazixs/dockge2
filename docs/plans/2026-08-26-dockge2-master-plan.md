@@ -1496,3 +1496,9 @@ Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest speci
 - A startup crash found by the browser suite: `mountMcp` opened the database before it was connected. Keys are now looked up per request; a unit test mounts the routes without a database.
 - `docs/mcp.md` rewritten in English: quick start, client configurations, tools, rights, approval, reserved names, security including prompt injection through logs, reaching the endpoint (proxy, opt-in HTTP, SSH tunnel), troubleshooting by status code, the log, executing servers, limits, verification.
 - Not done, with reasons in the checklist: OAuth 2.1, elicitation instead of owner approval, Server Cards, random boundaries around untrusted output.
+
+## 2026-09-24: env on edit, image update check without buildx
+
+- "Edit" reveals the env values at once: a hidden value cannot be edited, and the second click on "Show" only got in the way. "Show" outside edit mode still reveals them read-only.
+- The update preview said "the registry did not answer" for every multi platform image in the published panel: the image has no buildx, and `docker manifest inspect` rebuilds an index instead of returning it, so its digest never matched. The registry API is now asked directly (one HEAD with every manifest type accepted, an anonymous token or the plain `docker login` entry, credentials only to an HTTPS realm); its digests match `buildx imagetools` byte for byte on ghcr.io and Docker Hub.
+- An unknown answer names its cause: refused access (private image or wrong name), no such tag, or no answer. A failed answer is kept for one minute instead of ten.

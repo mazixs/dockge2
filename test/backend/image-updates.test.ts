@@ -10,6 +10,11 @@ const DIGEST_A = "sha256:1111111111111111111111111111111111111111111111111111111
 const DIGEST_B = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_C = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 
+/** A network that is down: the registry API never answers */
+const offline = (async () => {
+    throw new TypeError("fetch failed");
+}) as typeof fetch;
+
 /**
  * A stand-in for the docker CLI whose answers the test controls.
  *
@@ -125,10 +130,55 @@ test("an unreadable registry leaves the answer unknown instead of guessing", asy
         stub.setLocal(DIGEST_A);
         stub.setRemote("");
 
-        const result = await readImageUpdates([ IMAGE ], Date.now());
+        const result = await readImageUpdates([ IMAGE ], Date.now(), offline);
 
         assert.equal(result[0]?.newer, null);
         assert.equal(result[0]?.reason, "registryUnreachable");
+    } finally {
+        process.env.PATH = originalPath;
+        stub.remove();
+        clearImageUpdateCache();
+    }
+});
+
+test("without buildx the registry API answers, and names a refusal", async () => {
+    const stub = dockerStub();
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${stub.dir}:${originalPath}`;
+    clearImageUpdateCache();
+
+    try {
+        const now = Date.now();
+        let status = 200;
+        let asked = 0;
+        const registry = (async () => {
+            asked++;
+            return new Response(null, { status,
+                headers: { "Docker-Content-Digest": DIGEST_B } });
+        }) as typeof fetch;
+
+        // The panel image has no buildx: the stub answers it with nothing
+        stub.setLocal(DIGEST_A);
+        stub.setRemote("");
+
+        const answered = await readImageUpdates([ IMAGE ], now, registry);
+        assert.equal(answered[0]?.newer, true);
+        assert.equal(answered[0]?.remote, DIGEST_B);
+
+        clearImageUpdateCache();
+        status = 403;
+        const refused = await readImageUpdates([ IMAGE ], now, registry);
+        assert.equal(refused[0]?.newer, null);
+        assert.equal(refused[0]?.reason, "registryDenied");
+
+        // A failure is kept for a minute, not for ten
+        asked = 0;
+        await readImageUpdates([ IMAGE ], now + 30_000, registry);
+        assert.equal(asked, 0);
+        status = 200;
+        const retried = await readImageUpdates([ IMAGE ], now + 61_000, registry);
+        assert.equal(asked, 1);
+        assert.equal(retried[0]?.newer, true);
     } finally {
         process.env.PATH = originalPath;
         stub.remove();

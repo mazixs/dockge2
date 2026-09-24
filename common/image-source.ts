@@ -15,7 +15,7 @@ export interface ImageUpdate {
     remote : string;
     /** True when the registry has another image, null when it cannot be told */
     newer : boolean | null;
-    /** Why the answer is unknown: notPulled, registryUnreachable or empty */
+    /** Why the answer is unknown: notPulled, registryDenied, registryMissing, registryUnreachable or empty */
     reason : string;
 }
 

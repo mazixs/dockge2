@@ -97,3 +97,18 @@ test("an unlocked file still takes a paste", async ({ page }) => {
     expect(await editorText(compose)).toContain("# pasted-by-test");
     await expect(page).toHaveURL(/\/stack\/paperless\/files$/);
 });
+
+test("pressing Edit opens the env file without a second click on Show", async ({ page }) => {
+    await page.goto("/stack/paperless/files");
+
+    const envPanel = page.locator("section.file-card").filter({ has: page.locator(".env-hidden") });
+    await expect(envPanel.locator(".env-hidden")).toBeVisible();
+
+    await envPanel.getByRole("button", { name: "Изменить" }).click();
+
+    // Hidden values cannot be edited, so editing shows them at once
+    await expect(page.locator(".env-hidden")).toHaveCount(0);
+    const env = page.locator(".cm-content").nth(1);
+    await expect(env).toBeVisible();
+    await expect(env).not.toHaveAttribute("aria-readonly", "true");
+});
