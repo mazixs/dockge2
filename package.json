@@ -42,7 +42,7 @@
     "dependencies": {
         "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
         "@inventage/envsubst": "0.17.0",
-        "@modelcontextprotocol/sdk": "1.30.0",
+        "@modelcontextprotocol/server": "2.1.0",
         "better-auth": "1.7.2",
         "better-sqlite3": "13.0.3",
         "compare-versions": "~6.1.1",
@@ -76,6 +76,8 @@
         "@fortawesome/free-regular-svg-icons": "7.3.1",
         "@fortawesome/free-solid-svg-icons": "7.3.1",
         "@fortawesome/vue-fontawesome": "3.3.3",
+        "@modelcontextprotocol/client": "2.1.0",
+        "@modelcontextprotocol/sdk": "1.30.0",
         "@playwright/test": "1.62.1",
         "@types/better-sqlite3": "9.6.0",
         "@types/bootstrap": "5.2.11",

@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from "@modelcontextprotocol/client";
 import type { DelegationConfig } from "../../backend/mcp-delegation";
 
 const runFile = promisify(execFile);
@@ -341,7 +342,7 @@ test("M6 SDK clones HTTP Git, previews real changes and applies exact edited byt
     const bare = path.join(root, "served", "fixture.git");
     let instance : Instance | undefined;
     let http : import("node:http").Server | undefined;
-    let client : Client | undefined;
+    let client : ModernClient | undefined;
     try {
         const { default: express } = await import("express");
         const { readFile } = await import("node:fs/promises");
@@ -377,9 +378,11 @@ test("M6 SDK clones HTTP Git, previews real changes and applies exact edited byt
             stacks: [ reservation.id ],
             resources: { local: [ reservation.id ] },
             days: 1 });
-        client = new Client({ name: "real-git-test",
-            version: "1.0.0" });
-        await client.connect(new StreamableHTTPClientTransport(new URL(instance.url + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + key.secret } } }) as Transport);
+        // The Git flow runs on the 2026-07-28 protocol; the remote tests above stay on 2025-11-25
+        client = new ModernClient({ name: "real-git-test",
+            version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
+        await client.connect(new ModernTransport(new URL(instance.url + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + key.secret } } }));
+        assert.equal(client.getNegotiatedProtocolVersion(), "2026-07-28");
         const call = async (name : string, args : Record<string, unknown>) => {
             const response = await client!.callTool({ name,
                 arguments: args });

@@ -52,8 +52,9 @@ upstream.
 - **Signed releases and a host updater.** The installer and the updater verify signatures, pull the
   image by digest and snapshot the panel data first, so a failed update can go back to the previous
   release. Nothing is built on the server.
-- **MCP access for AI clients**, off by default: individual expiring keys scoped to servers and
-  stacks, with changes prepared and applied in two steps.
+- **MCP access for AI clients**, off by default, on the current protocol revision 2026-07-28:
+  individual expiring keys scoped to servers and stacks, ready-made client configurations, an
+  access log, and changes prepared and applied in two steps.
 - **A rewritten interface**, screen by screen, for keyboard use and narrow screens. English and
   Russian are complete; the language menu shows only complete translations. The interface starts
   in English and remembers another language once it is chosen, including on the sign-in screen.

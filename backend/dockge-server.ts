@@ -46,7 +46,7 @@ import type { StackSummaryDTO, ViewerStackSummary } from "../common/types/stack"
 import { ManageAgentSocketHandler } from "./socket-handlers/manage-agent-socket-handler";
 import { Terminal } from "./terminal";
 import { toNodeHandler } from "better-auth/node";
-import { AUTH_BASE_PATH, CLIENT_IP_HEADER, countUsers, getAuth, initAuth, resolveSocketIdentity, resolveTrustedOrigins, trustsProxyHeaders } from "./auth";
+import { AUTH_BASE_PATH, CLIENT_IP_HEADER, countUsers, getAuth, initAuth, resolveRequestAddress, resolveSocketIdentity, resolveTrustedOrigins, trustsProxyHeaders } from "./auth";
 import { runInBackground } from "./background";
 import { ResourceOwner, DEFAULT_STOP_TIMEOUT_MS, type ResourceStopReport } from "./resource-owner";
 import { installFatalErrorHandlers } from "./fatal-error";
@@ -722,26 +722,12 @@ export class DockgeServer {
     }
 
     /**
-     * Address an HTTP request came from.
-     *
-     * The connection is the source of truth. A proxy header is only read when the
-     * operator declared that there is a proxy in front, because otherwise the caller
-     * writes that header itself and would choose its own rate limit bucket.
+     * Address an HTTP request came from, see `resolveRequestAddress`
      * @param request Incoming request
      * @returns Address of the client
      */
     resolveClientAddress(request : express.Request) : string {
-        if (trustsProxyHeaders()) {
-            const forwardedFor = firstHeaderValue(request.headers["x-forwarded-for"]);
-            const realIP = firstHeaderValue(request.headers["x-real-ip"]);
-            const forwarded = forwardedFor?.split(",")[0]?.trim() || realIP?.trim();
-
-            if (forwarded) {
-                return forwarded;
-            }
-        }
-
-        return (request.socket.remoteAddress ?? "").replace(/^::ffff:/, "") || "unknown";
+        return resolveRequestAddress(request);
     }
 
     /**

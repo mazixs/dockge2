@@ -58,7 +58,11 @@ import { Database } from "../../backend/database";
 import { Settings } from "../../backend/settings";
 import { McpKeys, synchronizeStackIdentities } from "../../backend/mcp-keys";
 import { mountMcp, validateMcpURL, readMcpTool } from "../../backend/mcp-server";
+import { flushMcpAudit, resetMcpAudit, auditReason, auditText } from "../../backend/mcp-audit";
+import { failureMessage, MCP_TOOL_ORDER } from "../../backend/mcp-catalog";
 import type { DockgeServer } from "../../backend/dockge-server";
+import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from "@modelcontextprotocol/client";
+import { z } from "zod";
 
 /** Fresh HTTP endpoint and database; no real Docker command is performed. */
 async function withMcp(callback : (ctx : { base : string; secret : string; keyId : string; cookie : string; stackId : string; server : DockgeServer; userId : string; stacksDir : string }) => Promise<void>) {
@@ -97,11 +101,25 @@ async function withMcp(callback : (ctx : { base : string; secret : string; keyId
                 stacksDir });
         } finally {
             await new Promise<void>((resolve, reject) => http.close((error) => error ? reject(error) : resolve()));
+            await resetMcpAudit();
         }
     });
 }
 
-test("actual SDK client negotiates stateless HTTP with a Bearer key", async () => {
+test("mounting the routes touches no database, which connects only after them", () => {
+    const app = express();
+    assert.doesNotThrow(() => mountMcp({ app,
+        stacksDir: "/nonexistent",
+        config: { port: 5001 } } as unknown as DockgeServer));
+});
+
+/** Rows of the MCP log, oldest first, after pending counters are written */
+async function auditRows() {
+    await flushMcpAudit();
+    return Database.getKnex()("mcp_audit").orderBy("id", "asc");
+}
+
+test("a 2025-11-25 client still works through the stateless legacy path, and its session is logged", async () => {
     await withMcp(async ({ base, secret, keyId, stackId }) => {
         const client = new Client({ name: "dockge-test",
             version: "1.0.0" });
@@ -109,7 +127,9 @@ test("actual SDK client negotiates stateless HTTP with a Bearer key", async () =
         try {
             await client.connect(transport as Transport);
             const tools = await client.listTools();
-            assert.equal(tools.tools.length, 5);
+            assert.deepEqual(tools.tools.map(tool => tool.name), [ "servers_list", "stacks_list", "containers_list", "container_status", "stability_get" ]);
+            assert.ok(tools.tools.every(tool => tool.annotations?.readOnlyHint === true && tool.title));
+            assert.match(client.getInstructions() ?? "", /operation_prepare/);
             const result = await client.callTool({ name: "stacks_list",
                 arguments: { server_id: "local" } });
             assert.equal(result.isError, undefined);
@@ -136,7 +156,135 @@ test("actual SDK client negotiates stateless HTTP with a Bearer key", async () =
         } finally {
             await client.close();
         }
+        const rows = await auditRows();
+        const connected = rows.find(row => row.tool === "initialize");
+        assert.equal(connected?.client_name, "dockge-test");
+        assert.equal(connected?.client_version, "1.0.0");
+        assert.equal(connected?.protocol_version, "2025-11-25");
+        assert.equal(connected?.key_id, keyId);
+        assert.equal(connected?.address, "127.0.0.1");
+        const listed = rows.find(row => row.tool === "tools/list");
+        assert.equal(listed?.outcome, "allowed");
+        const call = rows.find(row => row.tool === "stacks_list" && row.outcome === "allowed");
+        assert.equal(call?.client_name, "dockge-test", "a 2025 call is attributed to the client that initialised");
+        assert.equal(rows.find(row => row.tool === "unknown")?.outcome, "denied");
+        const foreign = rows.find(row => row.tool === "containers_list");
+        assert.equal(foreign?.stack_id, null, "a refused call does not record a stack the key cannot see");
+        const refused = rows.find(row => row.outcome === "refused");
+        assert.equal(refused?.reason, "revoked_key");
+        assert.equal(refused?.key_id, keyId);
+        assert.ok(!JSON.stringify(rows).includes(secret));
     });
+});
+
+test("a 2026-07-28 client discovers the server without a session and gets actionable argument errors", async () => {
+    await withMcp(async ({ base, secret, keyId, stackId }) => {
+        const client = new ModernClient({ name: "modern-test",
+            version: "2.0.0" }, { versionNegotiation: { mode: "auto" } });
+        try {
+            await client.connect(new ModernTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + secret } } }));
+            assert.equal(client.getNegotiatedProtocolVersion(), "2026-07-28");
+            assert.equal(client.getServerVersion()?.name, "dockge2");
+            assert.match(client.getInstructions() ?? "", /untrusted/);
+            const tools = await client.listTools();
+            assert.deepEqual(tools.tools.map(tool => tool.name), MCP_TOOL_ORDER.filter(name => tools.tools.some(tool => tool.name === name)));
+            assert.equal(tools.tools.find(tool => tool.name === "stacks_list")?.title, "List stacks");
+            const listed = await client.callTool({ name: "stacks_list",
+                arguments: { server_id: "local" } });
+            assert.ok(JSON.stringify(listed).includes(stackId));
+            const invalid = await client.callTool({ name: "containers_list",
+                arguments: { server_id: "local",
+                    stack_id: "not-a-uuid" } });
+            assert.equal(invalid.isError, true);
+            assert.match(JSON.stringify(invalid.content), /Invalid arguments\. stack_id/);
+            const hidden = await client.callTool({ name: "containers_list",
+                arguments: { server_id: "local",
+                    stack_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" } });
+            assert.match(JSON.stringify(hidden.content), /Access denied or observation unavailable/);
+        } finally {
+            await client.close();
+        }
+        const rows = await auditRows();
+        const discovered = rows.find(row => row.tool === "server/discover");
+        assert.equal(discovered?.client_name, "modern-test");
+        assert.equal(discovered?.protocol_version, "2026-07-28");
+        assert.equal(discovered?.key_id, keyId);
+        const invalid = rows.find(row => row.tool === "containers_list" && row.outcome === "invalid");
+        assert.equal(invalid?.reason, "invalid_arguments");
+        assert.equal(invalid?.client_name, "modern-test");
+        assert.equal(rows.find(row => row.tool === "containers_list" && row.outcome === "denied")?.reason, "permission_denied");
+    });
+});
+
+test("an operator key lists its operation tools after the reads, with honest hints", async () => {
+    await withMcp(async ({ base, stackId, userId, cookie }) => {
+        const issued = await new McpKeys(Database.getKnex()).issue({ name: "operator",
+            userId,
+            role: "operator",
+            actions: [ "stacks:control", "logs:read", "deploy" ],
+            mode: "approval",
+            stacks: [ stackId ] });
+        const client = new ModernClient({ name: "operator-test",
+            version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
+        try {
+            await client.connect(new ModernTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + issued.secret } } }));
+            const tools = (await client.listTools()).tools;
+            assert.deepEqual(tools.map(tool => tool.name), [ "servers_list", "stacks_list", "containers_list", "container_status", "stability_get", "container_logs", "operation_prepare", "operation_apply", "operation_status" ]);
+            const hints = Object.fromEntries(tools.map(tool => [ tool.name, tool.annotations ]));
+            assert.equal(hints.operation_prepare?.readOnlyHint, false);
+            assert.equal(hints.operation_prepare?.destructiveHint, false);
+            assert.equal(hints.operation_apply?.destructiveHint, true);
+            assert.equal(hints.operation_apply?.openWorldHint, true);
+            assert.equal(hints.operation_status?.readOnlyHint, true);
+            assert.equal(hints.container_logs?.readOnlyHint, true);
+            const schema = JSON.stringify(tools.find(tool => tool.name === "operation_apply")?.inputSchema);
+            assert.match(schema, /parameters_hash returned by operation_prepare/);
+            const invalid = await client.callTool({ name: "operation_apply",
+                arguments: { operation_id: "x",
+                    parameters_hash: "y" } });
+            assert.match(JSON.stringify(invalid.content), /Invalid arguments\. operation_id/);
+            const prepared = await client.callTool({ name: "operation_prepare",
+                arguments: { request_id: "restart-1",
+                    action: "stack_restart",
+                    parameters: { server_id: "local",
+                        stack_id: stackId } } });
+            const operation = (prepared.structuredContent ?? JSON.parse((prepared.content as Array<{ text : string }>)[0]!.text)) as { operation_id : string; parameters_hash : string; state : string };
+            assert.equal(operation.state, "awaiting_approval");
+            const early = await client.callTool({ name: "operation_apply",
+                arguments: { operation_id: operation.operation_id,
+                    parameters_hash: operation.parameters_hash } });
+            assert.match(JSON.stringify(early.content), /Awaiting approval/);
+            const approved = await fetch(base + "/api/mcp/approve", { method: "POST",
+                headers: { Origin: base,
+                    Cookie: cookie,
+                    "Content-Type": "application/json" },
+                body: JSON.stringify({ password: TEST_PASSWORD,
+                    data: { id: operation.operation_id } }) });
+            assert.equal(approved.status, 200);
+        } finally {
+            await client.close();
+        }
+        const rows = await auditRows();
+        assert.equal(rows.find(row => row.tool === "operation_apply" && row.outcome === "denied")?.reason, "approval_required");
+        const approval = rows.find(row => row.tool === "operation_approve");
+        assert.equal(approval?.key_id, issued.id, "the owner's approval names the key that asked");
+        assert.equal(approval?.action, "stack_restart");
+        assert.equal(approval?.stack_id, stackId);
+    });
+});
+
+test("failure messages name the fix only for conditions the caller can fix", () => {
+    assert.match(failureMessage(new Error("mcpApprovalRequired")), /approve it in Dockge/);
+    assert.match(failureMessage(new Error("mcpOperationStale")), /operation_prepare again/);
+    assert.equal(failureMessage(new Error("mcpPermissionDenied")), "Access denied or observation unavailable");
+    assert.equal(failureMessage(new Error("ENOENT: /opt/stacks/secret")), "Access denied or observation unavailable");
+    const zod = z.object({ tail: z.number().max(200) }).safeParse({ tail: 999 });
+    assert.match(failureMessage(zod.error), /^Invalid arguments\. tail: /);
+    assert.equal(auditReason(new Error("mcpApprovalRequired")), "approval_required");
+    assert.equal(auditReason(zod.error), "invalid_arguments");
+    assert.equal(auditReason(new Error("boom")), "error");
+    assert.equal(auditText("Claude\u202eCode\u0000 \n1.0"), "ClaudeCode 1.0");
+    assert.equal(auditText("\u0007"), null);
 });
 
 test("key metadata never contains secret or digest; expiration, owner suspension and deletion invalidate keys", async () => {
@@ -180,15 +328,113 @@ test("HTTP boundary rejects missing key, cookie-only, wrong host/origin and over
         }), 403);
         assert.equal((await fetch(endpoint + "?key=x", { headers: auth })).status, 403);
         assert.equal((await fetch(endpoint, { headers: auth })).status, 405);
+        assert.equal((await fetch(endpoint, { method: "DELETE",
+            headers: auth })).status, 405);
         assert.equal((await fetch(endpoint, { method: "POST",
             headers: { ...auth,
                 "Content-Type": "application/json" },
             body: JSON.stringify({ value: "x".repeat(2 * 1024 * 1024 + 1) }) })).status, 413);
         await Settings.set("disableAuth", true);
         assert.equal((await fetch(endpoint)).status, 401);
+        const rows = await auditRows();
+        const reasons = rows.filter(row => row.outcome === "refused").map(row => row.reason);
+        for (const reason of [ "missing_key", "origin_mismatch", "host_mismatch", "query_rejected" ]) {
+            assert.ok(reasons.includes(reason), reason);
+        }
+        assert.equal(rows.find(row => row.reason === "missing_key")?.attempts, 3, "repeats are counted on one row");
+        assert.equal(rows.find(row => row.reason === "host_mismatch")?.detail, "attacker.example");
+        assert.ok(!JSON.stringify(rows).includes("key=x"), "a query is never written down");
         await Settings.set("mcpConfig", { enabled: false,
             url: endpoint }, "internal");
         assert.equal((await fetch(endpoint, { headers: auth })).status, 404);
+        const discovery = await fetch(base + "/.well-known/oauth-protected-resource/mcp");
+        assert.equal(discovery.status, 404);
+        assert.deepEqual(await discovery.json(), { error: "not_found" });
+    });
+});
+
+test("behind a declared proxy the forwarded host is accepted and the client address is logged", async () => {
+    await withMcp(async ({ base }) => {
+        await Settings.set("mcpConfig", { enabled: true,
+            url: "https://dockge.example/mcp" }, "internal");
+        const request = (headers : Record<string, string>) => fetch(base + "/mcp", { method: "POST",
+            headers: { "Content-Type": "application/json",
+                ...headers },
+            body: "{}" });
+        assert.equal((await request({ "X-Forwarded-Host": "dockge.example" })).status, 403, "without DOCKGE_TRUST_PROXY the header is ignored");
+        process.env.DOCKGE_TRUST_PROXY = "true";
+        try {
+            assert.equal((await request({ "X-Forwarded-Host": "dockge.example",
+                "X-Forwarded-For": "203.0.113.7, 10.0.0.1" })).status, 401);
+        } finally {
+            delete process.env.DOCKGE_TRUST_PROXY;
+        }
+        const rows = await auditRows();
+        assert.equal(rows.find(row => row.reason === "host_mismatch")?.address, "127.0.0.1");
+        assert.equal(rows.find(row => row.reason === "missing_key")?.address, "203.0.113.7");
+    });
+});
+
+test("plain HTTP beyond loopback needs an explicit opt-in, and saving names the reason it failed", async () => {
+    assert.throws(() => validateMcpURL("http://dockge.example/mcp"), /mcpInsecureURL/);
+    assert.equal(validateMcpURL("http://dockge.example:5001/mcp", true).host, "dockge.example:5001");
+    assert.throws(() => validateMcpURL("not a url", true), /mcpInvalidURL/);
+    assert.throws(() => validateMcpURL("https://dockge.example/other", true), /mcpInvalidURL/);
+    await withMcp(async ({ base, cookie }) => {
+        const save = (data : unknown, password = TEST_PASSWORD) => fetch(base + "/api/mcp/config", { method: "POST",
+            headers: { Origin: base,
+                Cookie: cookie,
+                "Content-Type": "application/json" },
+            body: JSON.stringify({ password,
+                data }) });
+        const wrong = await save({ enabled: true,
+            url: "https://dockge.example/mcp" }, "wrong");
+        assert.equal(wrong.status, 403);
+        assert.deepEqual(await wrong.json(), { error: "mcpWrongPassword" });
+        const insecure = await save({ enabled: true,
+            url: "http://dockge.example/mcp" });
+        assert.equal(insecure.status, 400);
+        assert.deepEqual(await insecure.json(), { error: "mcpInsecureURL" });
+        const invalid = await save({ enabled: true,
+            url: "dockge.example" });
+        assert.deepEqual(await invalid.json(), { error: "mcpInvalidURL" });
+        const saved = await save({ enabled: true,
+            url: "http://dockge.example/mcp",
+            allowInsecureHttp: true });
+        assert.equal(saved.status, 200);
+        assert.equal((await saved.json()).config.allowInsecureHttp, true);
+        const state = await (await fetch(base + "/api/mcp", { headers: { Cookie: cookie } })).json();
+        assert.equal(state.config.allowInsecureHttp, true);
+        assert.ok(state.audit.some((row : { tool : string; detail : string }) => row.tool === "config_update" && row.detail === "enabled"));
+    });
+});
+
+test("a reserved name can be listed, refused twice, and removed until it is cloned", async () => {
+    await withMcp(async ({ base, cookie, stacksDir, server }) => {
+        const call = (action : string, data : unknown) => fetch(base + "/api/mcp/" + action, { method: "POST",
+            headers: { Origin: base,
+                Cookie: cookie,
+                "Content-Type": "application/json" },
+            body: JSON.stringify({ password: TEST_PASSWORD,
+                data }) });
+        const reserved = await (await call("reserve", { name: "future" })).json();
+        assert.equal(reserved.reserved, true);
+        const duplicate = await call("reserve", { name: "future" });
+        assert.equal(duplicate.status, 400);
+        assert.deepEqual(await duplicate.json(), { error: "mcpStackReserved" });
+        assert.deepEqual(await (await call("reserve", { name: "demo" })).json(), { error: "mcpStackExists" });
+        const listed = await synchronizeStackIdentities(Database.getKnex(), server);
+        assert.ok(listed.some(item => item.id === reserved.id && item.reserved));
+        assert.equal((await call("unreserve", { id: reserved.id })).status, 200);
+        assert.deepEqual(await (await call("unreserve", { id: reserved.id })).json(), { error: "mcpReservationMissing" });
+        const [ demo ] = await synchronizeStackIdentities(Database.getKnex(), server);
+        assert.deepEqual(await (await call("unreserve", { id: demo!.id })).json(), { error: "mcpReservationMissing" }, "a real stack is never removed");
+        await rename(path.join(stacksDir, "demo"), path.join(stacksDir, "gone"));
+        const again = await (await call("reserve", { name: "demo" })).json();
+        assert.equal(again.reserved, true, "the identity of a deleted stack does not block its name");
+        assert.notEqual(again.id, demo!.id);
+        const tools = (await auditRows()).map(row => row.tool);
+        assert.ok(tools.includes("stack_reserve") && tools.includes("stack_unreserve"));
     });
 });
 

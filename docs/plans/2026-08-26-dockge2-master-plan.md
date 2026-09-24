@@ -1482,3 +1482,17 @@ the selected period"; экраны ведут себя как прежде, ус
 - A stack's compose and env editors outside edit mode took paste, drop and cut: `vue-codemirror6` maps `disabled` to `EditorView.editable` only, while CodeMirror gates those events on `EditorState.readOnly`. The text stayed in memory, survived "Edit" and was saved with the next edit. Both editors now pass `readonly` as well.
 - A compose file pasted into a locked editor also opened "new stack". The global paste handler now ignores a paste that an editor has already cancelled.
 - `test/visual/editor-lock.spec.ts` covers paste, cut, drop and the unchanged address on the real `Compose.vue`, and that an unlocked editor still takes a paste.
+
+
+## 2026-09-24: MCP on the current protocol, easy to connect, fully logged
+
+Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest specification, SDK v2, Supabase MCP and our own tool-design research).
+
+- The endpoint serves protocol 2026-07-28 through `@modelcontextprotocol/server` 2.1.0 (`createMcpHandler`, stateless, `server/discover`, the per-request `_meta` envelope). 2025-11-25 clients keep working through the SDK's stateless legacy path. POST only; OAuth discovery paths answer 404 JSON; a 401 carries `WWW-Authenticate: Bearer`.
+- Tools are listed in a fixed order with titles, honest hints, field descriptions and server instructions describing the flow and naming logs, files and diffs as untrusted. Argument errors name the field; conditions a client can fix say how; access and existence stay one generic sentence.
+- Settings: a status panel (state, endpoint, encryption, active keys, last connection, last refusal with its reason); the URL prefilled from the page or `DOCKGE_PUBLIC_URL`, a warning when its host differs from the page, plain HTTP beyond loopback only after an explicit opt-in; success and every failure named in words. "Connect a client" gives configurations for Claude Code, Cursor, VS Code, Codex CLI, Gemini CLI and a `curl` check, all reading the key from `DOCKGE_MCP_KEY`.
+- "Reserve a name for Git" was unexplained. It reserves a future stack name so an operator key can `git_clone` into it; nothing is created on disk. The panel now explains it, lists reservations with the keys they are granted to, removes an unused one and reports a duplicate.
+- The access log did not record connections or refusals. It now records `initialize`, `server/discover` and `tools/list` with client name, version and protocol; refusals with reason and address; requests the SDK rejects before a tool runs; owner actions including operation approval. Repeats are counted per source and minute, refusals are capped separately (1000 rows) from history (10000 rows), and arguments, secrets and results are never stored.
+- A startup crash found by the browser suite: `mountMcp` opened the database before it was connected. Keys are now looked up per request; a unit test mounts the routes without a database.
+- `docs/mcp.md` rewritten in English: quick start, client configurations, tools, rights, approval, reserved names, security including prompt injection through logs, reaching the endpoint (proxy, opt-in HTTP, SSH tunnel), troubleshooting by status code, the log, executing servers, limits, verification.
+- Not done, with reasons in the checklist: OAuth 2.1, elicitation instead of owner approval, Server Cards, random boundaries around untrusted output.

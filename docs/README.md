@@ -9,7 +9,7 @@
 | [Configuration](configuration.md) | Environment variables, reverse proxy, HTTPS |
 | [Authentication](authentication.md) | Accounts and roles, two-factor authentication, a lost password, sessions |
 | [Stacks from Git](git-stacks.md) | Deploying from a repository, updating file by file, private repositories |
-| [MCP access](mcp.md) | Access for AI clients: keys, scopes, limits and verified clients |
+| [MCP access](mcp.md) | Access for AI clients: connecting a client, keys and rights, security, the access log, limits |
 | [FAQ](faq.md) | Frequent questions |
 
 ## In depth

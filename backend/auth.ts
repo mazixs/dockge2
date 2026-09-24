@@ -82,6 +82,29 @@ export function trustsProxyHeaders() : boolean {
     return configured === "true" || configured === "1";
 }
 
+/**
+ * Address an HTTP request came from.
+ *
+ * The connection is the source of truth. A proxy header is only read when the
+ * operator declared that there is a proxy in front, because otherwise the caller
+ * writes that header itself and would choose its own rate limit bucket.
+ * @param request Incoming request
+ * @returns Address of the client
+ */
+export function resolveRequestAddress(request : { headers : Record<string, string | string[] | undefined>; socket : { remoteAddress? : string | undefined } }) : string {
+    if (trustsProxyHeaders()) {
+        const forwardedFor = [ request.headers["x-forwarded-for"] ].flat()[0];
+        const realIP = [ request.headers["x-real-ip"] ].flat()[0];
+        const forwarded = forwardedFor?.split(",")[0]?.trim() || realIP?.trim();
+
+        if (forwarded) {
+            return forwarded;
+        }
+    }
+
+    return (request.socket.remoteAddress ?? "").replace(/^::ffff:/, "") || "unknown";
+}
+
 /** What a request tells about the address the browser used */
 export interface RequestOrigins {
     /** `Host` header, the address the browser actually asked for */

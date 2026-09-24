@@ -8,6 +8,7 @@ import { Stack } from "./stack";
 import { Database } from "./database";
 import { Settings } from "./settings";
 import { MCP_ACTIONS, type McpMode } from "../common/mcp";
+import { recordMcpAudit } from "./mcp-audit";
 
 const issueKeySchema = z.object({
     name: z.string().trim().min(1).max(80),
@@ -78,11 +79,9 @@ export class McpKeys {
             created_at: Date.now(),
             expires_at: Date.now() + data.days * 86_400_000,
             policy_version: 1 });
-        await this.knex("mcp_audit").insert({ at: Date.now(),
-            key_id: id,
+        await recordMcpAudit({ key_id: id,
             tool: "key_issue",
-            outcome: "allowed",
-            duration_ms: 0 });
+            outcome: "allowed" });
         return { id,
             secret };
     }
@@ -109,21 +108,17 @@ export class McpKeys {
             mode: data.mode,
             expires_at: Math.min(Number(row.expires_at), Date.now() + data.days * 86_400_000),
             policy_version: Number(row.policy_version) + 1 });
-        await this.knex("mcp_audit").insert({ at: Date.now(),
-            key_id: id,
+        await recordMcpAudit({ key_id: id,
             tool: "key_reduce",
-            outcome: "allowed",
-            duration_ms: 0 });
+            outcome: "allowed" });
     }
 
     /** Revocation is read directly from the database on every request and response. */
     async revoke(id : string) {
         await this.knex("mcp_key").where({ id }).update({ revoked_at: Date.now() });
-        await this.knex("mcp_audit").insert({ at: Date.now(),
-            key_id: id,
+        await recordMcpAudit({ key_id: id,
             tool: "key_revoke",
-            outcome: "allowed",
-            duration_ms: 0 });
+            outcome: "allowed" });
     }
 
     /** Validate secret, expiry and current owner access without any session cache. */
@@ -228,20 +223,62 @@ export async function synchronizeStackIdentities(knex : Knex, server : DockgeSer
     return identities;
 }
 
-/** Reserve an explicit future stack name for scoped clone, without creating user files. */
+/**
+ * Reserve a future stack name, so a key can be granted `git_clone` into exactly that new
+ * stack. No file or directory is created.
+ *
+ * The identity of a stack whose directory is gone is dropped here: a reservation gets a
+ * new ID, so a key granted the deleted stack never inherits the new one.
+ * @param server Dockge server
+ * @param name Future stack name
+ * @returns The reservation
+ */
 export async function reserveMcpStack(server : DockgeServer, name : string) {
     const directory = Stack.getSafePath(server, name);
     if (await lstat(directory).catch(() => null)) {
         throw new Error("mcpStackExists");
     }
     const id = randomUUID();
-    await Database.getKnex()("mcp_stack_identity").insert({ id,
-        name,
-        fingerprint: "reserved",
-        created_at: Date.now() });
+    await Database.getKnex().transaction(async (trx) => {
+        const existing = await trx("mcp_stack_identity").where({ name }).first();
+        if (existing?.fingerprint === "reserved") {
+            throw new Error("mcpStackReserved");
+        }
+        await trx("mcp_stack_identity").where({ name }).delete();
+        await trx("mcp_stack_identity").insert({ id,
+            name,
+            fingerprint: "reserved",
+            created_at: Date.now() });
+    });
+    await recordMcpAudit({ tool: "stack_reserve",
+        outcome: "allowed",
+        server_id: "local",
+        stack_id: id,
+        detail: name });
     return { id,
         name,
         reserved: true };
+}
+
+/**
+ * Remove a reservation that was not used yet. A cloned stack is a real stack and is not
+ * touched: only a row still marked as reserved is deleted.
+ * @param id Reservation ID
+ * @returns {void}
+ */
+export async function unreserveMcpStack(id : string) : Promise<void> {
+    const row = await Database.getKnex()("mcp_stack_identity").where({ id,
+        fingerprint: "reserved" }).first();
+    const removed = row ? await Database.getKnex()("mcp_stack_identity").where({ id,
+        fingerprint: "reserved" }).delete() : 0;
+    if (!removed) {
+        throw new Error("mcpReservationMissing");
+    }
+    await recordMcpAudit({ tool: "stack_unreserve",
+        outcome: "allowed",
+        server_id: "local",
+        stack_id: id,
+        detail: row.name });
 }
 
 /** Re-check revocation and current rights immediately before a queued effect. */
