@@ -67,15 +67,12 @@ export class TerminalSocketHandler extends AgentSocketHandler {
             }
         });
 
-        // Whether the console is on, whether the variable at startup decided it (then the
-        // owner cannot turn it off in the settings) and whether operators may open it
+        // Whether the console is on and whether operators may open it
         agentSocket.on("checkMainTerminal", async (callback) => {
             try {
                 checkLogin(socket);
-                const state = await MainTerminal.state(server);
                 callbackResult({
-                    ok: state.enabled,
-                    forced: state.forced,
+                    ok: await MainTerminal.enabled(),
                     operators: await Settings.get(CONSOLE_OPERATORS_SETTING) === true,
                 }, callback);
             } catch (e) {

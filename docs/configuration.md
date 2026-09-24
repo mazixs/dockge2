@@ -16,7 +16,7 @@ A release installation reads them from `<installation>/.env`; a change takes eff
 | `DOCKGE_DATA_DIR` | `<installation>/data` | Host path of the panel data; in the container it is always `/app/data`. Set on installation |
 | `DOCKGE_STACKS_DIR` | `/opt/stacks` | Absolute path of the stacks, mounted at the same path. Set on installation |
 | `PUID`, `PGID` | root | Owner of the files the panel creates in stacks; set both or neither |
-| `DOCKGE_ENABLE_CONSOLE` | `false` | `true` turns the web console on for good: a shell in the panel container. Without it an owner can turn the console on and off in Settings, Security, confirming with the password. Either way only owners open it unless an owner lets operators in on the same page. The container holds the Docker socket, so treat the console as root on the host |
+| `DOCKGE_ENABLE_CONSOLE` | - | No longer read, whatever its value: older `.env` files may still carry it. An owner turns the web console on in Settings, Security, confirming with the password, and decides there whether operators open it too. The container holds the Docker socket, so treat the console as root on the host |
 | `DOCKGE_IMAGE` | `ghcr.io/mazixs/dockge2:latest` | Image for a plain `docker compose` run. The updater keeps its own record, change it with [`--image`](updating.md#channel-and-mirror) |
 
 ### Access and HTTPS

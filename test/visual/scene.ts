@@ -791,8 +791,7 @@ const scene = createApp({
                     msg: "Тестовая сцена: файл не создавался" };
             } else if (event === "checkMainTerminal") {
                 // Off, as a fresh installation answers: the console screen and the setting show their off state
-                return { ok: false,
-                    forced: false };
+                return { ok: false };
             } else if ([ "interactiveTerminal", "terminalLeave", "terminalInput", "mainTerminal", "joinCombinedTerminal", "leaveCombinedTerminal" ].includes(event)) {
                 // Accepted so the journal tab opens; nothing is executed
                 return { ok: true };

@@ -167,8 +167,7 @@ test("only an owner turns the console on, with the password, and turning it off 
         const cookie = await createTestAccount();
         const socket = new TestSocket(cookie);
         socket.userID = "owner";
-        const config = { enableConsole: false };
-        const server = Object.assign(createServer(stacksDir), { config });
+        const server = createServer(stacksDir);
         new MainSocketHandler().create(socket as unknown as DockgeSocket, server);
 
         socket.userRole = "operator";
@@ -187,8 +186,7 @@ test("only an owner turns the console on, with the password, and turning it off 
         const on = await emitWithCallback(socket, "setConsoleEnabled", true, TEST_PASSWORD);
         assert.equal(on.ok, true);
         assert.equal(on.msg, "consoleTurnedOn");
-        assert.deepEqual(await MainTerminal.state(server), { enabled: true,
-            forced: false });
+        assert.equal(await MainTerminal.enabled(), true);
 
         const session = await MainTerminal.open(server, socket as unknown as DockgeSocket);
         session.start();
@@ -198,12 +196,6 @@ test("only an owner turns the console on, with the password, and turning it off 
         assert.equal(off.ok, true);
         assert.equal(Terminal.forClient(socket as unknown as DockgeSocket, MainTerminal.NAME), undefined);
         await assert.rejects(MainTerminal.open(server, socket as unknown as DockgeSocket), /Console is not enabled/);
-
-        // The startup variable is a deployment decision the settings cannot undo
-        config.enableConsole = true;
-        const forced = await emitWithCallback(socket, "setConsoleEnabled", false, "");
-        assert.equal(forced.ok, false);
-        assert.equal(forced.msg, "consoleForcedByEnv");
     });
 });
 
@@ -212,7 +204,8 @@ test("letting operators into the console takes the password, and narrowing it en
         const cookie = await createTestAccount();
         const owner = new TestSocket(cookie);
         owner.userID = String((await listUsers())[0]?.id);
-        const server = Object.assign(createServer(stacksDir), { config: { enableConsole: true } });
+        const server = createServer(stacksDir);
+        await Settings.set(MainTerminal.SETTING, true, "console");
         new MainSocketHandler().create(owner as unknown as DockgeSocket, server);
 
         owner.userRole = "operator";

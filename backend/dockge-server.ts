@@ -110,11 +110,6 @@ function readConfig() : Config {
             type: String,
             optional: true,
         },
-        enableConsole: {
-            type: Boolean,
-            optional: true,
-            defaultValue: false,
-        }
     });
 
     const config = args as Config;
@@ -127,7 +122,6 @@ function readConfig() : Config {
     config.hostname = args.hostname || process.env.DOCKGE_HOSTNAME || undefined;
     config.dataDir = args.dataDir || process.env.DOCKGE_DATA_DIR || "./data/";
     config.stacksDir = args.stacksDir || process.env.DOCKGE_STACKS_DIR || defaultStacksDir;
-    config.enableConsole = args.enableConsole || process.env.DOCKGE_ENABLE_CONSOLE === "true" || false;
     return config;
 }
 

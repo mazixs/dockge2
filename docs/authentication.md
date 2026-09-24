@@ -43,7 +43,7 @@ An operator controls Docker and the terminal, which is host-level authority. It 
 the operator role is not a security boundary against the owner. New accounts default to viewer.
 
 The server console is off until an owner turns it on in Settings, Security, confirming with the
-password, or `DOCKGE_ENABLE_CONSOLE=true` is set at startup. Only owners open it until an owner lets
+password; `DOCKGE_ENABLE_CONSOLE` is no longer read. Only owners open it until an owner lets
 operators in on the same page, again with the password; keeping it to owners again ends the
 operators' console sessions, and turning the console off ends all of them. Every user gets a console
 session and container shells of their own: nobody else can read their scrollback or type into them.

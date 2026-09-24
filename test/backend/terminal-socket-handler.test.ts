@@ -81,8 +81,7 @@ test("terminal events answer the browser instead of leaving it waiting", async (
         const socket = { userID: 1,
             endpoint: "",
             emitAgent: () => undefined } as unknown as DockgeSocket;
-        const server = { stacksDir,
-            config: { enableConsole: false } } as unknown as DockgeServer;
+        const server = { stacksDir } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new TerminalSocketHandler().create(socket, server, agentSocket);
 
@@ -95,7 +94,7 @@ test("terminal events answer the browser instead of leaving it waiting", async (
         const wrongType = await call(agentSocket, "terminalInput", 5, "ls");
         assert.equal(wrongType.ok, false);
 
-        // The console is a deployment decision, and a refusal is not a failure
+        // The console is off until an owner turns it on, and a refusal is not a failure
         const console = await call(agentSocket, "checkMainTerminal");
         assert.equal(console.ok, false);
 
@@ -126,26 +125,27 @@ test("terminal events answer the browser instead of leaving it waiting", async (
     });
 });
 
-test("the console follows the setting of the owner, and the startup variable wins over it", async () => {
+test("the console follows the setting of the owner, and the old startup variable is ignored", async () => {
     await withDatabase(async ({ stacksDir }) => {
         const socket = { id: "console-client",
             userID: 1,
             endpoint: "",
             connected: true,
             emitAgent: () => undefined } as unknown as DockgeSocket;
-        const config = { enableConsole: false };
-        const server = { stacksDir,
-            config } as unknown as DockgeServer;
+        const server = { stacksDir } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new TerminalSocketHandler().create(socket, server, agentSocket);
 
-        assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: false,
-            forced: false,
-            operators: false });
+        process.env.DOCKGE_ENABLE_CONSOLE = "true";
+        try {
+            assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: false,
+                operators: false });
+        } finally {
+            delete process.env.DOCKGE_ENABLE_CONSOLE;
+        }
 
         await Settings.set(MainTerminal.SETTING, true, "console");
         assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: true,
-            forced: false,
             operators: false });
 
         // Whatever name the client sends, the session is this user's own console
@@ -161,9 +161,7 @@ test("the console follows the setting of the owner, and the startup variable win
 
         await Settings.set(MainTerminal.SETTING, false, "console");
         await Settings.set("consoleOperators", true, "console");
-        config.enableConsole = true;
-        assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: true,
-            forced: true,
+        assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: false,
             operators: true });
     });
 });
@@ -173,8 +171,7 @@ test("a resize of a terminal that is not ours is ignored rather than thrown at t
         const socket = { userID: 1,
             endpoint: "",
             emitAgent: () => undefined } as unknown as DockgeSocket;
-        const server = { stacksDir,
-            config: { enableConsole: false } } as unknown as DockgeServer;
+        const server = { stacksDir } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new TerminalSocketHandler().create(socket, server, agentSocket);
 

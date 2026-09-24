@@ -55,8 +55,6 @@ services:
       DOCKGE_DATA_DIR: /app/data
       DOCKGE_MCP_DELEGATION_CONFIG: ${DOCKGE_MCP_DELEGATION_CONFIG:-}
       DOCKGE_STACKS_DIR: ${DOCKGE_LOCAL_STACKS_DIR:-/tmp/dockge2-stacks}
-      # Локально консоль хоста удобна, в production она выключена.
-      DOCKGE_ENABLE_CONSOLE: "true"
       # Файлы стеков создаются от имени хостового пользователя, иначе их придется
       # править через sudo. Значения подставляет local.sh.
       PUID: ${PUID:-1000}

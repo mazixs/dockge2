@@ -179,7 +179,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 - Проверить текущий self-container по реальному `compose.yaml` и Dockerfile: image/tag/digest, healthcheck, restart policy, пользователь процесса, Docker socket, bind mounts `/app/data` и `/opt/stacks`, Docker CLI/Compose CLI и сохранность данных при пересоздании.
 - Отображать control plane отдельной карточкой с health, uptime, image, restart count, last seen и mount status. Не давать общей кнопке контейнеров удалить сам Dockge 2 или вызвать `down -v`.
-- Основную Dockge-консоль оставить выключенной по умолчанию. При `DOCKGE_ENABLE_CONSOLE=true` явно показывать, что через Docker socket пользователь получает практически host-level control. Решение "включение из UI не добавлять" отменено 2026-09-24: владелец включает консоль в настройках безопасности с паролем, см. журнал ниже.
+- Основную Dockge-консоль оставить выключенной по умолчанию и явно показывать, что через Docker socket пользователь получает практически host-level control. Решение "включение из UI не добавлять" отменено 2026-09-24: владелец включает консоль в настройках безопасности с паролем, `DOCKGE_ENABLE_CONSOLE` больше не читается, см. журнал ниже.
 - Для self restart показывать предупреждение о краткой потере UI и выполнять только безопасную операцию; обновление образа вести через отдельный Git/Compose CLI, а не через произвольный браузерный shell.
 
 ### Преобразование Docker Run → Compose
@@ -297,7 +297,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [ ] Выполнить там Task 3: масштабируемый StackList, фильтры, постраничный вывод и read-only связи сервисов. Сделаны поиск и фильтры; постраничного вывода и экрана связей сервисов нет.
 - [x] Выполнить там Task 4: история доступности, стабильности и retention 30 дней.
 - [ ] Выполнить там Task 5: inventory контейнеров вне `stacksDir` с раздельными режимами read-only/control. Не начиналось: панель показывает только каталоги из `stacksDir`.
-- [ ] Выполнить там Task 6: аудит и безопасное управление self-container Dockge 2 и основной консолью. Консоль уже включается осознанно (`DOCKGE_ENABLE_CONSOLE`, по умолчанию выключена), но собственный стек панели стоит в списке наравне с прочими, и остановить его можно обычной кнопкой.
+- [ ] Выполнить там Task 6: аудит и безопасное управление self-container Dockge 2 и основной консолью. Консоль уже включается осознанно (владелец в настройках безопасности, по умолчанию выключена), но собственный стек панели стоит в списке наравне с прочими, и остановить его можно обычной кнопкой.
 - [ ] Выполнить там Task 7: corpus-аудит `docker run` → Compose, предупреждения и preview. Конвертер работает, аудита на корпусе команд не было.
 - [x] Выполнить там Task 8: бренд, иконка, repository map и SemVer 2.x. Версия `2.0.0`, свой namespace образов и адреса, проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию. Тестов release guard (`test/backend/version-policy.test.ts`) нет - публикации пока тоже.
 - [ ] Выполнить там Task 9: итоговая UX/accessibility/performance-проверка. Есть визуальные снимки и e2e, но поведение на 500 и 2000 контейнерах не измерялось.
@@ -1517,3 +1517,9 @@ Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest speci
   - Open: an owner has no per-user restriction beyond the three roles: no per-stack or per-agent scope for browser users (MCP keys have it), no 2FA reset or requirement, no session list, no audit log outside MCP.
   - Open: across agents every local user acts as the one stored agent account: remote secrets check that account's password, and the lockout counter is shared. Shells are separated by the header above, but the agent's own role and console setting apply to the agent account.
   - Open, by design: an operator deploys arbitrary compose, which reaches the host (privileged services, host mounts); keeping the console to owners does not change that.
+
+## 2026-09-24: `DOCKGE_ENABLE_CONSOLE` is no longer read
+
+- Follows the entry above, at the user's request: the setting is the only switch. The variable forced the console on and hid the toggle, so an owner could not take the console back without editing `.env` and restarting.
+- No migration: an installation that ran with `DOCKGE_ENABLE_CONSOLE=true` comes up with the console off until an owner turns it on. The `--enableConsole` flag and the "forced" state of `checkMainTerminal` are gone; the gate is `MainTerminal.enabled()`.
+- The frozen `docker-compose.yml` still passes the variable and the updater still writes `DOCKGE_ENABLE_CONSOLE=false` into a new `.env`; both are harmless now.

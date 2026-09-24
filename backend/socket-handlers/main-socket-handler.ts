@@ -145,9 +145,6 @@ export class MainSocketHandler extends SocketHandler {
                 if (typeof enabled !== "boolean") {
                     throw new ValidationError("Wrong data type?");
                 }
-                if ((await MainTerminal.state(server)).forced) {
-                    throw new ValidationError("consoleForcedByEnv");
-                }
                 if (enabled) {
                     await doubleCheckPassword(socket, currentPassword);
                 }

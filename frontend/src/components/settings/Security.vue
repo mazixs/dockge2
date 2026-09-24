@@ -95,8 +95,7 @@
 
             <div class="panel-body form-stack">
                 <p class="form-text">{{ $t("securityConsoleHint") }}</p>
-                <p v-if="consoleState?.forced" class="form-text">{{ $t("securityConsoleForced") }}</p>
-                <div v-else-if="consoleState" class="actions">
+                <div v-if="consoleState" class="actions">
                     <button v-if="consoleState.enabled" id="console-off-btn" class="btn btn-normal" type="button" :disabled="consoleProcessing" @click="setConsole(false)">{{ $t("consoleTurnOff") }}</button>
                     <button v-else id="console-on-btn" class="btn btn-normal btn-danger-text" type="button" :disabled="consoleProcessing" @click="askConsole('enable')">{{ $t("consoleTurnOn") }}</button>
                 </div>
@@ -183,7 +182,7 @@ export default {
                 newPassword: "",
                 repeatNewPassword: "",
             },
-            /** @type {{ enabled: boolean, forced: boolean, operators: boolean } | null} */
+            /** @type {{ enabled: boolean, operators: boolean } | null} */
             consoleState: null,
             /** What the password dialog confirms: turning the console on, or letting operators in */
             consoleAction: "enable",
@@ -203,9 +202,6 @@ export default {
             return this.$parent.$parent.$parent.settingsLoaded;
         },
         consoleStateLabel() {
-            if (this.consoleState?.forced) {
-                return this.$t("consoleStateForced");
-            }
             return this.$t(this.consoleState?.enabled ? "consoleStateOn" : "consoleStateOff");
         },
     },
@@ -282,11 +278,10 @@ export default {
             this.$refs.confirmDisableAuth.show();
         },
 
-        /** Read whether the console of this server is on, what decided it and who may open it */
+        /** Read whether the console of this server is on and who may open it */
         async loadConsoleState() {
             const res = await this.$root.emitAgentRequest("", "checkMainTerminal", []);
             this.consoleState = "msg" in res && res.msg ? null : { enabled: res.ok,
-                forced: Boolean("forced" in res && res.forced),
                 operators: Boolean("operators" in res && res.operators) };
         },
 

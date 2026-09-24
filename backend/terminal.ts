@@ -543,13 +543,6 @@ export class InteractiveTerminal extends Terminal {
     }
 }
 
-/** Whether the console may be opened on this server, and what decided it */
-export interface ConsoleState {
-    enabled : boolean;
-    /** DOCKGE_ENABLE_CONSOLE=true turned it on, so the setting cannot turn it off */
-    forced : boolean;
-}
-
 /**
  * User interactive terminal that use bash or powershell with limited commands such as docker, ls, cd, dir
  */
@@ -562,17 +555,11 @@ export class MainTerminal extends InteractiveTerminal {
 
     /**
      * The console runs commands next to the Docker socket of the host, so it stays off
-     * until the variable at startup or the owner in the settings turns it on.
-     * @param server Server the console belongs to
-     * @returns Whether it may be opened, and whether the variable decided that
+     * until the owner turns it on in the settings.
+     * @returns Whether it may be opened
      */
-    static async state(server : DockgeServer) : Promise<ConsoleState> {
-        if (server.config.enableConsole) {
-            return { enabled: true,
-                forced: true };
-        }
-        return { enabled: await Settings.get(MainTerminal.SETTING) === true,
-            forced: false };
+    static async enabled() : Promise<boolean> {
+        return await Settings.get(MainTerminal.SETTING) === true;
     }
 
     /**
@@ -583,7 +570,7 @@ export class MainTerminal extends InteractiveTerminal {
      * @returns The session
      */
     static async open(server : DockgeServer, socket : DockgeSocket) : Promise<Terminal> {
-        if (!(await MainTerminal.state(server)).enabled) {
+        if (!await MainTerminal.enabled()) {
             throw new Error("Console is not enabled.");
         }
 

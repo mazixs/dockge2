@@ -34,7 +34,6 @@ export interface Arguments {
     hostname? : string | undefined;
     dataDir? : string | undefined;
     stacksDir? : string | undefined;
-    enableConsole? : boolean | undefined;
 }
 
 // Some config values are required
@@ -42,7 +41,6 @@ export interface Config extends Arguments {
     dataDir : string;
     stacksDir : string;
     port : number;
-    enableConsole : boolean;
 }
 
 export function checkLogin(socket : DockgeSocket) {

@@ -159,8 +159,8 @@ require recovery from `.git/dockge-recovery-*`.
   `array-bracket-spacing: always`, JSDoc on public and non-obvious methods. `camelCase` in TS,
   `snake_case` for SQLite columns, `kebab-case` for CSS. `.editorconfig` and ESLint decide the rest.
 - Settings live in the UI (the `setting` table). Environment variables are for startup only:
-  `DOCKGE_STACKS_DIR`, `DOCKGE_PORT`, `DOCKGE_DATA_DIR`, `DOCKGE_SSL_*`, `DOCKGE_ENABLE_CONSOLE`,
-  `DOCKGE_TRUSTED_ORIGINS`, `DOCKGE_TRUST_PROXY`, `DOCKGE_SECURE_COOKIES`, `DOCKGE_AUTH_SECRET`.
+  `DOCKGE_STACKS_DIR`, `DOCKGE_PORT`, `DOCKGE_DATA_DIR`, `DOCKGE_SSL_*`, `DOCKGE_TRUSTED_ORIGINS`,
+  `DOCKGE_TRUST_PROXY`, `DOCKGE_SECURE_COOKIES`, `DOCKGE_AUTH_SECRET`.
 - Backend dependencies go in `dependencies`, front end and tooling in `devDependencies`.
 - No HTML inside a translation string - markup goes through `<i18n-t>`. `en.json` is the source of
   truth and `ru.json` is kept complete.
