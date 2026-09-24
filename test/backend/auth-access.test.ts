@@ -19,7 +19,8 @@ test("public registration is disabled even before the first owner exists", async
 // These tests exercise the HTTP bootstrap boundary and real better-auth sessions.
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { authorizeSocketEvent, changeUserAccess, issueUser, resetUserPassword, roleAllowsEvent } from "../../backend/auth-access";
+import { authorizeSocketEvent, changeUserAccess, CONSOLE_OPERATORS_SETTING, issueUser, resetUserPassword, roleAllowsEvent } from "../../backend/auth-access";
+import { Settings } from "../../backend/settings";
 import { countUsers, getSessionFromHeaders } from "../../backend/auth";
 import { Database } from "../../backend/database";
 import { createTestAccount, makeAuthenticatedSocket } from "../helpers/database";
@@ -76,6 +77,10 @@ test("viewer cannot request raw files, logs, Docker actions, agent management or
     }
     assert.equal(roleAllowsEvent("viewer", "usersCreate"), false);
     assert.equal(roleAllowsEvent("operator", "setSettings"), false);
+    assert.equal(roleAllowsEvent("operator", "setConsoleEnabled"), false);
+    assert.equal(roleAllowsEvent("admin", "setConsoleEnabled"), true);
+    assert.equal(roleAllowsEvent("operator", "setConsoleOperators"), false);
+    assert.equal(roleAllowsEvent("admin", "setConsoleOperators"), true);
     assert.equal(roleAllowsEvent("operator", "checkForUpdates"), false);
     assert.equal(roleAllowsEvent("viewer", "checkForUpdates"), false);
     assert.equal(roleAllowsEvent("admin", "checkForUpdates"), true);
@@ -140,6 +145,36 @@ test("password reset revokes current cookies and role changes affect already ope
         const nextCookie = (nextLogin.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
         await assert.rejects(authorizeSocketEvent(makeAuthenticatedSocket({ cookie: nextCookie,
             userID: user.id }), "startStack", true), /authPermissionDenied/);
+    });
+});
+
+test("the console is for owners until an owner lets operators in", async () => {
+    await withDatabase(async () => {
+        const ownerCookie = await createTestAccount();
+        const owner = await Database.getKnex()("user").where("username", "owner").first();
+        const user = await issueUser({ username: "operator",
+            email: "operator@example.com",
+            name: "Operator",
+            password: TEST_PASSWORD,
+            role: "operator" });
+        const login = await getAuth().api.signInUsername({ body: { username: "operator",
+            password: TEST_PASSWORD },
+        asResponse: true });
+        const operator = makeAuthenticatedSocket({ cookie: (login.headers.get("set-cookie") ?? "").split(";")[0] ?? "",
+            userID: user.id });
+        const admin = makeAuthenticatedSocket({ cookie: ownerCookie,
+            userID: owner.id });
+
+        for (const event of [ "mainTerminal", "checkMainTerminal" ]) {
+            await assert.rejects(authorizeSocketEvent(operator, event, true), /consoleOwnersOnly/, event);
+            await authorizeSocketEvent(admin, event, true);
+        }
+        // The rest of an operator's work does not depend on the console
+        await authorizeSocketEvent(operator, "interactiveTerminal", true);
+
+        await Settings.set(CONSOLE_OPERATORS_SETTING, true, "console");
+        await authorizeSocketEvent(operator, "mainTerminal", true);
+        await assert.rejects(authorizeSocketEvent(operator, "setConsoleOperators"), /authPermissionDenied/);
     });
 });
 

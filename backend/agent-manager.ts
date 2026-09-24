@@ -10,6 +10,7 @@ import type { StackSummaryDTO } from "../common/types/stack";
 import dayjs, { Dayjs } from "dayjs";
 import { BASELINE_ARGUMENT_INDEX, BASELINE_EVENTS, BASELINE_PROTOCOL_VERSION, MIN_AGENT_PROTOCOL_VERSION } from "../common/agent-socket";
 import { runInBackground } from "./background";
+import { TERMINAL_CLIENT_HEADER, terminalClientKey } from "./terminal";
 
 /**
  * Decide whether an agent is too old to talk to.
@@ -140,10 +141,14 @@ export class AgentManager {
         if (!this.socket.connected || this.agentSocketList[endpoint]) {
             return;
         }
+        // Every user of this panel signs in with the same agent account, so the header
+        // keeps their shells on the agent apart
+        const terminalClient = terminalClientKey(String(this.socket.userID ?? ""));
         let client = io(url, {
             extraHeaders: {
                 cookie,
                 endpoint,
+                [TERMINAL_CLIENT_HEADER]: terminalClient,
             }
         });
 
@@ -172,7 +177,8 @@ export class AgentManager {
                 cookie = await signInAgent(url, username, password);
                 if (this.socket.connected && this.agentSocketList[endpoint] === client) {
                     client.io.opts.extraHeaders = { endpoint,
-                        cookie };
+                        cookie,
+                        [TERMINAL_CLIENT_HEADER]: terminalClient };
                     client.connect();
                 }
             } catch (error) {

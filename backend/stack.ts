@@ -42,7 +42,7 @@ import {
     RUNNING, TERMINAL_ROWS,
     UNKNOWN
 } from "../common/util-common";
-import { InteractiveTerminal, Terminal } from "./terminal";
+import { InteractiveTerminal, Terminal, terminalOwner } from "./terminal";
 import { spawn } from "./child-process";
 import { discardStackGitPreviews } from "./stack-git";
 import { clearStackSourceCache, readStackSource, type StackSource } from "./stack-source";
@@ -1200,9 +1200,10 @@ export class Stack {
     }
 
     /**
-     * Attach a client to an interactive shell of one service.
+     * Attach a client to its own interactive shell of one service.
      * The service has to exist in the selected compose file and the shell has to exist
-     * in the image, both are checked before a PTY is started.
+     * in the image, both are checked before a PTY is started. The shell belongs to the
+     * user who opened it: another user asking for the same name gets a shell of their own.
      * @param socket Client socket
      * @param serviceName Service of this stack
      * @param shell Allowed shell
@@ -1218,12 +1219,13 @@ export class Stack {
         this.assertServiceExists(serviceName);
 
         const terminalName = getContainerExecTerminalName(socket.endpoint, this.name, serviceName, shell, index);
-        let terminal = Terminal.getTerminal(terminalName);
+        const owner = terminalOwner(socket);
+        let terminal = Terminal.getTerminal(terminalName, owner);
 
         if (!terminal) {
             await this.assertShellExists(serviceName, shell);
 
-            terminal = new InteractiveTerminal(this.server, terminalName, "docker", this.getComposeOptions("exec", serviceName, shell), this.path);
+            terminal = new InteractiveTerminal(this.server, terminalName, "docker", this.getComposeOptions("exec", serviceName, shell), this.path, owner);
             terminal.rows = TERMINAL_ROWS;
             log.debug("joinContainerTerminal", "Terminal created");
         }

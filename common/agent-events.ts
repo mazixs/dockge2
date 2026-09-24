@@ -160,7 +160,7 @@ export interface AgentRequestContract extends AgentEventContract {
     terminalInput : { args : [ terminalName : string, cmd : string ]; result : AgentDone };
     mainTerminal : { args : [ terminalName : string ]; result : AgentDone };
     /** Answers whether the console is switched on at all, so a refusal is not an error */
-    checkMainTerminal : { args : []; result : { ok : boolean } | AgentErrorResponse };
+    checkMainTerminal : { args : []; result : { ok : boolean; forced : boolean; operators? : boolean } | AgentErrorResponse };
     interactiveTerminal : {
         args : [ stackName : string, serviceName : string, shell : string ];
         result : AgentResponse<{ terminalName : string }>;

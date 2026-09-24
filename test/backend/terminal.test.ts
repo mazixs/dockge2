@@ -4,7 +4,7 @@ import test from "node:test";
 import { AgentSocket } from "../../common/agent-socket";
 import { TerminalSocketHandler } from "../../backend/agent-socket-handlers/terminal-socket-handler";
 import type { DockgeServer } from "../../backend/dockge-server";
-import { InteractiveTerminal, Terminal } from "../../backend/terminal";
+import { InteractiveTerminal, Terminal, TERMINAL_CLIENT_HEADER, terminalClientKey, terminalOwner } from "../../backend/terminal";
 import { Stack } from "../../backend/stack";
 import type { DockgeSocket } from "../../backend/util-server";
 
@@ -21,6 +21,31 @@ function makeSocket(id : string) : DockgeSocket {
         connected: true,
         emitAgent: () => undefined,
     } as unknown as DockgeSocket;
+}
+
+/**
+ * A client of one account
+ * @param id Socket id
+ * @param userID Account the client signed in as
+ * @param client Value of the terminal client header, as a panel sends it to an agent
+ * @returns Fake client socket
+ */
+function userSocket(id : string, userID : string, client? : string) : DockgeSocket {
+    return Object.assign(makeSocket(id), { userID,
+        request: { headers: client ? { [TERMINAL_CLIENT_HEADER]: client } : {} } });
+}
+
+/**
+ * Send an event to a handler and wait for its answer
+ * @param agentSocket Socket the handler listens on
+ * @param eventName Event to send
+ * @param args Arguments without the callback
+ * @returns The answer
+ */
+function call(agentSocket : AgentSocket, eventName : string, ...args : unknown[]) : Promise<Record<string, unknown>> {
+    return new Promise((resolve) => {
+        agentSocket.call(eventName, ...args, resolve);
+    });
 }
 
 /**
@@ -357,4 +382,75 @@ test("a missing executable reports a spawn failure and releases the terminal", a
     const server = { stacksDir: os.tmpdir() } as DockgeServer;
     await assert.rejects(Terminal.exec(server, undefined, "missing-command-test", "/does-not-exist/dockge-command", [], os.tmpdir()), { code: "spawn" });
     assert.equal(Terminal.getTerminal("missing-command-test"), undefined);
+});
+
+test("a private shell is out of reach of every other user, whatever name they send", async () => {
+    const server = { stacksDir: os.tmpdir() } as unknown as DockgeServer;
+    const name = "container-exec-test-private";
+    const alice = userSocket("alice-socket", "alice");
+    const bob = userSocket("bob-socket", "bob");
+    const terminal = new InteractiveTerminal(server, name, process.execPath, [
+        "-e",
+        "console.log('alice-secret'); setInterval(() => {}, 1000);",
+    ], os.tmpdir(), terminalOwner(alice));
+    terminal.join(alice);
+    terminal.start();
+
+    const asAlice = new AgentSocket();
+    const asBob = new AgentSocket();
+    new TerminalSocketHandler().create(alice, server, asAlice);
+    new TerminalSocketHandler().create(bob, server, asBob);
+
+    try {
+        assert.ok(await waitFor(() => terminal.getBuffer().includes("alice-secret")));
+        assert.equal(Terminal.getTerminal(name), undefined, "a private shell is not filed under its bare name");
+        assert.match(String((await call(asAlice, "terminalJoin", name)).buffer), /alice-secret/);
+
+        // Neither the name nor a guess at the registry key reaches it
+        for (const crafted of [ name, JSON.stringify([ "alice", "", name ]) ]) {
+            assert.equal((await call(asBob, "terminalJoin", crafted)).buffer, "", crafted);
+            assert.equal((await call(asBob, "terminalInput", crafted, "exit\r")).ok, false, crafted);
+            await call(asBob, "terminalLeave", crafted);
+        }
+        assert.equal(Terminal.getTerminal(name, terminalOwner(alice)), terminal, "the shell of alice survived");
+        assert.equal(terminal.hasClient(alice), true);
+    } finally {
+        await terminal.end(500);
+    }
+});
+
+test("the users of a panel get separate shells on an agent, and a forged header stays inside the account", () => {
+    const key = terminalClientKey("panel-user");
+    assert.match(key, /^[a-f0-9]{16}$/);
+    assert.notEqual(key, terminalClientKey("another-panel-user"));
+    assert.equal(key, terminalClientKey("panel-user"), "a reconnect finds the same shell");
+
+    assert.deepEqual(terminalOwner(userSocket("s1", "agent-account", key)), { user: "agent-account",
+        client: key });
+    assert.deepEqual(terminalOwner(userSocket("s2", "agent-account", "../other")), { user: "agent-account",
+        client: "" });
+    assert.deepEqual(terminalOwner(userSocket("s3", "agent-account")), { user: "agent-account",
+        client: "" });
+});
+
+test("ending the sessions of one account leaves the others running", async () => {
+    const server = { stacksDir: os.tmpdir() } as unknown as DockgeServer;
+    const shell = (user : string) => new InteractiveTerminal(server, "container-exec-test-owned", process.execPath, [
+        "-e",
+        "setInterval(() => {}, 1000);",
+    ], os.tmpdir(), { user,
+        client: "" });
+    const alice = shell("alice");
+    const bob = shell("bob");
+    alice.start();
+    bob.start();
+
+    try {
+        assert.ok(await waitFor(() => alice.ptyProcess !== undefined && bob.ptyProcess !== undefined));
+        await Terminal.endOwnedBy("alice");
+        assert.equal(Terminal.getTerminal(alice.name, alice.owner), undefined);
+        assert.equal(Terminal.getTerminal(bob.name, bob.owner), bob);
+    } finally {
+        await bob.end(500);
+    }
 });

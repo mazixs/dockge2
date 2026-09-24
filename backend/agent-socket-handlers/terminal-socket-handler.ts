@@ -7,6 +7,8 @@ import { AgentSocketHandler } from "../agent-socket-handler";
 import { AgentSocket } from "../../common/agent-socket";
 import type { AgentRequestContract } from "../../common/agent-events";
 import { isContainerShell } from "../../common/util-common";
+import { Settings } from "../settings";
+import { CONSOLE_OPERATORS_SETTING } from "../auth-access";
 
 export class TerminalSocketHandler extends AgentSocketHandler {
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
@@ -24,7 +26,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new Error("Command must be a string.");
                 }
 
-                let terminal = Terminal.getTerminal(terminalName);
+                let terminal = Terminal.forClient(socket, terminalName);
                 if (terminal instanceof InteractiveTerminal) {
                     // Writing into a session the client never joined would let one client
                     // type into the shell of another, so the membership is checked
@@ -48,32 +50,12 @@ export class TerminalSocketHandler extends AgentSocketHandler {
         });
 
         // Main Terminal
-        agentSocket.on("mainTerminal", async (terminalName : unknown, callback) => {
+        agentSocket.on("mainTerminal", async (_terminalName : unknown, callback) => {
             try {
                 checkLogin(socket);
 
-                // Throw an error if console is not enabled
-                if (!server.config.enableConsole) {
-                    throw new ValidationError("Console is not enabled.");
-                }
-
-                // TODO: Reset the name here, force one main terminal for now
-                terminalName = "console";
-
-                if (typeof(terminalName) !== "string") {
-                    throw new ValidationError("Terminal name must be a string.");
-                }
-
-                log.debug("mainTerminal", "Terminal name: " + terminalName);
-
-                let terminal = Terminal.getTerminal(terminalName);
-
-                if (!terminal) {
-                    terminal = new MainTerminal(server, terminalName);
-                    terminal.rows = 50;
-                    log.debug("mainTerminal", "Terminal created");
-                }
-
+                // The console of this user, whatever name the client asked for
+                const terminal = await MainTerminal.open(server, socket);
                 terminal.join(socket);
                 terminal.start();
 
@@ -85,12 +67,16 @@ export class TerminalSocketHandler extends AgentSocketHandler {
             }
         });
 
-        // Check if MainTerminal is enabled
+        // Whether the console is on, whether the variable at startup decided it (then the
+        // owner cannot turn it off in the settings) and whether operators may open it
         agentSocket.on("checkMainTerminal", async (callback) => {
             try {
                 checkLogin(socket);
+                const state = await MainTerminal.state(server);
                 callbackResult({
-                    ok: server.config.enableConsole,
+                    ok: state.enabled,
+                    forced: state.forced,
+                    operators: await Settings.get(CONSOLE_OPERATORS_SETTING) === true,
                 }, callback);
             } catch (e) {
                 callbackError(e, callback);
@@ -144,7 +130,9 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Terminal name must be a string.");
                 }
 
-                let buffer : string = Terminal.getTerminal(terminalName)?.getBuffer() ?? "";
+                // Only this client's own session or shared output: the buffer of somebody
+                // else's shell holds what they typed and what it printed
+                let buffer : string = Terminal.forClient(socket, terminalName)?.getBuffer() ?? "";
 
                 if (!buffer) {
                     log.debug("console", "No buffer found.");
@@ -168,7 +156,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Terminal name must be a string.");
                 }
 
-                const terminal = Terminal.getTerminal(terminalName);
+                const terminal = Terminal.forClient(socket, terminalName);
 
                 // Only a client that actually joined may end a session, otherwise any
                 // logged in client could kill somebody else's container shell by guessing the name
@@ -262,7 +250,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     throw new Error("Command must be a number.");
                 }
 
-                let terminal = Terminal.getTerminal(terminalName);
+                let terminal = Terminal.forClient(socket, terminalName);
 
                 // Resizing somebody else's terminal would garble their output
                 if (terminal && !terminal.hasClient(socket)) {

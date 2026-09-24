@@ -1,6 +1,7 @@
 import { OperationError } from "./operation-error";
 import { DockgeServer } from "./dockge-server";
 import * as os from "node:os";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
 import { TerminalBuffer } from "./utils/terminal-buffer";
@@ -12,6 +13,7 @@ import {
     TERMINAL_ROWS
 } from "../common/util-common";
 import { log } from "./log";
+import { Settings } from "./settings";
 
 function commandExistsSync(command : string) {
     try {
@@ -22,6 +24,44 @@ function commandExistsSync(command : string) {
     } catch {
         return false;
     }
+}
+
+/**
+ * Whose private session a terminal is. Shells are private: sharing one let the next user
+ * inherit the history and environment of the previous one, or type into a live shell.
+ */
+export interface TerminalOwner {
+    /** Account the socket signed in as */
+    user : string;
+    /**
+     * Person behind a panel that connects as an agent: every user of that panel signs in
+     * with the same agent account, so the panel names them in a header
+     */
+    client : string;
+}
+
+/** Header a panel names its user with when it connects to an agent */
+export const TERMINAL_CLIENT_HEADER = "x-dockge-terminal-client";
+
+/**
+ * The value a panel sends in TERMINAL_CLIENT_HEADER for one of its users
+ * @param userID Account on the panel
+ * @returns A stable key that does not reveal the account ID to the agent
+ */
+export function terminalClientKey(userID : string) : string {
+    return createHash("sha256").update(userID).digest("hex").slice(0, 16);
+}
+
+/**
+ * Who a socket's private sessions belong to. The header only divides the sessions of one
+ * account, so a client that forges it never reaches the sessions of another account.
+ * @param socket Client socket
+ * @returns Owner of the sessions this socket opens
+ */
+export function terminalOwner(socket : DockgeSocket) : TerminalOwner {
+    const client = socket.request?.headers?.[TERMINAL_CLIENT_HEADER];
+    return { user: String(socket.userID ?? ""),
+        client: typeof client === "string" && /^[a-f0-9]{16}$/.test(client) ? client : "" };
 }
 
 /**
@@ -58,15 +98,34 @@ export class Terminal {
     private executionError : OperationError | undefined;
     private commandExecution = false;
 
-    constructor(server : DockgeServer, name : string, file : string, args : string | string[], cwd : string) {
+    /** Owner of a private session; output that everyone allowed may watch has none */
+    readonly owner : TerminalOwner | undefined;
+
+    constructor(server : DockgeServer, name : string, file : string, args : string | string[], cwd : string, owner? : TerminalOwner) {
         this.server = server;
         this._name = name;
         //this._name = "terminal-" + Date.now() + "-" + getCryptoRandomInt(0, 1000000);
         this.file = file;
         this.args = args;
         this.cwd = cwd;
+        this.owner = owner;
 
-        Terminal.terminalMap.set(this.name, this);
+        Terminal.terminalMap.set(this.key, this);
+    }
+
+    /**
+     * Registry key. A private session is filed under its owner, so the same name asked for
+     * by somebody else never reaches it; the encoding keeps a crafted name from colliding.
+     * @param name Name the client uses
+     * @param owner Owner of a private session
+     * @returns Key in the registry
+     */
+    private static keyOf(name : string, owner? : TerminalOwner) : string {
+        return JSON.stringify(owner ? [ owner.user, owner.client, name ] : [ name ]);
+    }
+
+    private get key() : string {
+        return Terminal.keyOf(this.name, this.owner);
     }
 
     get rows() {
@@ -225,8 +284,8 @@ export class Terminal {
      * A late shutdown must not delete the entry of a terminal that was opened again.
      */
     protected forgetSelf() {
-        if (Terminal.terminalMap.get(this.name) === this) {
-            Terminal.terminalMap.delete(this.name);
+        if (Terminal.terminalMap.get(this.key) === this) {
+            Terminal.terminalMap.delete(this.key);
         }
     }
 
@@ -373,10 +432,21 @@ export class Terminal {
 
     /**
      * Get a running and non-exited terminal
-     * @param name
+     * @param name Name the client uses
+     * @param owner Owner, for a private session
      */
-    public static getTerminal(name : string) : Terminal | undefined {
-        return Terminal.terminalMap.get(name);
+    public static getTerminal(name : string, owner? : TerminalOwner) : Terminal | undefined {
+        return Terminal.terminalMap.get(Terminal.keyOf(name, owner));
+    }
+
+    /**
+     * The terminal a client means by a name: its own private session, otherwise shared
+     * output. A private session of somebody else is never returned, whatever the name.
+     * @param socket Client socket
+     * @param name Name the client uses
+     */
+    public static forClient(socket : DockgeSocket, name : string) : Terminal | undefined {
+        return Terminal.getTerminal(name, terminalOwner(socket)) ?? Terminal.getTerminal(name);
     }
 
     public static getOrCreateTerminal(server : DockgeServer, name : string, file : string, args : string | string[], cwd : string) : Terminal {
@@ -391,7 +461,7 @@ export class Terminal {
     public static exec(server : DockgeServer, socket : DockgeSocket | undefined, terminalName : string, file : string, args : string | string[], cwd : string) : Promise<number> {
         return new Promise((resolve, reject) => {
             // check if terminal exists
-            if (Terminal.terminalMap.has(terminalName)) {
+            if (Terminal.getTerminal(terminalName)) {
                 reject(new OperationError("busy", "operationBusy"));
                 return;
             }
@@ -428,7 +498,25 @@ export class Terminal {
      * @param graceMs How long each shell may take to exit on its own
      */
     public static async endAll(graceMs = 3000) : Promise<void> {
-        const terminals = [ ...Terminal.terminalMap.values() ];
+        await Terminal.endWhere(() => true, graceMs);
+    }
+
+    /**
+     * End the private sessions of an account, whose access just changed: cutting its
+     * connections alone left its shells running
+     * @param userID Account
+     */
+    public static async endOwnedBy(userID : string) : Promise<void> {
+        await Terminal.endWhere((terminal) => terminal.owner?.user === userID);
+    }
+
+    /**
+     * End the sessions that match, the way endAll ends every session
+     * @param match Which sessions to end
+     * @param graceMs How long each shell may take to exit on its own
+     */
+    public static async endWhere(match : (terminal : Terminal) => boolean, graceMs = 3000) : Promise<void> {
+        const terminals = [ ...Terminal.terminalMap.values() ].filter(match);
 
         await Promise.all(terminals.map(async (terminal) => {
             try {
@@ -455,17 +543,69 @@ export class InteractiveTerminal extends Terminal {
     }
 }
 
+/** Whether the console may be opened on this server, and what decided it */
+export interface ConsoleState {
+    enabled : boolean;
+    /** DOCKGE_ENABLE_CONSOLE=true turned it on, so the setting cannot turn it off */
+    forced : boolean;
+}
+
 /**
  * User interactive terminal that use bash or powershell with limited commands such as docker, ls, cd, dir
  */
 export class MainTerminal extends InteractiveTerminal {
-    constructor(server : DockgeServer, name : string) {
-        let shell;
+    /** Name of the console; every user has their own session under it */
+    static readonly NAME = "console";
 
-        // Throw an error if console is not enabled
-        if (!server.config.enableConsole) {
+    /** Setting the owner turns the console on with */
+    static readonly SETTING = "consoleEnabled";
+
+    /**
+     * The console runs commands next to the Docker socket of the host, so it stays off
+     * until the variable at startup or the owner in the settings turns it on.
+     * @param server Server the console belongs to
+     * @returns Whether it may be opened, and whether the variable decided that
+     */
+    static async state(server : DockgeServer) : Promise<ConsoleState> {
+        if (server.config.enableConsole) {
+            return { enabled: true,
+                forced: true };
+        }
+        return { enabled: await Settings.get(MainTerminal.SETTING) === true,
+            forced: false };
+    }
+
+    /**
+     * The console session of this client, started on first use. Every user has their own,
+     * and nothing else creates one, so no path skips the check.
+     * @param server Server the console belongs to
+     * @param socket Client that opens it
+     * @returns The session
+     */
+    static async open(server : DockgeServer, socket : DockgeSocket) : Promise<Terminal> {
+        if (!(await MainTerminal.state(server)).enabled) {
             throw new Error("Console is not enabled.");
         }
+
+        const owner = terminalOwner(socket);
+        let terminal = Terminal.getTerminal(MainTerminal.NAME, owner);
+        if (!terminal) {
+            terminal = new MainTerminal(server, MainTerminal.NAME, owner);
+            terminal.rows = 50;
+        }
+        return terminal;
+    }
+
+    /**
+     * End console sessions: turning the console off or narrowing it must not leave one open
+     * @param keepUsers Accounts whose sessions stay, because they may still open the console
+     */
+    static async closeSessions(keepUsers : ReadonlySet<string> = new Set()) : Promise<void> {
+        await Terminal.endWhere((terminal) => terminal instanceof MainTerminal && !keepUsers.has(terminal.owner?.user ?? ""));
+    }
+
+    private constructor(server : DockgeServer, name : string, owner : TerminalOwner) {
+        let shell;
 
         if (os.platform() === "win32") {
             if (commandExistsSync("pwsh.exe")) {
@@ -476,7 +616,7 @@ export class MainTerminal extends InteractiveTerminal {
         } else {
             shell = "bash";
         }
-        super(server, name, shell, [], server.stacksDir);
+        super(server, name, shell, [], server.stacksDir, owner);
     }
 
     public write(input : string) {

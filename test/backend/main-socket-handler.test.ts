@@ -8,6 +8,8 @@ import { releaseAssets } from "../helpers/releases";
 import checkVersion from "../../backend/check-version";
 import { MainSocketHandler, stripGeneratedProjectName } from "../../backend/socket-handlers/main-socket-handler";
 import { Settings } from "../../backend/settings";
+import { MainTerminal, Terminal } from "../../backend/terminal";
+import { CONSOLE_OPERATORS_SETTING, listUsers } from "../../backend/auth-access";
 import type { DockgeSocket } from "../../backend/util-server";
 import { createTestAccount, TEST_PASSWORD, withDatabase } from "../helpers/database";
 
@@ -26,6 +28,7 @@ interface CallbackResponse {
 class TestSocket extends EventEmitter {
     id = "test-socket";
     userID = "";
+    userRole? : string;
     endpoint = "";
     connected = true;
     instanceManager = {};
@@ -156,6 +159,95 @@ test("disabling authentication requires the current password", async () => {
         const right = await emitWithCallback(socket, "setSettings", { disableAuth: true }, TEST_PASSWORD);
         assert.equal(right.ok, true);
         assert.equal(await Settings.get("disableAuth"), true);
+    });
+});
+
+test("only an owner turns the console on, with the password, and turning it off ends the session", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        const config = { enableConsole: false };
+        const server = Object.assign(createServer(stacksDir), { config });
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, server);
+
+        socket.userRole = "operator";
+        const operator = await emitWithCallback(socket, "setConsoleEnabled", true, TEST_PASSWORD);
+        assert.equal(operator.ok, false);
+        assert.equal(await Settings.get(MainTerminal.SETTING), undefined);
+
+        socket.userRole = "admin";
+        const wrong = await emitWithCallback(socket, "setConsoleEnabled", true, "wrong-password");
+        assert.equal(wrong.ok, false);
+        assert.equal(await Settings.get(MainTerminal.SETTING), undefined);
+
+        const notBoolean = await emitWithCallback(socket, "setConsoleEnabled", "true", TEST_PASSWORD);
+        assert.equal(notBoolean.ok, false);
+
+        const on = await emitWithCallback(socket, "setConsoleEnabled", true, TEST_PASSWORD);
+        assert.equal(on.ok, true);
+        assert.equal(on.msg, "consoleTurnedOn");
+        assert.deepEqual(await MainTerminal.state(server), { enabled: true,
+            forced: false });
+
+        const session = await MainTerminal.open(server, socket as unknown as DockgeSocket);
+        session.start();
+
+        // Taking the console away asks for no password, and leaves no shell behind
+        const off = await emitWithCallback(socket, "setConsoleEnabled", false, "");
+        assert.equal(off.ok, true);
+        assert.equal(Terminal.forClient(socket as unknown as DockgeSocket, MainTerminal.NAME), undefined);
+        await assert.rejects(MainTerminal.open(server, socket as unknown as DockgeSocket), /Console is not enabled/);
+
+        // The startup variable is a deployment decision the settings cannot undo
+        config.enableConsole = true;
+        const forced = await emitWithCallback(socket, "setConsoleEnabled", false, "");
+        assert.equal(forced.ok, false);
+        assert.equal(forced.msg, "consoleForcedByEnv");
+    });
+});
+
+test("letting operators into the console takes the password, and narrowing it ends their sessions only", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const owner = new TestSocket(cookie);
+        owner.userID = String((await listUsers())[0]?.id);
+        const server = Object.assign(createServer(stacksDir), { config: { enableConsole: true } });
+        new MainSocketHandler().create(owner as unknown as DockgeSocket, server);
+
+        owner.userRole = "operator";
+        const refused = await emitWithCallback(owner, "setConsoleOperators", true, TEST_PASSWORD);
+        assert.equal(refused.ok, false);
+
+        owner.userRole = "admin";
+        const wrong = await emitWithCallback(owner, "setConsoleOperators", true, "wrong-password");
+        assert.equal(wrong.ok, false);
+        assert.equal(await Settings.get(CONSOLE_OPERATORS_SETTING), undefined);
+
+        const allowed = await emitWithCallback(owner, "setConsoleOperators", true, TEST_PASSWORD);
+        assert.equal(allowed.ok, true);
+        assert.equal(allowed.msg, "consoleOperatorsAllowed");
+        assert.equal(await Settings.get(CONSOLE_OPERATORS_SETTING), true);
+
+        const operator = new TestSocket();
+        operator.id = "operator-socket";
+        operator.userID = "operator";
+        const ownerSession = await MainTerminal.open(server, owner as unknown as DockgeSocket);
+        const operatorSession = await MainTerminal.open(server, operator as unknown as DockgeSocket);
+        assert.notEqual(ownerSession, operatorSession, "every user has a console of their own");
+        ownerSession.start();
+        operatorSession.start();
+
+        try {
+            const narrowed = await emitWithCallback(owner, "setConsoleOperators", false, "");
+            assert.equal(narrowed.ok, true);
+            assert.equal(narrowed.msg, "consoleOwnersOnlySet");
+            assert.equal(await Settings.get(CONSOLE_OPERATORS_SETTING), false);
+            assert.equal(Terminal.forClient(operator as unknown as DockgeSocket, MainTerminal.NAME), undefined);
+            assert.equal(Terminal.forClient(owner as unknown as DockgeSocket, MainTerminal.NAME), ownerSession, "the owner keeps working");
+        } finally {
+            await MainTerminal.closeSessions();
+        }
     });
 });
 

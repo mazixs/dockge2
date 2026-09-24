@@ -1,6 +1,6 @@
 <template>
-    <!-- Безопасность разложена по панелям: учетная запись, второй фактор и
-         отключение входа. Каждая говорит, что именно она меняет -->
+    <!-- Безопасность разложена по панелям: учетная запись, второй фактор,
+         отключение входа и консоль. Каждая говорит, что именно она меняет -->
     <div v-if="settingsLoaded" class="security">
         <section v-if="!settings.disableAuth" class="panel">
             <div class="panel-bar">
@@ -86,7 +86,48 @@
             </div>
         </section>
 
+        <!-- The console of this server only: an agent turns its own console on in its own panel -->
+        <section v-if="$root.isAdmin" class="panel console-access">
+            <div class="panel-bar">
+                <h2 class="panel-title"><InterfaceIcon name="terminal" />{{ $t("console") }}</h2>
+                <span v-if="consoleState" class="panel-meta">{{ consoleStateLabel }}</span>
+            </div>
+
+            <div class="panel-body form-stack">
+                <p class="form-text">{{ $t("securityConsoleHint") }}</p>
+                <p v-if="consoleState?.forced" class="form-text">{{ $t("securityConsoleForced") }}</p>
+                <div v-else-if="consoleState" class="actions">
+                    <button v-if="consoleState.enabled" id="console-off-btn" class="btn btn-normal" type="button" :disabled="consoleProcessing" @click="setConsole(false)">{{ $t("consoleTurnOff") }}</button>
+                    <button v-else id="console-on-btn" class="btn btn-normal btn-danger-text" type="button" :disabled="consoleProcessing" @click="askConsole('enable')">{{ $t("consoleTurnOn") }}</button>
+                </div>
+
+                <template v-if="consoleState?.enabled">
+                    <p class="form-text">{{ $t(consoleState.operators ? "consoleAccessOperators" : "consoleAccessOwners") }}</p>
+                    <div class="actions">
+                        <button v-if="consoleState.operators" id="console-owners-btn" class="btn btn-normal" type="button" :disabled="consoleProcessing" @click="setConsoleOperators(false)">{{ $t("consoleOwnersOnlyAction") }}</button>
+                        <button v-else id="console-operators-btn" class="btn btn-normal btn-danger-text" type="button" :disabled="consoleProcessing" @click="askConsole('operators')">{{ $t("consoleAllowOperators") }}</button>
+                    </div>
+                </template>
+            </div>
+        </section>
+
         <TwoFADialog ref="TwoFADialog" />
+
+        <Confirm ref="confirmConsole" btn-style="btn-danger" :yes-text="$t(consoleAction === 'operators' ? 'consoleAllowOperators' : 'consoleTurnOn')" :no-text="$t('cancel')" @yes="confirmConsole" @no="consolePassword = ''">
+            <p>{{ $t(consoleAction === "operators" ? "consoleAllowOperatorsConfirm" : "consoleTurnOnConfirm") }}</p>
+
+            <div class="field">
+                <label for="console-password" class="form-label">{{ $t("Current Password") }}</label>
+                <input
+                    id="console-password"
+                    v-model="consolePassword"
+                    type="password"
+                    class="form-control"
+                    autocomplete="current-password"
+                    required
+                />
+            </div>
+        </Confirm>
 
         <Confirm ref="confirmDisableAuth" btn-style="btn-danger" :yes-text="$t('I understand, please disable')" :no-text="$t('Leave')" @yes="disableAuth">
             <i18n-t scope="global" keypath="disableauth.message1" tag="p">
@@ -141,7 +182,13 @@ export default {
                 currentPassword: "",
                 newPassword: "",
                 repeatNewPassword: "",
-            }
+            },
+            /** @type {{ enabled: boolean, forced: boolean, operators: boolean } | null} */
+            consoleState: null,
+            /** What the password dialog confirms: turning the console on, or letting operators in */
+            consoleAction: "enable",
+            consolePassword: "",
+            consoleProcessing: false,
         };
     },
 
@@ -154,12 +201,26 @@ export default {
         },
         settingsLoaded() {
             return this.$parent.$parent.$parent.settingsLoaded;
-        }
+        },
+        consoleStateLabel() {
+            if (this.consoleState?.forced) {
+                return this.$t("consoleStateForced");
+            }
+            return this.$t(this.consoleState?.enabled ? "consoleStateOn" : "consoleStateOff");
+        },
     },
 
     watch: {
         "password.repeatNewPassword"() {
             this.invalidPassword = false;
+        },
+        "$root.isAdmin": {
+            immediate: true,
+            handler(isAdmin) {
+                if (isAdmin) {
+                    this.loadConsoleState();
+                }
+            },
         },
     },
 
@@ -219,6 +280,69 @@ export default {
         /** Show confirmation dialog for disable auth */
         confirmDisableAuth() {
             this.$refs.confirmDisableAuth.show();
+        },
+
+        /** Read whether the console of this server is on, what decided it and who may open it */
+        async loadConsoleState() {
+            const res = await this.$root.emitAgentRequest("", "checkMainTerminal", []);
+            this.consoleState = "msg" in res && res.msg ? null : { enabled: res.ok,
+                forced: Boolean("forced" in res && res.forced),
+                operators: Boolean("operators" in res && res.operators) };
+        },
+
+        /**
+         * Ask for the password before a change that widens access to the console
+         * @param {"enable" | "operators"} action What the dialog confirms
+         * @returns {void}
+         */
+        askConsole(action) {
+            this.consoleAction = action;
+            this.$refs.confirmConsole.show();
+        },
+
+        /** Apply what the password dialog confirmed */
+        confirmConsole() {
+            if (this.consoleAction === "operators") {
+                this.setConsoleOperators(true);
+            } else {
+                this.setConsole(true);
+            }
+        },
+
+        /**
+         * Turn the console on, with the password, or off
+         * @param {boolean} enabled Whether the console should be on
+         * @returns {void}
+         */
+        setConsole(enabled) {
+            this.consoleProcessing = true;
+            this.$root.getSocket().emit("setConsoleEnabled", enabled, enabled ? this.consolePassword : "", (res) => {
+                this.consoleProcessing = false;
+                this.consolePassword = "";
+                this.$root.toastRes(res);
+                if (res.ok) {
+                    this.consoleState = { ...this.consoleState,
+                        enabled };
+                }
+            });
+        },
+
+        /**
+         * Let operators open the console, with the password, or limit it to owners again
+         * @param {boolean} allowed Whether operators may open it
+         * @returns {void}
+         */
+        setConsoleOperators(allowed) {
+            this.consoleProcessing = true;
+            this.$root.getSocket().emit("setConsoleOperators", allowed, allowed ? this.consolePassword : "", (res) => {
+                this.consoleProcessing = false;
+                this.consolePassword = "";
+                this.$root.toastRes(res);
+                if (res.ok) {
+                    this.consoleState = { ...this.consoleState,
+                        operators: allowed };
+                }
+            });
         },
 
     },

@@ -179,7 +179,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 - Проверить текущий self-container по реальному `compose.yaml` и Dockerfile: image/tag/digest, healthcheck, restart policy, пользователь процесса, Docker socket, bind mounts `/app/data` и `/opt/stacks`, Docker CLI/Compose CLI и сохранность данных при пересоздании.
 - Отображать control plane отдельной карточкой с health, uptime, image, restart count, last seen и mount status. Не давать общей кнопке контейнеров удалить сам Dockge 2 или вызвать `down -v`.
-- Основную Dockge-консоль оставить выключенной по умолчанию. При `DOCKGE_ENABLE_CONSOLE=true` явно показывать, что через Docker socket пользователь получает практически host-level control; включение из UI не добавлять.
+- Основную Dockge-консоль оставить выключенной по умолчанию. При `DOCKGE_ENABLE_CONSOLE=true` явно показывать, что через Docker socket пользователь получает практически host-level control. Решение "включение из UI не добавлять" отменено 2026-09-24: владелец включает консоль в настройках безопасности с паролем, см. журнал ниже.
 - Для self restart показывать предупреждение о краткой потере UI и выполнять только безопасную операцию; обновление образа вести через отдельный Git/Compose CLI, а не через произвольный браузерный shell.
 
 ### Преобразование Docker Run → Compose
@@ -1502,3 +1502,18 @@ Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest speci
 - "Edit" reveals the env values at once: a hidden value cannot be edited, and the second click on "Show" only got in the way. "Show" outside edit mode still reveals them read-only.
 - The update preview said "the registry did not answer" for every multi platform image in the published panel: the image has no buildx, and `docker manifest inspect` rebuilds an index instead of returning it, so its digest never matched. The registry API is now asked directly (one HEAD with every manifest type accepted, an anonymous token or the plain `docker login` entry, credentials only to an HTTPS realm); its digests match `buildx imagetools` byte for byte on ghcr.io and Docker Hub.
 - An unknown answer names its cause: refused access (private image or wrong name), no such tag, or no answer. A failed answer is kept for one minute instead of ten.
+
+## 2026-09-24: the owner turns the console on, role audit
+
+- Reverses "включение из UI не добавлять" above, at the user's request. An owner turns the console on in Settings, Security, confirming with the password; turning it off needs no password and ends the open sessions. `DOCKGE_ENABLE_CONSOLE=true` still forces it on, and the setting then cannot turn it off. "false" cannot be a lock: the frozen `docker-compose.yml` always passes it.
+- No new privilege: an owner already reaches the host through compose (privileged services, host mounts).
+- One gate: `MainTerminal.state()` (variable or setting) and `MainTerminal.open()`, the only way to create the session. Each server decides for itself; an agent's console is turned on in the agent's own panel.
+- Role audit, by weight, with what was done the same day:
+  - Fixed: the console and container shells were shared sessions (one `console` terminal for everyone; `interactiveTerminal` always used index 0, so a second user joined the first user's live shell). Every private session is now filed under its owner: `TerminalOwner` = account plus, for a panel that connects as an agent, the `x-dockge-terminal-client` header (a sha256 of the panel user's id), because every user of a panel signs in to the agent with one account. The header only divides one account's sessions, so forging it reaches nobody else. `Terminal.forClient()` returns the client's own session or shared output, never another user's session, whatever name is sent.
+  - Fixed: `terminalJoin` returned the scrollback of any terminal by name. It goes through `forClient()` now, as do input, leave and resize.
+  - Fixed: demoting, suspending, resetting or deleting an account now also ends its shells (`Terminal.endOwnedBy`), not only its connections.
+  - Fixed: user management (create, reset password, role, delete) asks the acting owner for their password; a wrong one is not masked as "account exists".
+  - Added: who opens the console, `consoleOperators`, owners only by default. Checked in `authorizeSocketEvent` for `mainTerminal` / `checkMainTerminal`, so it holds for local and proxied calls; letting operators in takes the password, narrowing ends the console sessions of everyone who is not an active owner. This narrows existing installations with `DOCKGE_ENABLE_CONSOLE=true`, where operators could open the console before.
+  - Open: an owner has no per-user restriction beyond the three roles: no per-stack or per-agent scope for browser users (MCP keys have it), no 2FA reset or requirement, no session list, no audit log outside MCP.
+  - Open: across agents every local user acts as the one stored agent account: remote secrets check that account's password, and the lockout counter is shared. Shells are separated by the header above, but the agent's own role and console setting apply to the agent account.
+  - Open, by design: an operator deploys arbitrary compose, which reaches the host (privileged services, host mounts); keeping the console to owners does not change that.

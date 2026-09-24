@@ -1,10 +1,12 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
+import os from "node:os";
 import test from "node:test";
 import { getAuth, resolveSocketIdentity } from "../../backend/auth";
 import { issueUser } from "../../backend/auth-access";
 import { UsersSocketHandler } from "../../backend/socket-handlers/users-socket-handler";
 import type { DockgeServer } from "../../backend/dockge-server";
+import { InteractiveTerminal, Terminal } from "../../backend/terminal";
 import { createTestAccount, makeAuthenticatedSocket, TEST_PASSWORD, withDatabase } from "../helpers/database";
 
 /** The account events and what the handler did to other sessions */
@@ -73,7 +75,7 @@ test("only the owner may see and change accounts", async () => {
         const refusedCreate = await asOperator.call("usersCreate", { username: "sneak",
             email: "sneak@example.com",
             role: "admin",
-            password: TEST_PASSWORD });
+            password: TEST_PASSWORD }, TEST_PASSWORD);
         assert.equal(refusedCreate.ok, false);
         assert.equal(refusedCreate.msg, "authPermissionDenied");
     });
@@ -88,7 +90,7 @@ test("a refused account creation says what is wrong without quoting the database
         const shortPassword = await call("usersCreate", { username: "newuser",
             email: "newuser@example.com",
             role: "operator",
-            password: "short" });
+            password: "short" }, TEST_PASSWORD);
         assert.equal(shortPassword.ok, false);
         assert.equal(shortPassword.msg, "authPasswordLength");
 
@@ -96,7 +98,7 @@ test("a refused account creation says what is wrong without quoting the database
             email: "newuser@example.com",
             name: "New User",
             role: "operator",
-            password: TEST_PASSWORD });
+            password: TEST_PASSWORD }, TEST_PASSWORD);
         assert.equal(created.ok, true);
 
         // The second attempt fails inside the database. What comes back is a message the
@@ -105,7 +107,7 @@ test("a refused account creation says what is wrong without quoting the database
             email: "newuser@example.com",
             name: "New User",
             role: "operator",
-            password: TEST_PASSWORD });
+            password: TEST_PASSWORD }, TEST_PASSWORD);
         assert.equal(duplicate.ok, false);
         assert.equal(duplicate.msg, "authAccountExists");
     });
@@ -119,25 +121,72 @@ test("changing an account without naming it is refused, and removing one ends it
         const { call, disconnected } = handlerFor(ownerCookie, owner.userID ?? "");
 
         for (const event of [ "usersUpdate", "usersResetPassword", "usersDelete" ]) {
-            const noID = await call(event, { role: "viewer" });
+            const noID = await call(event, { role: "viewer" }, TEST_PASSWORD);
             assert.equal(noID.ok, false, event);
             assert.equal(noID.msg, "authInvalidUserData", event);
         }
 
+        // A shell the account left open has to end with its access, not only its connections
+        const shell = new InteractiveTerminal({ stacksDir: os.tmpdir() } as unknown as DockgeServer, "container-exec-victim", process.execPath,
+            [ "-e", "setInterval(() => {}, 1000);" ], os.tmpdir(), { user: victim.id,
+                client: "" });
+        shell.start();
+
         const demoted = await call("usersUpdate", { id: victim.id,
-            role: "viewer" });
+            role: "viewer" }, TEST_PASSWORD);
         assert.equal(demoted.ok, true);
 
         // A changed role has to reach the open browser of that account, which is why its
         // clients are disconnected rather than left with the rights they connected with
         assert.deepEqual(disconnected, [ victim.id ]);
+        const deadline = Date.now() + 10_000;
+        while (Terminal.getTerminal(shell.name, shell.owner) && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.equal(Terminal.getTerminal(shell.name, shell.owner), undefined, "the shell of a demoted account ends");
 
-        const removed = await call("usersDelete", { id: victim.id });
+        const removed = await call("usersDelete", { id: victim.id }, TEST_PASSWORD);
         assert.equal(removed.ok, true);
         assert.deepEqual(disconnected, [ victim.id, victim.id ]);
 
-        const gone = await call("usersDelete", { id: victim.id });
+        const gone = await call("usersDelete", { id: victim.id }, TEST_PASSWORD);
         assert.equal(gone.ok, false);
         assert.equal(gone.msg, "authUnknownUser");
+    });
+});
+
+test("every change to an account asks for the password of the owner making it", async () => {
+    await withDatabase(async () => {
+        const ownerCookie = await createTestAccount();
+        const owner = await resolveSocketIdentity({ cookie: ownerCookie });
+        const other = await signIn("operator7", "operator");
+        const { call, disconnected } = handlerFor(ownerCookie, owner.userID ?? "");
+
+        const create = await call("usersCreate", { username: "unconfirmed",
+            email: "unconfirmed@example.com",
+            role: "admin",
+            password: TEST_PASSWORD }, "wrong-password");
+        assert.equal(create.ok, false);
+        assert.equal(create.msg, "Incorrect current password", "the refusal is not masked as an existing account");
+
+        for (const [ event, data ] of [
+            [ "usersUpdate", { id: other.id,
+                role: "admin" }],
+            [ "usersResetPassword", { id: other.id,
+                password: "another-long-password" }],
+            [ "usersDelete", { id: other.id }],
+        ] as const) {
+            const refused = await call(event, data, "wrong-password");
+            assert.equal(refused.ok, false, event);
+        }
+
+        const missing = await call("usersDelete", { id: other.id }, undefined);
+        assert.equal(missing.ok, false);
+
+        assert.deepEqual(disconnected, [], "nothing changed, so nobody was disconnected");
+        const list = await call("usersList");
+        const users = list.users as { username : string; role : string }[];
+        assert.equal(users.some((user) => user.username === "unconfirmed"), false);
+        assert.equal(users.find((user) => user.username === "operator7")?.role, "operator");
     });
 });

@@ -36,16 +36,24 @@ the person is the owner's decision.
 | Role | What it can do |
 | --- | --- |
 | Owner (`admin`) | Users, agents, settings, stacks and Docker |
-| Operator (`operator`) | Stacks and Docker, including compose, environment, secrets, logs and the terminal |
+| Operator (`operator`) | Stacks and Docker, including compose, environment, secrets, logs and container shells; the server console when an owner allows it |
 | Viewer (`viewer`) | Statuses, the list of services, availability and stability. No compose or env contents, no secrets, no logs, no terminal |
 
 An operator controls Docker and the terminal, which is host-level authority. It is trusted access:
 the operator role is not a security boundary against the owner. New accounts default to viewer.
 
+The server console is off until an owner turns it on in Settings, Security, confirming with the
+password, or `DOCKGE_ENABLE_CONSOLE=true` is set at startup. Only owners open it until an owner lets
+operators in on the same page, again with the password; keeping it to owners again ends the
+operators' console sessions, and turning the console off ends all of them. Every user gets a console
+session and container shells of their own: nobody else can read their scrollback or type into them.
+An agent's console, and who opens it, is set in that agent's own panel.
+
+Creating, changing, resetting or deleting an account asks the acting owner for their own password.
 Resetting a password revokes every current session of that user and keeps their two factor setup.
 Suspending an account blocks new logins. Changing a role or deleting an account also ends that
-account's sessions, agent connections and terminal streams. The last active owner cannot be deleted,
-suspended or moved to another role.
+account's sessions, agent connections, terminal streams and the shells it left open. The last active
+owner cannot be deleted, suspended or moved to another role.
 
 Rights are checked on the server for every Socket.IO request and every nested agent operation. A new
 event is denied until it is explicitly allowed. A viewer receives a separate, safe set of stack list

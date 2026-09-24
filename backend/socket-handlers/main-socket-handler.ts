@@ -17,6 +17,8 @@ import { Settings } from "../settings";
 import fs, { promises as fsAsync } from "fs";
 import path from "path";
 import { runInBackground } from "../background";
+import { MainTerminal } from "../terminal";
+import { CONSOLE_OPERATORS_SETTING, listUsers } from "../auth-access";
 
 export class MainSocketHandler extends SocketHandler {
     create(socket : DockgeSocket, server : DockgeServer) {
@@ -126,6 +128,74 @@ export class MainSocketHandler extends SocketHandler {
                     await server.sendInfoToAll();
                 });
 
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // The console runs commands inside the Dockge container, which drives the Docker
+        // daemon of the host. Only an owner turns it on, confirming with the password;
+        // turning it off needs no confirmation and ends the session that is open
+        socket.on("setConsoleEnabled", async (enabled : unknown, currentPassword : unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (socket.userRole !== "admin") {
+                    throw new ValidationError("authPermissionDenied");
+                }
+                if (typeof enabled !== "boolean") {
+                    throw new ValidationError("Wrong data type?");
+                }
+                if ((await MainTerminal.state(server)).forced) {
+                    throw new ValidationError("consoleForcedByEnv");
+                }
+                if (enabled) {
+                    await doubleCheckPassword(socket, currentPassword);
+                }
+
+                await Settings.set(MainTerminal.SETTING, enabled, "console");
+                if (!enabled) {
+                    await MainTerminal.closeSessions();
+                }
+                log.info("console", `Console turned ${enabled ? "on" : "off"} by user ${socket.userID}`);
+
+                callbackResult({
+                    ok: true,
+                    msg: enabled ? "consoleTurnedOn" : "consoleTurnedOff",
+                    msgi18n: true,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
+        // Who opens the console: owners only, the default, or operators as well. Letting
+        // operators in hands them the host, so it takes the password; narrowing ends
+        // the sessions of everyone who is not an owner
+        socket.on("setConsoleOperators", async (allowed : unknown, currentPassword : unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (socket.userRole !== "admin") {
+                    throw new ValidationError("authPermissionDenied");
+                }
+                if (typeof allowed !== "boolean") {
+                    throw new ValidationError("Wrong data type?");
+                }
+                if (allowed) {
+                    await doubleCheckPassword(socket, currentPassword);
+                }
+
+                await Settings.set(CONSOLE_OPERATORS_SETTING, allowed, "console");
+                if (!allowed) {
+                    const owners = (await listUsers()).filter((user) => user.role === "admin" && !user.suspended);
+                    await MainTerminal.closeSessions(new Set(owners.map((user) => String(user.id))));
+                }
+                log.info("console", `Console ${allowed ? "opened to operators" : "limited to owners"} by user ${socket.userID}`);
+
+                callbackResult({
+                    ok: true,
+                    msg: allowed ? "consoleOperatorsAllowed" : "consoleOwnersOnlySet",
+                    msgi18n: true,
+                }, callback);
             } catch (e) {
                 callbackError(e, callback);
             }

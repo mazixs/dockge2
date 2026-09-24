@@ -5,7 +5,9 @@ import test from "node:test";
 import { AgentSocket } from "../../common/agent-socket";
 import { TerminalSocketHandler } from "../../backend/agent-socket-handlers/terminal-socket-handler";
 import type { DockgeServer } from "../../backend/dockge-server";
+import { Settings } from "../../backend/settings";
 import { Stack } from "../../backend/stack";
+import { MainTerminal, Terminal } from "../../backend/terminal";
 import type { DockgeSocket } from "../../backend/util-server";
 import { ValidationError } from "../../backend/util-server";
 import { withDatabase } from "../helpers/database";
@@ -121,6 +123,48 @@ test("terminal events answer the browser instead of leaving it waiting", async (
 
         const leaveCombined = await call(agentSocket, "leaveCombinedTerminal", 7);
         assert.equal(leaveCombined.ok, false);
+    });
+});
+
+test("the console follows the setting of the owner, and the startup variable wins over it", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const socket = { id: "console-client",
+            userID: 1,
+            endpoint: "",
+            connected: true,
+            emitAgent: () => undefined } as unknown as DockgeSocket;
+        const config = { enableConsole: false };
+        const server = { stacksDir,
+            config } as unknown as DockgeServer;
+        const agentSocket = new AgentSocket();
+        new TerminalSocketHandler().create(socket, server, agentSocket);
+
+        assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: false,
+            forced: false,
+            operators: false });
+
+        await Settings.set(MainTerminal.SETTING, true, "console");
+        assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: true,
+            forced: false,
+            operators: false });
+
+        // Whatever name the client sends, the session is this user's own console
+        const opened = await call(agentSocket, "mainTerminal", "another-name");
+        assert.equal(opened.ok, true);
+        const session = Terminal.forClient(socket, MainTerminal.NAME);
+        assert.ok(session instanceof MainTerminal);
+        assert.equal(session.hasClient(socket), true);
+        assert.equal(Terminal.getTerminal(MainTerminal.NAME), undefined, "no console is shared");
+
+        await MainTerminal.closeSessions();
+        assert.equal(Terminal.forClient(socket, MainTerminal.NAME), undefined);
+
+        await Settings.set(MainTerminal.SETTING, false, "console");
+        await Settings.set("consoleOperators", true, "console");
+        config.enableConsole = true;
+        assert.deepEqual(await call(agentSocket, "checkMainTerminal"), { ok: true,
+            forced: true,
+            operators: true });
     });
 });
 

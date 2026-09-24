@@ -10,78 +10,72 @@
                 <h2 class="panel-title"><InterfaceIcon name="users" />{{ mode === "create" ? $t("usersAdd") : selected?.name }}</h2>
             </div>
 
-            <form v-if="mode === 'create'" class="panel-body form-stack" @submit.prevent="create">
-                <div class="user-fields">
-                    <div class="field">
-                        <label for="user-username" class="form-label">{{ $t("authUsername") }}</label>
-                        <input id="user-username" v-model="form.username" class="form-control" autocomplete="off" pattern="[a-zA-Z0-9_.]{3,30}" required :disabled="busy">
+            <!-- Every change asks for the password of the owner making it: an unattended
+                 signed-in browser must not be enough to hand out or take away access -->
+            <form class="panel-body form-stack" @submit.prevent="submit">
+                <template v-if="mode === 'create'">
+                    <div class="user-fields">
+                        <div class="field">
+                            <label for="user-username" class="form-label">{{ $t("authUsername") }}</label>
+                            <input id="user-username" v-model="form.username" class="form-control" autocomplete="off" pattern="[a-zA-Z0-9_.]{3,30}" required :disabled="busy">
+                        </div>
+                        <div class="field">
+                            <label for="user-email" class="form-label">{{ $t("Email") }}</label>
+                            <input id="user-email" v-model="form.email" class="form-control" type="email" autocomplete="off" required :disabled="busy">
+                        </div>
+                        <div class="field">
+                            <label for="user-name" class="form-label">{{ $t("usersDisplayName") }}</label>
+                            <input id="user-name" v-model="form.name" class="form-control" maxlength="100" :disabled="busy">
+                        </div>
+                        <div class="field">
+                            <label for="user-password" class="form-label">{{ $t("Password") }}</label>
+                            <input id="user-password" v-model="form.password" class="form-control" type="password" autocomplete="new-password" minlength="10" maxlength="128" required :disabled="busy">
+                        </div>
+                        <div class="field">
+                            <label for="user-role" class="form-label">{{ $t("usersRole") }}</label>
+                            <select id="user-role" v-model="form.role" class="form-select" :disabled="busy">
+                                <option v-for="role in roles" :key="role" :value="role">{{ $t(`usersRole_${role}`) }}</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="field">
-                        <label for="user-email" class="form-label">{{ $t("Email") }}</label>
-                        <input id="user-email" v-model="form.email" class="form-control" type="email" autocomplete="off" required :disabled="busy">
-                    </div>
-                    <div class="field">
-                        <label for="user-name" class="form-label">{{ $t("usersDisplayName") }}</label>
-                        <input id="user-name" v-model="form.name" class="form-control" maxlength="100" :disabled="busy">
-                    </div>
-                    <div class="field">
-                        <label for="user-password" class="form-label">{{ $t("Password") }}</label>
-                        <input id="user-password" v-model="form.password" class="form-control" type="password" autocomplete="new-password" minlength="10" maxlength="128" required :disabled="busy">
-                    </div>
-                    <div class="field">
-                        <label for="user-role" class="form-label">{{ $t("usersRole") }}</label>
-                        <select id="user-role" v-model="form.role" class="form-select" :disabled="busy">
-                            <option v-for="role in roles" :key="role" :value="role">{{ $t(`usersRole_${role}`) }}</option>
-                        </select>
-                    </div>
-                </div>
-                <ul class="form-hints">
-                    <li>{{ $t("authUsernameHint") }}</li>
-                    <li>{{ $t("usersRoleHint") }}</li>
-                </ul>
-                <div class="actions">
-                    <button class="btn btn-primary" :disabled="busy">{{ $t("Create") }}</button>
-                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
-                </div>
-            </form>
+                    <ul class="form-hints">
+                        <li>{{ $t("authUsernameHint") }}</li>
+                        <li>{{ $t("usersRoleHint") }}</li>
+                    </ul>
+                </template>
 
-            <form v-else-if="mode === 'password'" class="panel-body form-stack" @submit.prevent="resetPassword">
-                <div class="field">
+                <div v-else-if="mode === 'password'" class="field">
                     <label for="user-new-password" class="form-label">{{ $t("New Password") }}</label>
                     <input id="user-new-password" v-model="form.password" class="form-control" type="password" autocomplete="new-password" minlength="10" maxlength="128" required :disabled="busy">
                     <p class="form-text">{{ $t("usersResetHint") }}</p>
                 </div>
-                <div class="actions">
-                    <button class="btn btn-primary" :disabled="busy">{{ $t("usersResetPassword") }}</button>
-                    <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
-                </div>
-            </form>
 
-            <form v-else-if="mode === 'access'" class="panel-body form-stack" @submit.prevent="saveAccess">
+                <template v-else-if="mode === 'access'">
+                    <div class="field">
+                        <label for="user-access-role" class="form-label">{{ $t("usersRole") }}</label>
+                        <select id="user-access-role" v-model="form.role" class="form-select" :disabled="busy">
+                            <option v-for="role in roles" :key="role" :value="role">{{ $t(`usersRole_${role}`) }}</option>
+                        </select>
+                        <p class="form-text">{{ $t("usersAccessHint") }}</p>
+                    </div>
+                    <label class="form-check">
+                        <input v-model="form.suspended" type="checkbox" class="form-check-input" :disabled="busy">
+                        <span class="form-check-label">{{ $t("usersSuspend") }}</span>
+                    </label>
+                </template>
+
+                <p v-else class="form-text">{{ $t("usersDeleteHint", { name: selected?.username || selected?.email }) }}</p>
+
                 <div class="field">
-                    <label for="user-access-role" class="form-label">{{ $t("usersRole") }}</label>
-                    <select id="user-access-role" v-model="form.role" class="form-select" :disabled="busy">
-                        <option v-for="role in roles" :key="role" :value="role">{{ $t(`usersRole_${role}`) }}</option>
-                    </select>
-                    <p class="form-text">{{ $t("usersAccessHint") }}</p>
+                    <label for="user-confirm-password" class="form-label">{{ $t("usersYourPassword") }}</label>
+                    <input id="user-confirm-password" v-model="confirmPassword" class="form-control" type="password" autocomplete="current-password" required :disabled="busy">
                 </div>
-                <label class="form-check">
-                    <input v-model="form.suspended" type="checkbox" class="form-check-input" :disabled="busy">
-                    <span class="form-check-label">{{ $t("usersSuspend") }}</span>
-                </label>
+
                 <div class="actions">
-                    <button class="btn btn-primary" :disabled="busy">{{ $t("Save") }}</button>
+                    <button class="btn" :class="mode === 'delete' ? 'btn-danger' : 'btn-primary'" :disabled="busy">{{ $t(submitLabel) }}</button>
                     <button type="button" class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
                 </div>
             </form>
-
-            <div v-else-if="mode === 'delete'" class="panel-body form-stack">
-                <p class="form-text">{{ $t("usersDeleteHint", { name: selected?.username || selected?.email }) }}</p>
-                <div class="actions">
-                    <button class="btn btn-danger" :disabled="busy" @click="remove">{{ $t("usersDelete") }}</button>
-                    <button class="btn btn-normal" :disabled="busy" @click="closeEditor">{{ $t("cancel") }}</button>
-                </div>
-            </div>
         </section>
 
         <section class="panel" aria-labelledby="users-heading">
@@ -148,6 +142,7 @@ export default {
             message: "",
             mode: "",
             selected: null,
+            confirmPassword: "",
             roles: [ "viewer", "operator", "admin" ],
             form: { username: "",
                 name: "",
@@ -168,6 +163,14 @@ export default {
             return owners.length === 1 ? owners[0].id : "";
         },
 
+        /** Label of the button that applies the open editor */
+        submitLabel() {
+            return { create: "Create",
+                password: "usersResetPassword",
+                access: "Save",
+                delete: "usersDelete" }[this.mode] ?? "Save";
+        },
+
         /** Подпись панели: откуда берутся учетные записи и почему одна из них несносима */
         hint() {
             const parts = [ this.$t("usersHint") ];
@@ -183,8 +186,14 @@ export default {
         this.load();
     },
     methods: {
-        /** Bound socket requests so a lost connection cannot leave an endless spinner. */
-        request(event, data) {
+        /**
+         * Bound socket requests so a lost connection cannot leave an endless spinner.
+         * @param {string} event Event name
+         * @param {object} [data] Payload
+         * @param {string} [currentPassword] Password of the owner, for a change
+         * @returns {Promise<object>} The answer
+         */
+        request(event, data, currentPassword) {
             return new Promise((resolve, reject) => {
                 const callback = (error, result) => {
                     if (error || !result?.ok) {
@@ -197,7 +206,7 @@ export default {
                 if (data === undefined) {
                     socket.emit(event, callback);
                 } else {
-                    socket.emit(event, data, callback);
+                    socket.emit(event, data, currentPassword, callback);
                 }
             });
         },
@@ -217,6 +226,7 @@ export default {
             this.mode = "";
             this.selected = null;
             this.form.password = "";
+            this.confirmPassword = "";
         },
         openCreate() {
             this.form = { username: "",
@@ -242,15 +252,22 @@ export default {
             this.error = "";
             this.message = "";
             try {
-                await this.request(event, data);
+                await this.request(event, data, this.confirmPassword);
                 this.closeEditor();
                 this.message = "usersSaved";
                 await this.load();
             } catch (error) {
                 this.error = error.message;
+                this.confirmPassword = "";
             } finally {
                 this.busy = false;
             }
+        },
+        submit() {
+            return { create: this.create,
+                password: this.resetPassword,
+                access: this.saveAccess,
+                delete: this.remove }[this.mode]?.();
         },
         create() {
             return this.apply("usersCreate", this.form);

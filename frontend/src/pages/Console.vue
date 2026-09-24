@@ -17,15 +17,22 @@
                 </div>
             </section>
 
-            <!-- Консоль выключена: экран объясняет, почему ее нет и чем она
-                 включается. Кнопки здесь нет намеренно - в интерфейсе консоль
-                 не включается, только переменной окружения при запуске -->
+            <!-- The console is off: the screen says why and who turns it on. Only an owner
+                 of this panel can, so only an owner gets the way to the setting -->
+            <EmptyState
+                v-else-if="ownersOnly"
+                class="console-off"
+                :title="$t('consoleOwnersOnlyTitle')"
+                :hint="$t(endpoint && $root.isAdmin ? 'consoleOwnersOnlyHintAgent' : 'consoleOwnersOnlyHint')"
+            />
             <EmptyState
                 v-else
                 class="console-off"
                 :title="$t('consoleDisabledTitle')"
-                :hint="$t('consoleDisabledHint')"
-            />
+                :hint="disabledHint"
+            >
+                <router-link v-if="!endpoint && $root.isAdmin" to="/settings/security" class="btn btn-normal">{{ $t("consoleOpenSettings") }}</router-link>
+            </EmptyState>
         </div>
     </transition>
 </template>
@@ -45,6 +52,8 @@ export default {
         return {
             processing: true,
             enableConsole: false,
+            /** The console is on, but an owner keeps it to owners */
+            ownersOnly: false,
         };
     },
     computed: {
@@ -60,10 +69,19 @@ export default {
 
             return this.$root.endpointDisplayFunction(this.endpoint) || this.endpoint;
         },
+
+        /** An agent is configured on its own server, this panel only by an owner */
+        disabledHint() {
+            if (this.endpoint) {
+                return this.$t("consoleDisabledHintAgent");
+            }
+            return this.$t(this.$root.isAdmin ? "consoleDisabledHintOwner" : "consoleDisabledHintOperator");
+        },
     },
     mounted() {
         this.$root.emitAgent(this.endpoint, "checkMainTerminal", (res) => {
             this.enableConsole = res.ok;
+            this.ownersOnly = !res.ok && res.msg === "consoleOwnersOnly";
             this.processing = false;
         });
     },

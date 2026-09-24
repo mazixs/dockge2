@@ -4,6 +4,7 @@ import path from "node:path";
 import { createLocalAccountIssuer } from "better-auth/db";
 import { APIError, createAuthEndpoint, formCsrfMiddleware, originCheckMiddleware } from "better-auth/api";
 import { Database } from "./database";
+import { Settings } from "./settings";
 import { getAuthRuntime, type UserRole } from "./auth-runtime";
 import type { DockgeSocket } from "./util-server";
 import type { StackSummaryDTO, ViewerStackSummary } from "../common/types/stack";
@@ -164,8 +165,14 @@ export const OPERATOR_EVENTS = new Set([
     "getDockerNetworkList", "terminalInput", "mainTerminal", "checkMainTerminal", "interactiveTerminal",
     "terminalJoin", "terminalLeave", "joinCombinedTerminal", "leaveCombinedTerminal", "terminalResize",
 ]);
+/**
+ * Agent events of the console. It controls the Docker daemon of the host, so only owners
+ * open it unless an owner lets operators in with this setting.
+ */
+const CONSOLE_EVENTS = new Set([ "mainTerminal", "checkMainTerminal" ]);
+export const CONSOLE_OPERATORS_SETTING = "consoleOperators";
 const ACCOUNT_EVENTS = new Set([ "getSettings", "disconnectOtherSocketClients" ]);
-const ADMIN_EVENTS = new Set([ "checkForUpdates", "setSettings", "addAgent", "removeAgent", "updateAgent", "usersList", "usersCreate", "usersUpdate", "usersResetPassword", "usersDelete" ]);
+const ADMIN_EVENTS = new Set([ "checkForUpdates", "setSettings", "setConsoleEnabled", "setConsoleOperators", "addAgent", "removeAgent", "updateAgent", "usersList", "usersCreate", "usersUpdate", "usersResetPassword", "usersDelete" ]);
 
 /** Explicit allowlists cover both direct and forwarded agent operations. */
 export function roleAllowsEvent(role : UserRole, event : string, agent = false) : boolean {
@@ -190,6 +197,9 @@ export async function authorizeSocketEvent(socket : DockgeSocket, event : string
     socket.userRole = identity.role ?? "viewer";
     if (!roleAllowsEvent(socket.userRole, event, agent)) {
         throw new Error("authPermissionDenied");
+    }
+    if (agent && socket.userRole !== "admin" && CONSOLE_EVENTS.has(event) && await Settings.get(CONSOLE_OPERATORS_SETTING) !== true) {
+        throw new Error("consoleOwnersOnly");
     }
 }
 
