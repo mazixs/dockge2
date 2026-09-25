@@ -85,8 +85,8 @@ const ATTENTION_REASONS = new Set([
     "missingInstance",
     "notStarted",
     // A failed or unreadable exit is reported as an issue, but a stack whose services are
-    // all gone stays EXITED: that is what the requirements ask for, and EXITED is not a
-    // calmer state than ATTENTION, it is the red one.
+    // all gone stays EXITED. The issues then tell a failure from a stop: isStackFailed
+    // in util-common reads them, and a failed stack is the red one, not a calm one.
 ]);
 
 /**

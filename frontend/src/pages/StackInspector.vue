@@ -335,8 +335,8 @@
                 </div>
             </div>
         </transition>
-        <BModal v-model="showDownDialog" :cancelTitle="$t('cancel')" :okTitle="$t('downStack')" @ok="run('downStack')">{{ $t("familiarDownWarning") }}</BModal>
-        <BModal v-model="showDeleteDialog" :cancelTitle="$t('cancel')" :okTitle="$t('deleteStack')" okVariant="danger" @ok="deleteStack">
+        <BModal v-model="showDownDialog" :title="$t('downStackTitle', [ stackName ])" :cancelTitle="$t('cancel')" :okTitle="$t('downStack')" @ok="run('downStack')">{{ $t("familiarDownWarning") }}</BModal>
+        <BModal v-model="showDeleteDialog" :title="$t('deleteStackTitle', [ stackName ])" :cancelTitle="$t('cancel')" :okTitle="$t('deleteStack')" okVariant="danger" @ok="deleteStack">
             {{ $t("familiarDeleteWarning") }}
         </BModal>
     </div>
@@ -359,7 +359,7 @@ import { VisibleTask } from "../visible-task";
 import { RequestTracker } from "../request-tracker";
 import { StackRun } from "../stack-run";
 import Uptime from "../components/Uptime.vue";
-import { ATTENTION, RUNNING, envsubstYAML } from "../../../common/util-common";
+import { ATTENTION, EXITED, RUNNING, envsubstYAML, instanceStateName, isStackFailed, seriousIssuesFirst } from "../../../common/util-common";
 import { describeServices, readDeclaredUrls } from "../stack-services";
 import { summariseRegistries } from "../../../common/image-source";
 import { formatDuration, formatPercent } from "../format";
@@ -635,6 +635,11 @@ export default {
          * @returns {import("../../../common/compose-status").StackStatusIssue | null} Первое замечание
          */
         firstIssue() {
+            // A stack someone stopped has nothing to fix: its services stopped, as asked
+            const status = this.globalStack?.status;
+            if (status === EXITED && !isStackFailed(status, this.issues)) {
+                return null;
+            }
             return this.issues[0] ?? null;
         },
 
@@ -649,7 +654,8 @@ export default {
                 return this.$t("statusAgeUnknown");
             }
 
-            return this.$t("statusAgeSeconds", [ this.statusAgeSeconds ]);
+            // "0 s ago" is a number where a word reads better
+            return this.statusAgeSeconds < 1 ? this.$t("justNow") : this.$t("statusAgeSeconds", [ this.statusAgeSeconds ]);
         },
 
         /** Окна, которые предлагает сервер: сутки, неделя, месяц */
@@ -762,10 +768,8 @@ export default {
         },
 
         issues() {
-            if (Array.isArray(this.serviceIssues) && this.serviceIssues.length > 0) {
-                return this.serviceIssues;
-            }
-            return this.globalStack?.issues ?? [];
+            const issues = Array.isArray(this.serviceIssues) && this.serviceIssues.length > 0 ? this.serviceIssues : this.globalStack?.issues ?? [];
+            return seriousIssuesFirst(issues);
         },
 
         /** Сервисы файла, дополненные тем, что о них знает Docker */
@@ -1455,6 +1459,10 @@ export default {
             }
 
             const labels = new Set(service.instances.map(instance => {
+                // A crash is named with its code: "exited" alone reads like a stop
+                if (instanceStateName(instance) === "failed") {
+                    return typeof instance.exitCode === "number" ? this.$t("instanceFailedCode", [ instance.exitCode ]) : this.$t("instanceFailed");
+                }
                 if (instance.health) {
                     return this.$t(instance.health);
                 }
@@ -1486,10 +1494,7 @@ export default {
                 return GONE_VERBS.includes(task.verb) ? "stopped" : "running";
             }
 
-            if (service.attention) {
-                return "attention";
-            }
-            return service.instances.length === 0 ? service.summaryState : service.running ? "running" : "stopped";
+            return service.state;
         },
 
         /**
@@ -1622,8 +1627,11 @@ export default {
 // вся ширина рабочей области
 .services {
     // Вбок едет только таблица: шапка с меню колонок стоит над этой областью
+    // overflow-x alone turns y into auto, and a one-row table grew a vertical bar;
+    // the row menu is fixed, so nothing needs to escape downwards
     .services-scroll {
         overflow-x: auto;
+        overflow-y: hidden;
     }
 
     // Таблица по содержимому, а не по ширине экрана

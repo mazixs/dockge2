@@ -238,8 +238,17 @@ a.item {
         outline-offset: calc(var(--focus-offset) * -1);
     }
 
+    // A project Dockge does not manage: quieter by colour, not by transparency,
+    // which took its name below a readable contrast
     &.dim {
-        opacity: 0.6;
+        color: var(--text-muted);
+
+        // Outlined: in the dark theme the sunken surface is the sidebar itself
+        .stack-letter {
+            background: var(--surface-sunken);
+            box-shadow: inset 0 0 0 1px var(--line-hair);
+            color: var(--text-muted);
+        }
     }
 
     // Только что созданный стек: подсветка отвечает на "где он в списке"

@@ -37,7 +37,7 @@ export async function readDockerRuntime() : Promise<ContainerRuntime[]> {
     }
     // Docker omits Health entirely when no health check is configured. The template
     // uses index because direct .State.Health fails before an if can inspect it.
-    const format = "{\"id\":{{json .Id}},\"name\":{{json .Name}},\"project\":{{json (index .Config.Labels \"com.docker.compose.project\")}},\"service\":{{json (index .Config.Labels \"com.docker.compose.service\")}},\"workingDir\":{{json (index .Config.Labels \"com.docker.compose.project.working_dir\")}},\"state\":{{json .State.Status}},\"health\":{{with (index .State \"Health\")}}{{json .Status}}{{else}}\"\"{{end}},\"startedAt\":{{json .State.StartedAt}},\"restartCount\":{{json .RestartCount}}}";
+    const format = "{\"id\":{{json .Id}},\"name\":{{json .Name}},\"project\":{{json (index .Config.Labels \"com.docker.compose.project\")}},\"service\":{{json (index .Config.Labels \"com.docker.compose.service\")}},\"workingDir\":{{json (index .Config.Labels \"com.docker.compose.project.working_dir\")}},\"state\":{{json .State.Status}},\"health\":{{with (index .State \"Health\")}}{{json .Status}}{{else}}\"\"{{end}},\"startedAt\":{{json .State.StartedAt}},\"restartCount\":{{json .RestartCount}},\"exitCode\":{{json .State.ExitCode}}}";
     const containers : ContainerRuntime[] = [];
     for (let start = 0; start < ids.length; start += 100) {
         const batch = ids.slice(start, start + 100);
@@ -115,6 +115,8 @@ function describeContainer(container : StoredContainer, own : readonly StatusCha
         health: context.stale ? "" : container.health,
         startedAt: container.startedAt,
         restartCount: context.stale ? null : container.restartCount,
+        // A snapshot written before exit codes were read has none: that is unknown, not 0
+        exitCode: context.stale ? null : container.exitCode ?? null,
         uptimeMs: context.stale ? null : containerUptime(container.state, container.startedAt, context.observedAt),
         availability,
         history: buildStabilityHistory(own, context.windowMs, context.now),

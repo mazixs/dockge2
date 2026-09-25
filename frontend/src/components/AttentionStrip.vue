@@ -18,18 +18,23 @@
 </template>
 
 <script>
-import { ATTENTION } from "../../../common/util-common";
+import { isStackFailed, seriousIssuesFirst, stackNeedsAttention } from "../../../common/util-common";
 
 /** Сколько стеков названо прямо в полосе: остальные - под "Еще N" */
 const SHOWN = 3;
 
 export default {
     computed: {
-        /** Стеки, требующие внимания: полоса существует только ради них */
+        /**
+         * Stacks that need attention, the strip exists only for them. The owner's own
+         * stacks come before foreign projects, and a crash before a degradation
+         */
         stacks() {
+            const rank = (stack) => (stack.isManagedByDockge ? 0 : 2) + (isStackFailed(stack.status, stack.issues) ? 0 : 1);
+
             return Object.values(this.$root.completeStackList)
-                .filter((stack) => stack.status === ATTENTION)
-                .sort((first, second) => first.name.localeCompare(second.name));
+                .filter((stack) => stackNeedsAttention(stack))
+                .sort((first, second) => rank(first) - rank(second) || first.name.localeCompare(second.name));
         },
 
         shown() {
@@ -46,12 +51,12 @@ export default {
     },
     methods: {
         /**
-         * Одна причина словами: из восьми называется та, из-за которой стек не в порядке
+         * One reason in words: the most serious one, a crash before a clean stop
          * @param {object} stack Стек из списка
          * @returns {string} Причина или пустая строка
          */
         reasonOf(stack) {
-            const issue = (stack.issues ?? [])[0];
+            const [ issue ] = seriousIssuesFirst(stack.issues ?? []);
 
             if (!issue) {
                 return "";

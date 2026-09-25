@@ -29,7 +29,7 @@ if (args[0] === "ps") {
 } else if (args[0] === "inspect") {
     const ids = args.filter((value) => /^[a-f0-9]{64}$/.test(value));
     if (fixture.incomplete) ids.pop();
-    process.stdout.write(ids.map((id) => JSON.stringify({ id, name: "/container-" + id, project: null, service: null, workingDir: null, state: "running", health: "", startedAt: "2026-09-09T10:00:00Z", restartCount: 0 })).join("\\n"));
+    process.stdout.write(ids.map((id) => JSON.stringify({ id, name: "/container-" + id, project: null, service: null, workingDir: null, state: "running", health: "", startedAt: "2026-09-09T10:00:00Z", restartCount: 0, exitCode: 0 })).join("\\n"));
 } else {
     process.stderr.write("Unexpected Docker mutation");
     process.exit(2);
@@ -56,6 +56,7 @@ test("runtime collection batches more than one hundred containers and includes s
         assert.equal(runtime.length, 105);
         assert.equal(runtime[0]?.project, "");
         assert.equal(runtime[0]?.restartCount, 0);
+        assert.equal(runtime[0]?.exitCode, 0);
         const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
         assert.deepEqual(calls.map((args) => args[0]), [ "ps", "inspect", "inspect" ]);
     });

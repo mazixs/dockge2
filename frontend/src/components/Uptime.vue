@@ -12,7 +12,7 @@
 
 <script>
 import StateChip from "./StateChip.vue";
-import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, statusStateName } from "../../../common/util-common";
+import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed, statusStateName } from "../../../common/util-common";
 
 export default {
     components: {
@@ -53,16 +53,22 @@ export default {
     computed: {
         /** Имя состояния системы: running, attention, stopped, failed, unknown */
         state() {
-            return statusStateName(this.stack?.status);
+            return statusStateName(this.stack?.status, this.stack?.issues);
         },
 
         statusName() {
+            const status = this.stack?.status;
+
+            // EXITED is both a stop and a crash: only the exit codes tell them apart
+            if (status === EXITED) {
+                return this.$t(isStackFailed(status, this.stack?.issues) ? "pagesFailed" : "pagesStopped");
+            }
+
             const labels = { [CREATED_FILE]: "pagesNotDeployed",
                 [CREATED_STACK]: "pagesStopped",
                 [RUNNING]: "pagesRunning",
-                [EXITED]: "pagesFailed",
                 [ATTENTION]: "pagesAttention" };
-            return this.$t(labels[this.stack?.status] || "pagesUnknown");
+            return this.$t(labels[status] || "pagesUnknown");
         },
 
         needsAttention() {

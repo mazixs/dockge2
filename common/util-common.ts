@@ -64,15 +64,39 @@ export const RUNNING = 3;
 export const EXITED = 4;
 export const ATTENTION = 5;
 
+/** Issue reasons meaning a container ended with an error rather than being stopped */
+export const FAILURE_REASONS : readonly string[] = [ "serviceFailed", "workerFailed" ];
+
 /**
- * Состояние стека как имя токена состояния, а не как вариант Bootstrap.
+ * Whether a stack with no running containers ended with an error.
  *
- * Синий в системе означает только интерактив, поэтому "работает" не может быть
- * `primary`: имена здесь совпадают с токенами `--state-*` из tokens.scss.
- * @param status Числовое состояние стека
- * @returns Имя состояния: running, attention, stopped, failed или unknown
+ * EXITED arrives both after the Stop button and after a crash: only the exit code, which
+ * compose-status turns into issues, tells them apart. Without issues (an older agent) the
+ * stack counts as failed, because nothing confirms a calm "stopped".
+ * @param status Numeric stack status
+ * @param issues Issues from the status summary, when known
+ * @returns True when the stack failed
  */
-export function statusStateName(status : number) : string {
+export function isStackFailed(status : number, issues? : readonly { reason : string }[] | null) : boolean {
+    if (status !== EXITED) {
+        return false;
+    }
+    if (!Array.isArray(issues)) {
+        return true;
+    }
+    return issues.some((issue) => FAILURE_REASONS.includes(issue.reason) || issue.reason === "unknownExitCode");
+}
+
+/**
+ * Stack state as the name of a state token, not a Bootstrap variant.
+ *
+ * Blue means only "interactive" here, so "running" cannot be `primary`: the names match
+ * the `--state-*` tokens in tokens.scss.
+ * @param status Numeric stack status
+ * @param issues Issues from the status summary: they split EXITED into failed and stopped
+ * @returns running, attention, stopped, failed or unknown
+ */
+export function statusStateName(status : number, issues? : readonly { reason : string }[] | null) : string {
     switch (status) {
         case CREATED_FILE:
         case CREATED_STACK:
@@ -80,12 +104,84 @@ export function statusStateName(status : number) : string {
         case RUNNING:
             return "running";
         case EXITED:
-            return "failed";
+            return isStackFailed(status, issues) ? "failed" : "stopped";
         case ATTENTION:
             return "attention";
         default:
             return "unknown";
     }
+}
+
+/**
+ * Issues ordered by how serious they are: a crash first, a clean stop last, so the one
+ * named first is the one to fix
+ * @param issues Issues from the status summary
+ * @returns A sorted copy
+ */
+export function seriousIssuesFirst<T extends { reason : string }>(issues : readonly T[]) : T[] {
+    const rank = (issue : T) => FAILURE_REASONS.includes(issue.reason) || issue.reason === "unknownExitCode" ? 0 : issue.reason === "serviceStopped" ? 2 : 1;
+    return [ ...issues ].sort((first, second) => rank(first) - rank(second));
+}
+
+/**
+ * Whether a stack needs the owner: degraded or failed. One rule for the attention strip,
+ * the list filter and the list order.
+ * @param stack Stack from the list
+ * @param stack.status Numeric stack status
+ * @param stack.issues Issues from the status summary
+ * @returns True when the stack belongs among the problems
+ */
+export function stackNeedsAttention(stack : { status : number, issues? : readonly { reason : string }[] | null }) : boolean {
+    return stack.status === ATTENTION || isStackFailed(stack.status, stack.issues);
+}
+
+/**
+ * State name of one container of a stack, from the issue compose-status found on it.
+ * A clean exit of a long-lived service is still an issue for the stack, but the
+ * container itself is stopped, not failed.
+ * @param instance Container with its Docker state and issue
+ * @param instance.state Docker state
+ * @param instance.issue Issue reason, if any
+ * @returns running, attention, stopped, failed or unknown
+ */
+export function instanceStateName(instance : { state? : string, issue? : string | null }) : string {
+    if (instance.issue && (FAILURE_REASONS.includes(instance.issue) || instance.issue === "unknownExitCode")) {
+        return "failed";
+    }
+    // Output that cannot be read is unknown, as in the service summary, not a problem
+    if (instance.issue === "unknownState") {
+        return "unknown";
+    }
+    if (instance.issue && instance.issue !== "serviceStopped") {
+        return "attention";
+    }
+    if (instance.state === "running") {
+        return "running";
+    }
+    return instance.state ? "stopped" : "unknown";
+}
+
+/**
+ * State name of a service from its containers. Replicas that disagree - one up, one
+ * down - are a degraded service, not a failed or a running one.
+ * @param instances Containers of the service with their Docker states and issues
+ * @returns running, attention, stopped, failed or unknown
+ */
+export function serviceStateName(instances : readonly { state? : string, issue? : string | null }[]) : string {
+    const states = new Set(instances.map((instance) => instanceStateName(instance)));
+
+    if (states.size === 0) {
+        return "unknown";
+    }
+    if (states.has("attention") || (states.has("running") && states.size > 1)) {
+        return "attention";
+    }
+    for (const state of [ "failed", "running", "stopped" ]) {
+        if (states.has(state)) {
+            return state;
+        }
+    }
+    return "unknown";
 }
 
 export const isDev = process.env.NODE_ENV === "development";

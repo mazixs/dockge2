@@ -124,7 +124,7 @@
 <script>
 // @ts-check
 import { canApplyGitChoices, diffLineRows } from "../git-ui";
-import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
+import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed } from "../../../common/util-common";
 
 /**
  * How long the acknowledgement of an apply is waited for.
@@ -183,12 +183,14 @@ export default {
             const labels = { [CREATED_FILE]: "pagesNotDeployed",
                 [CREATED_STACK]: "pagesStopped",
                 [RUNNING]: "pagesRunning",
-                [EXITED]: "pagesFailed",
                 [ATTENTION]: "pagesAttention" };
             const status = this.currentStack?.status;
 
             if (this.$root.agentStatusList[this.endpoint] !== "online" || status === undefined) {
                 return "pagesUnknown";
+            }
+            if (status === EXITED) {
+                return isStackFailed(status, this.currentStack?.issues) ? "pagesFailed" : "pagesStopped";
             }
             return labels[status] || "pagesUnknown";
         },

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { buildStabilityHistory, containerUptime, normaliseContainerRuntime, runtimeStatus } from "../../common/stability";
+import { buildStabilityHistory, containerStateName, containerUptime, normaliseContainerRuntime, runtimeStatus } from "../../common/stability";
 import { ATTENTION, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 
 const NOW = 1_700_000_000_000;
@@ -24,16 +24,21 @@ test("normalisation retains only safe runtime fields and valid Docker timestamps
         health: "healthy",
         startedAt: new Date(NOW - HOUR).toISOString(),
         restartCount: 3,
+        exitCode: 0,
         env: [ "PASSWORD=secret" ] });
     assert.equal(result?.name, "demo-web-1");
     assert.equal(result?.startedAt, NOW - HOUR);
     assert.equal(result?.restartCount, 3);
+    assert.equal(result?.exitCode, 0);
     assert.equal(JSON.stringify(result).includes("secret"), false);
     assert.equal(normaliseContainerRuntime({ id: "invalid" }), null);
     assert.equal(normaliseContainerRuntime({ id: "a".repeat(64),
         name: "demo",
         startedAt: "0001-01-01T00:00:00Z",
         restartCount: -1 })?.startedAt, null);
+    assert.equal(normaliseContainerRuntime({ id: "a".repeat(64),
+        name: "demo",
+        exitCode: "1" })?.exitCode, null);
 });
 
 test("unhealthy and unknown runtime never become running", () => {
@@ -41,6 +46,33 @@ test("unhealthy and unknown runtime never become running", () => {
     assert.equal(runtimeStatus("running", "unhealthy"), ATTENTION);
     assert.equal(runtimeStatus("restarting", ""), ATTENTION);
     assert.equal(runtimeStatus("", ""), UNKNOWN);
+});
+
+test("an exited container is failed unless it exited with 0", () => {
+    assert.equal(containerStateName({ state: "exited",
+        health: "",
+        exitCode: 1 }), "failed");
+    assert.equal(containerStateName({ state: "exited",
+        health: "",
+        exitCode: 0 }), "stopped");
+    // No code is not a clean exit: the stack counts it as a failure too
+    assert.equal(containerStateName({ state: "exited",
+        health: "",
+        exitCode: null }), "failed");
+    assert.equal(containerStateName({ state: "exited",
+        health: "" }), "failed");
+    assert.equal(containerStateName({ state: "created",
+        health: "",
+        exitCode: 0 }), "stopped");
+    assert.equal(containerStateName({ state: "running",
+        health: "unhealthy",
+        exitCode: 0 }), "attention");
+    assert.equal(containerStateName({ state: "running",
+        health: "",
+        exitCode: 0 }), "running");
+    assert.equal(containerStateName({ state: "",
+        health: "",
+        exitCode: null }), "unknown");
 });
 
 test("history shows observation gaps separately from running and attention", () => {

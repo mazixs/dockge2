@@ -20,6 +20,11 @@ import {
     parseDockerPort,
     sleep,
     ATTENTION,
+    instanceStateName,
+    isStackFailed,
+    seriousIssuesFirst,
+    serviceStateName,
+    stackNeedsAttention,
     statusStateName,
 } from "../../common/util-common";
 
@@ -34,6 +39,63 @@ test("the stack status maps to one state name of the system", () => {
         statusStateName(ATTENTION),
         statusStateName(99),
     ], [ "unknown", "stopped", "stopped", "running", "failed", "attention", "unknown" ]);
+});
+
+test("an exited stack is failed only when a container ended with an error", () => {
+    const failed = [{ reason: "serviceStopped" }, { reason: "serviceFailed" }];
+    const stopped = [{ reason: "serviceStopped" }];
+
+    assert.equal(statusStateName(EXITED, failed), "failed");
+    assert.equal(statusStateName(EXITED, [{ reason: "workerFailed" }]), "failed");
+    // An exit nobody could read is not taken for a calm stop
+    assert.equal(statusStateName(EXITED, [{ reason: "unknownExitCode" }]), "failed");
+    assert.equal(statusStateName(EXITED, stopped), "stopped");
+    // A job that finished cleanly leaves no issue at all
+    assert.equal(statusStateName(EXITED, []), "stopped");
+    // An older agent sends no issues, and nothing then confirms a stop
+    assert.equal(isStackFailed(EXITED, undefined), true);
+    assert.equal(isStackFailed(RUNNING, failed), false);
+
+    assert.equal(stackNeedsAttention({ status: EXITED,
+        issues: failed }), true);
+    assert.equal(stackNeedsAttention({ status: ATTENTION,
+        issues: stopped }), true);
+    assert.equal(stackNeedsAttention({ status: EXITED,
+        issues: stopped }), false);
+    assert.equal(stackNeedsAttention({ status: RUNNING,
+        issues: [] }), false);
+});
+
+test("the issue named first is the one to fix", () => {
+    const issues = [{ reason: "serviceStopped" }, { reason: "unhealthy" }, { reason: "serviceFailed" }];
+    assert.deepEqual(seriousIssuesFirst(issues).map((issue) => issue.reason), [ "serviceFailed", "unhealthy", "serviceStopped" ]);
+    // The list of the caller stays as it was
+    assert.equal(issues[0]?.reason, "serviceStopped");
+});
+
+test("a container and a service are named by what happened to them", () => {
+    assert.equal(instanceStateName({ state: "exited",
+        issue: "serviceFailed" }), "failed");
+    assert.equal(instanceStateName({ state: "exited",
+        issue: "serviceStopped" }), "stopped");
+    assert.equal(instanceStateName({ state: "running",
+        issue: "unhealthy" }), "attention");
+    assert.equal(instanceStateName({ state: "",
+        issue: "unknownState" }), "unknown");
+    assert.equal(instanceStateName({ state: "running" }), "running");
+    assert.equal(instanceStateName({ state: "exited" }), "stopped");
+    assert.equal(instanceStateName({}), "unknown");
+
+    assert.equal(serviceStateName([]), "unknown");
+    assert.equal(serviceStateName([{ state: "exited",
+        issue: "serviceFailed" }, { state: "exited",
+        issue: "serviceStopped" }]), "failed");
+    // One replica up and one down is a degraded service, not a failed or a running one
+    assert.equal(serviceStateName([{ state: "running" }, { state: "exited",
+        issue: "serviceFailed" }]), "attention");
+    assert.equal(serviceStateName([{ state: "running" }, { state: "running" }]), "running");
+    assert.equal(serviceStateName([{ state: "exited",
+        issue: "serviceStopped" }]), "stopped");
 });
 
 test("common naming and hashing helpers are deterministic", () => {

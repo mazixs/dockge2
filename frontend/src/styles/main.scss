@@ -120,6 +120,13 @@ html {
     scrollbar-color: var(--line-control) transparent;
 }
 
+// Once scrollbar-color is set, Chrome draws the standard bar and ignores the webkit
+// rules below; a thin one has no arrow buttons, and it is not inherited. The page
+// itself keeps the full bar: it is the one grabbed with a mouse
+body * {
+    scrollbar-width: thin;
+}
+
 ::-webkit-scrollbar {
     width: 10px;
 }

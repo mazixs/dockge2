@@ -137,8 +137,7 @@ import { defineComponent, markRaw } from "vue";
 import { VisibleTask } from "../visible-task";
 import { stabilityPage } from "../stability-pages";
 import { formatDuration, formatPercent } from "../format";
-import { STABILITY_WINDOWS, STABILITY_STALE_MS, runtimeStatus, type StabilityOverview, type StabilityContainer, type StabilityHistoryBucket, type StabilityState, type StabilityWindow } from "../../../common/stability";
-import { ATTENTION, CREATED_STACK, EXITED, RUNNING } from "../../../common/util-common";
+import { STABILITY_WINDOWS, STABILITY_STALE_MS, containerStateName, type StabilityOverview, type StabilityContainer, type StabilityHistoryBucket, type StabilityState, type StabilityWindow } from "../../../common/stability";
 import AttentionStrip from "./AttentionStrip.vue";
 import StateChip from "./StateChip.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
@@ -226,7 +225,9 @@ export default defineComponent({
             for (const host of this.hosts) {
                 for (const stack of host.overview?.stacks ?? []) {
                     for (const container of stack.containers) {
-                        counts[this.containerState(container, host)] += 1;
+                        // A crash is counted where the link leads to it: among the stacks that need attention
+                        const state = this.containerState(container, host);
+                        counts[state === "failed" ? "attention" : state] += 1;
                     }
                 }
             }
@@ -334,12 +335,8 @@ export default defineComponent({
             }
             return this.$t(host.overview?.error === "noObservation" ? "stabilityNoObservation" : "stabilityStale");
         },
-        containerState(container : StabilityContainer, host : HostView) : StabilityState {
-            if (this.hostIsStale(host)) {
-                return "unknown";
-            }
-            const status = runtimeStatus(container.state, container.health);
-            return status === RUNNING ? "running" : status === ATTENTION ? "attention" : [ EXITED, CREATED_STACK ].includes(status) ? "stopped" : "unknown";
+        containerState(container : StabilityContainer, host : HostView) : StabilityState | "failed" {
+            return this.hostIsStale(host) ? "unknown" : containerStateName(container);
         },
         healthLabel(container : StabilityContainer, host : HostView) : string {
             if (this.hostIsStale(host)) {
@@ -347,6 +344,10 @@ export default defineComponent({
             }
             if ([ "healthy", "unhealthy", "starting" ].includes(container.health)) {
                 return this.$t(`stabilityHealth_${container.health}`);
+            }
+            if (container.state === "exited" && container.exitCode !== 0) {
+                // An older agent sends no exit code at all: that is unknown, not "undefined"
+                return typeof container.exitCode === "number" ? this.$t("stabilityExitCode", [ container.exitCode ]) : this.$t("stabilityExitCodeUnknown");
             }
             if ([ "restarting", "paused", "dead", "removing", "created", "exited" ].includes(container.state)) {
                 return this.$t(`stabilityDocker_${container.state}`);

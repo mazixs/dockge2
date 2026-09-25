@@ -82,11 +82,33 @@
                     <span class="count">{{ agent.stacks.length }}</span>
                 </button>
 
-                <StackListItem
-                    v-for="item in agent.stacks"
-                    v-show="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)" :key="item.name" :stack="item" :isSelectMode="selectMode"
-                    :isSelected="isSelected" :select="select" :deselect="deselect"
-                />
+                <template v-if="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)">
+                    <StackListItem
+                        v-for="item in agent.managed" :key="item.name" :stack="item" :isSelectMode="selectMode"
+                        :isSelected="isSelected" :select="select" :deselect="deselect"
+                    />
+
+                    <!-- Compose projects started past the panel: listed, since they run on
+                         the machine, but folded away so they do not bury the owner's stacks -->
+                    <template v-if="agent.foreign.length > 0">
+                        <button
+                            class="foreign-toggle" type="button"
+                            :aria-expanded="String(isForeignOpen(agent))"
+                            :title="$t('otherProjectsHint')"
+                            @click="toggleForeign(agent.endpoint)"
+                        >
+                            <font-awesome-icon icon="chevron-down" class="chevron" />
+                            <span>{{ $t("otherProjects") }}</span>
+                            <span class="count">{{ agent.foreign.length }}</span>
+                        </button>
+                        <template v-if="isForeignOpen(agent)">
+                            <StackListItem
+                                v-for="item in agent.foreign" :key="item.name" :stack="item" :isSelectMode="selectMode"
+                                :isSelected="isSelected" :select="select" :deselect="deselect"
+                            />
+                        </template>
+                    </template>
+                </template>
             </div>
         </div>
     </div>
@@ -100,7 +122,7 @@
 import Confirm from "../components/Confirm.vue";
 import EmptyState from "../components/EmptyState.vue";
 import StackListItem from "../components/StackListItem.vue";
-import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../../common/util-common";
+import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, UNKNOWN, isStackFailed, stackNeedsAttention } from "../../../common/util-common";
 
 export default {
     components: {
@@ -125,6 +147,8 @@ export default {
              *  поэтому счетчик в шапке может привести сразу к нужному срезу */
             activeFilter: this.$route.query.filter ?? "",
             closedAgents: new Map(),
+            /** Servers whose foreign projects the user unfolded; folded by default */
+            openForeign: new Set(),
         };
     },
     computed: {
@@ -146,28 +170,28 @@ export default {
                     return 1;
                 }
 
-                // Sort by status, alert first: a stack that needs attention is the one
+                // Sort by status, alert first: a crashed or degraded stack is the one
                 // the user came to look at, so it goes above the healthy ones
-                if (m1.status !== m2.status) {
-                    const rank = (status) => {
-                        switch (status) {
-                            case ATTENTION:
-                                return 0;
-                            case RUNNING:
-                                return 1;
-                            case EXITED:
-                                return 2;
-                            case CREATED_STACK:
-                                return 3;
-                            case CREATED_FILE:
-                                return 4;
-                            default:
-                                // UNKNOWN and anything unexpected go last
-                                return 5;
-                        }
-                    };
+                const rank = (stack) => {
+                    switch (stack.status) {
+                        case EXITED:
+                            return isStackFailed(stack.status, stack.issues) ? 0 : 3;
+                        case ATTENTION:
+                            return 1;
+                        case RUNNING:
+                            return 2;
+                        case CREATED_STACK:
+                            return 4;
+                        case CREATED_FILE:
+                            return 5;
+                        default:
+                            // UNKNOWN and anything unexpected go last
+                            return 6;
+                    }
+                };
 
-                    return rank(m1.status) - rank(m2.status);
+                if (rank(m1) !== rank(m2)) {
+                    return rank(m1) - rank(m2);
                 }
                 return m1.name.localeCompare(m2.name);
             });
@@ -185,7 +209,9 @@ export default {
                 }, new Map()).entries()
             ].map(([ endpoint, stacks ]) => ({
                 endpoint,
-                stacks
+                stacks,
+                managed: stacks.filter((stack) => stack.isManagedByDockge),
+                foreign: stacks.filter((stack) => !stack.isManagedByDockge),
             })).sort((a, b) => {
                 if (a.endpoint === "current" && b.endpoint !== "current") {
                     return -1;
@@ -246,10 +272,10 @@ export default {
                     count: all.filter((stack) => stack.status === RUNNING).length },
                 { key: "attention",
                     label: this.$t("filterAttention"),
-                    count: all.filter((stack) => stack.status === ATTENTION).length },
+                    count: all.filter((stack) => stackNeedsAttention(stack)).length },
                 { key: "stopped",
                     label: this.$t("filterStopped"),
-                    count: all.filter((stack) => stack.status === EXITED || stack.status === CREATED_FILE || stack.status === CREATED_STACK).length },
+                    count: all.filter((stack) => this.isStopped(stack)).length },
                 { key: "unknown",
                     label: this.$t("filterUnknown"),
                     count: all.filter((stack) => stack.status === UNKNOWN).length },
@@ -308,6 +334,48 @@ export default {
         },
 
         /**
+         * Whether the foreign projects of a server are shown. A search, a filter or an
+         * open foreign stack unfolds them: the user asked for exactly these rows
+         * @param {object} agent Server group of the list
+         * @returns {boolean} Whether the group is unfolded
+         */
+        isForeignOpen(agent) {
+            if (this.openForeign.has(agent.endpoint) || this.isNarrowed) {
+                return true;
+            }
+            const current = this.$route.params.stackName;
+            return !!current && agent.foreign.some((stack) => stack.name === current && (stack.endpoint || "") === (this.$route.params.endpoint ?? ""));
+        },
+
+        /**
+         * Fold or unfold the foreign projects of a server
+         * @param {string} endpoint Server of the group
+         * @returns {void}
+         */
+        toggleForeign(endpoint) {
+            const agent = this.agentStackList.find((item) => item.endpoint === endpoint);
+            if (agent && this.isForeignOpen(agent) && !this.openForeign.has(endpoint)) {
+                // Unfolded by a search or an open stack: the click keeps it open for good
+                this.openForeign.add(endpoint);
+                return;
+            }
+            if (this.openForeign.has(endpoint)) {
+                this.openForeign.delete(endpoint);
+            } else {
+                this.openForeign.add(endpoint);
+            }
+        },
+
+        /**
+         * Stopped by someone rather than crashed: a crash belongs under attention
+         * @param {object} stack Stack from the list
+         * @returns {boolean} Whether the stack is quietly stopped
+         */
+        isStopped(stack) {
+            return (stack.status === EXITED && !isStackFailed(stack.status, stack.issues)) || stack.status === CREATED_FILE || stack.status === CREATED_STACK;
+        },
+
+        /**
          * Совпадает ли стек с нажатым фильтром
          * @param {object} stack Стек из списка
          * @returns {boolean} Показывать ли строку
@@ -317,9 +385,9 @@ export default {
                 case "running":
                     return stack.status === RUNNING;
                 case "attention":
-                    return stack.status === ATTENTION;
+                    return stackNeedsAttention(stack);
                 case "stopped":
-                    return stack.status === EXITED || stack.status === CREATED_FILE || stack.status === CREATED_STACK;
+                    return this.isStopped(stack);
                 case "unknown":
                     return stack.status === UNKNOWN;
                 case "updates":
@@ -452,9 +520,19 @@ export default {
     50% { opacity: 0.45; }
 }
 .filter .count { margin-left: auto; }
-.stack-list { overflow-y: auto; height: auto !important; }
+.stack-list { overflow-y: auto; overflow-x: hidden; height: auto !important; }
 .agent-select { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); background: none; border: 0; color: var(--text-faint); font-size: var(--text-sm); }
 .agent-select .count { margin-left: auto; }
+.foreign-toggle { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); margin-top: var(--gap-sm); padding: 0 var(--gap-sm); background: none; border: 0; border-top: 1px solid var(--line-hair); color: var(--text-muted); font-size: var(--text-sm); text-align: start; }
+.foreign-toggle:hover { color: var(--text-strong); }
+.foreign-toggle:focus-visible { outline: var(--focus-ring); outline-offset: calc(var(--focus-offset) * -1); }
+.foreign-toggle .count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.foreign-toggle .chevron { font-size: var(--icon-sm); transition: transform var(--motion-fast) var(--motion-ease); }
+.foreign-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
+[dir="rtl"] .foreign-toggle[aria-expanded="false"] .chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+    .foreign-toggle .chevron { transition: none; }
+}
 @media (max-width: 800px) {
     .search-icon { width: 44px; }
     .search-input { padding-left: 44px; }

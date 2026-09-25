@@ -9,7 +9,7 @@
                     <span>{{ imageName }}:</span><span class="tag">{{ imageTag }}</span>
                 </div>
                 <div v-if="!isEditMode" class="service-state">
-                    <StateChip :state="serviceState" :label="statusLabel" :attention="needsAttention" />
+                    <StateChip :state="serviceState" :label="statusLabel" :attention="serviceState === 'attention'" />
 
                     <a v-for="port in (envsubstService.ports ?? [])" :key="port" class="port-link" :href="parsePort(port).url" target="_blank">
                         <span class="port-chip">{{ parsePort(port).display }}</span>
@@ -18,7 +18,7 @@
                     <ul v-if="instances.length > 0" class="instance-list">
                         <li v-for="instance in instances" :key="instance.name">
                             <span class="instance-name">{{ instance.name || $t("unknown") }}</span>
-                            <StateChip :state="instanceState(instance)" :label="instanceLabel(instance)" :attention="!!instance.issue" />
+                            <StateChip :state="instanceState(instance)" :label="instanceLabel(instance)" :attention="instanceState(instance) === 'attention'" />
                             <span v-if="instance.issue" class="issue">{{ instanceIssueText(instance) }}</span>
                         </li>
                     </ul>
@@ -146,7 +146,7 @@
 <script>
 import { defineComponent } from "vue";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
-import { parseDockerPort } from "../../../common/util-common";
+import { instanceStateName, parseDockerPort, serviceStateName } from "../../../common/util-common";
 import DockerStat from "./DockerStat.vue";
 import StateChip from "./StateChip.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
@@ -223,13 +223,8 @@ export default defineComponent({
          * @returns {string} Имя состояния для чипа
          */
         serviceState() {
-            if (this.needsAttention) {
-                return "attention";
-            }
-            if (this.hasRunningInstance) {
-                return "running";
-            }
-            return "stopped";
+            // No container means nothing is known, and the label already says "unknown"
+            return serviceStateName(this.instances);
         },
 
         terminalRouteLink() {
@@ -336,13 +331,6 @@ export default defineComponent({
         },
 
         /**
-         * Whether at least one instance needs attention, which never means "inactive"
-         */
-        needsAttention() {
-            return this.instances.some(instance => !!instance.issue);
-        },
-
-        /**
          * Service level label: the instance state when they agree, otherwise a mixed marker
          */
         statusLabel() {
@@ -369,6 +357,10 @@ export default defineComponent({
          * @returns {string} Label
          */
         instanceLabel(instance) {
+            // A crash is named with its code: "exited" alone reads like a stop
+            if (instanceStateName(instance) === "failed") {
+                return typeof instance.exitCode === "number" ? this.$t("instanceFailedCode", [ instance.exitCode ]) : this.$t("instanceFailed");
+            }
             if (instance.health) {
                 return this.$t(instance.health);
             }
@@ -384,13 +376,7 @@ export default defineComponent({
          * @returns {string} Имя состояния для чипа
          */
         instanceState(instance) {
-            if (instance.issue) {
-                return "attention";
-            }
-            if (instance.state === "running") {
-                return "running";
-            }
-            return "stopped";
+            return instanceStateName(instance);
         },
 
         /**

@@ -23,7 +23,7 @@
             <!-- Переключатель сети по контракту системы: button с role="switch",
                  подпись слева, вид сети справа. Чекбокс Bootstrap не давал ни
                  состояния для чтения с экрана, ни цели нажатия нужного размера -->
-            <div v-for="networkName in externalNetworkList" :key="networkName" class="network-row">
+            <div v-for="networkName in ownExternal" :key="networkName" class="network-row">
                 <span class="network-name">{{ networkName }}</span>
                 <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
                 <button
@@ -35,17 +35,41 @@
                     <span class="knob" aria-hidden="true"></span>
                 </button>
             </div>
+
+            <!-- The rest of the machine's networks: offered, but folded when there are
+                 many, so the networks of this file are not lost among other stacks' ones -->
+            <details v-if="otherExternal.length > 0" class="other-networks" :open="otherExternal.length <= OTHER_SHOWN">
+                <summary>{{ $t("otherNetworks", [ otherExternal.length ]) }}</summary>
+                <div v-for="networkName in otherExternal" :key="networkName" class="network-row">
+                    <span class="network-name">{{ networkName }}</span>
+                    <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
+                    <button
+                        class="switch" type="button" role="switch"
+                        :aria-checked="String(!!selectedExternalList[networkName])"
+                        :aria-label="networkName"
+                        @click="toggleExternal(networkName)"
+                    >
+                        <span class="knob" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </details>
         </fieldset>
     </div>
 </template>
 <script>
+/** How many other networks are listed unfolded */
+const OTHER_SHOWN = 3;
+
 export default {
     data() {
         return {
+            OTHER_SHOWN,
             networkList: [],
             externalList: {},
             selectedExternalList: {},
             externalNetworkList: [],
+            /** External networks the file declared when it was read: they stay on top while toggled */
+            declaredExternal: [],
             /** True while the editor is filled from the compose file */
             loading: true,
             /** True when the last change of the model came from this component */
@@ -67,6 +91,14 @@ export default {
 
         endpoint() {
             return this.$parent.$parent.endpoint;
+        },
+
+        ownExternal() {
+            return this.externalNetworkList.filter((name) => this.declaredExternal.includes(name));
+        },
+
+        otherExternal() {
+            return this.externalNetworkList.filter((name) => !this.declaredExternal.includes(name));
         },
     },
     watch: {
@@ -137,6 +169,8 @@ export default {
                     this.networkList.push(obj);
                 }
             }
+
+            this.declaredExternal = Object.keys(this.externalList);
 
             // Restore selectedExternalList
             this.selectedExternalList = {};
@@ -237,6 +271,23 @@ legend {
     float: none;
     width: auto;
     padding: 0;
+}
+
+.other-networks {
+    margin-top: var(--gap-sm);
+}
+
+// The summary keeps its marker: it is the only sign that more is folded here
+.other-networks summary {
+    padding: var(--gap-xs) 0;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+
+.other-networks summary:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
 }
 
 .add-value {

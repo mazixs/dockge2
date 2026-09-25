@@ -17,6 +17,8 @@ export interface ContainerRuntime {
     health : string;
     startedAt : number | null;
     restartCount : number | null;
+    /** Exit code of the last run; meaningful only for an exited container */
+    exitCode : number | null;
 }
 
 export interface StabilityHistoryBucket {
@@ -68,6 +70,7 @@ export function normaliseContainerRuntime(value : unknown) : ContainerRuntime | 
         health: text("health").toLowerCase(),
         startedAt: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null,
         restartCount: typeof row.restartCount === "number" && Number.isInteger(row.restartCount) && row.restartCount >= 0 ? row.restartCount : null,
+        exitCode: typeof row.exitCode === "number" && Number.isInteger(row.exitCode) ? row.exitCode : null,
     };
 }
 
@@ -83,6 +86,29 @@ export function runtimeStatus(state : string, health : string) : number {
         return CREATED_STACK;
     }
     return state === "exited" ? EXITED : UNKNOWN;
+}
+
+/**
+ * State of one container for the dashboard chip. An exited container failed unless it
+ * exited with 0; a code nobody reported counts as a failure, as it does for a stack.
+ * @param container Docker state, health and exit code
+ * @param container.state Docker state
+ * @param container.health Docker health status
+ * @param container.exitCode Exit code of the last run
+ * @returns The stability state, or failed
+ */
+export function containerStateName(container : { state : string, health : string, exitCode? : number | null }) : StabilityState | "failed" {
+    const status = runtimeStatus(container.state, container.health);
+    if (status === RUNNING) {
+        return "running";
+    }
+    if (status === ATTENTION) {
+        return "attention";
+    }
+    if (status === EXITED) {
+        return container.exitCode === 0 ? "stopped" : "failed";
+    }
+    return status === CREATED_STACK ? "stopped" : "unknown";
 }
 
 /** Time since Docker StartedAt as of the last successful sample, not application uptime. */

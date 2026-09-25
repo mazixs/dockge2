@@ -67,9 +67,14 @@ const stacks = Object.fromEntries(names.map((name, index) => [ `${name}_`, {
     // которое требует внимания, - иначе ни чип, ни полоса внимания над обзором
     // ни на одном снимке не видны
     status: index === 4 ? CREATED_STACK : index === 2 ? EXITED : index === 1 ? ATTENTION : RUNNING,
+    // Only the exit code tells a stopped stack from a crashed one: without the
+    // "service failed" reason uptime-kuma would read as stopped by hand
     issues: index === 1 ? [{ service: "web",
         reason: "unhealthy",
-        detail: "" }] : [],
+        detail: "" }] : index === 2 ? [{ service: "db",
+        name: "uptime-kuma-db",
+        reason: "serviceFailed",
+        detail: "1" }] : [],
     dir: `/opt/stacks/${name}`,
     // Стек из Git, который ни разу не сверяли, - отдельное состояние: ноль
     // коммитов отставания здесь означает, что origin никто не спрашивал
@@ -82,6 +87,16 @@ const stacks = Object.fromEntries(names.map((name, index) => [ `${name}_`, {
     services: [ "web", "broker", "db" ].map((service, serviceIndex) => ({ name: service,
         state: index === 4 ? "stopped" : index === 2 ? "failed" : index === 1 && serviceIndex === 0 ? "attention" : "running" })),
 }]));
+// A compose project started outside Dockge: the list folds it under its own heading
+stacks.watchtower_ = { ...stacks.paperless_!,
+    name: "watchtower",
+    isManagedByDockge: false,
+    status: RUNNING,
+    issues: [],
+    dir: "",
+    source: { kind: "local" },
+    services: [{ name: "watchtower",
+        state: "running" }] };
 const preview = { id: "visual-preview",
     branch: "main",
     currentCommit: source.commit,
@@ -413,7 +428,7 @@ const mcpOverview = { peers: [],
 
 // Общий обзор: те же поля, что отдает сервер после наблюдений. Сцена держит
 // по контейнеру на каждое состояние, чтобы на экране были видны и зеленая
-// строка, и деградация, и остановленный, и пропуск в наблюдениях
+// строка, и деградация, и упавший, и остановленный, и пропуск в наблюдениях
 const HOUR_MS = 3_600_000;
 
 /**
@@ -448,6 +463,7 @@ function stabilityContainer(shape : Record<string, unknown>) : object {
         health: shape.health ?? "",
         startedAt: shape.startedAt ?? null,
         restartCount: shape.restartCount ?? 0,
+        exitCode: shape.exitCode ?? 0,
         uptimeMs: shape.uptimeMs ?? null,
         availability: shape.availability,
         history: shape.history };
@@ -509,6 +525,19 @@ const stabilityOverview = { observedAt: Date.now() - 20_000,
                     currentForMs: 4 * 60_000,
                     currentStatus: EXITED },
                 history: historyBuckets([ 9, 10, 18 ], "attention") }),
+            // Crashed rather than stopped: the exit code is not zero
+            stabilityContainer({ name: "uptime-kuma-db",
+                service: "db",
+                state: "exited",
+                exitCode: 1,
+                availability: { verdict: "degraded",
+                    ratio: 0.708,
+                    incidents: 1,
+                    coveredMs: 24 * HOUR_MS,
+                    windowMs: 24 * HOUR_MS,
+                    currentForMs: 7 * HOUR_MS,
+                    currentStatus: EXITED },
+                history: historyBuckets([ 17, 18, 19, 20, 21, 22, 23 ], "stopped") }),
         ] }, { name: "jellyfin",
         managed: true,
         standalone: false,
@@ -749,7 +778,9 @@ const scene = createApp({
                     // Имя контейнера настоящее: по нему строка сервиса находит
                     // свой шаг в выводе compose
                     serviceStatusList: Object.fromEntries([ "web", "broker", "db" ].map(service => [ service, [{ name: `${name}-${service}`,
-                        state: stack?.status === RUNNING ? "running" : "exited" }]])) };
+                        state: stack?.status === RUNNING ? "running" : "exited",
+                        ...(stack?.issues?.some((issue) => issue.service === service && issue.reason === "serviceFailed") ? { issue: "serviceFailed",
+                            exitCode: 1 } : {}) }]])) };
             } else if (event === "stabilityOverview") {
                 return { ok: true,
                     overview: { ...stabilityOverview,

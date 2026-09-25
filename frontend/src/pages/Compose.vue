@@ -37,7 +37,7 @@
                     <!-- General -->
                     <section v-if="isAdd" class="panel">
                         <div class="panel-bar">
-                            <h2 class="panel-title"><InterfaceIcon name="sliders" />{{ $t("general") }}</h2>
+                            <h2 class="panel-title"><InterfaceIcon name="sliders" />{{ $t("stackNameAndServer") }}</h2>
                         </div>
                         <div class="panel-body fields">
                             <!-- Stack Name -->
@@ -461,6 +461,11 @@ export default {
             /** @type {import("../../../common/util-common").LooseObject} */
             dockerStats: {},
             isEditMode: false,
+            /**
+             * What the editor held when editing began: leaving is asked about only past it
+             * @type {{ name : string, yaml : string, env : string } | null}
+             */
+            editBaseline: null,
             // Значения .env показываются только по просьбе: см. панель env в шаблоне
             envRevealed: false,
             submitted: false,
@@ -821,6 +826,11 @@ export default {
             };
 
             this.yamlCodeChange();
+            // The blank template is the start: a text handed over from a conversion is
+            // already the user's work, and leaving would lose it
+            this.editBaseline = { name: "",
+                yaml: template,
+                env: envDefault };
 
         } else {
             this.stack.name = this.embedded ? this.stackName : String(this.$route.params.stackName ?? "");
@@ -986,7 +996,7 @@ export default {
          * @returns {void}
          */
         exitConfirm(next) {
-            if (this.isEditMode) {
+            if (this.hasUnsavedEdits()) {
                 if (confirm(this.$t("confirmLeaveStack"))) {
                     this.exitAction();
                     next();
@@ -997,6 +1007,28 @@ export default {
                 this.exitAction();
                 next();
             }
+        },
+
+        /**
+         * Remember what the editor holds, so leaving without a change asks nothing
+         * @returns {void}
+         */
+        rememberEditBaseline() {
+            this.editBaseline = { name: this.stack.name ?? "",
+                yaml: this.stack.composeYAML ?? "",
+                env: this.stack.composeENV ?? "" };
+        },
+
+        /**
+         * Whether leaving would lose something the user typed
+         * @returns {boolean} True when the editor differs from what editing began with
+         */
+        hasUnsavedEdits() {
+            if (!this.isEditMode) {
+                return false;
+            }
+            const baseline = this.editBaseline;
+            return !baseline || baseline.name !== (this.stack.name ?? "") || baseline.yaml !== (this.stack.composeYAML ?? "") || baseline.env !== (this.stack.composeENV ?? "");
         },
 
         exitAction() {
@@ -1055,6 +1087,10 @@ export default {
                     this.fileBaseline = res.stack.fileHashes ?? null;
                     this.readIssues = res.stack.readIssues ?? [];
                     this.yamlCodeChange();
+                    // Reloaded over a conflict while editing: the server version is the new start
+                    if (this.isEditMode) {
+                        this.rememberEditBaseline();
+                    }
 
                     // What the file on disk had is the reference for the networks rule
                     this.sourceHadNetworks = this.composeAnalysis?.hasNetworksKey ?? false;
@@ -1344,6 +1380,7 @@ export default {
         enableEditMode() {
             this.isEditMode = true;
             this.envRevealed = true;
+            this.rememberEditBaseline();
         },
 
         checkYAML() {

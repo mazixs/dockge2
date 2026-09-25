@@ -1,4 +1,4 @@
-import { parseDockerPort } from "../../common/util-common";
+import { parseDockerPort, serviceStateName } from "../../common/util-common";
 
 /** A published port of a service, as the inspector shows it */
 export interface ServicePort {
@@ -15,6 +15,7 @@ export interface ServiceInstance {
     health? : string;
     statusText? : string;
     issue? : string | null;
+    exitCode? : number | null;
 }
 
 /** What the stack list knows about a service without reading the compose file */
@@ -34,7 +35,8 @@ export interface InspectedService {
     summaryState : string;
     instances : ServiceInstance[];
     running : boolean;
-    attention : boolean;
+    /** State of the containers: running, attention, stopped, failed or unknown */
+    state : string;
 }
 
 /**
@@ -126,7 +128,7 @@ export function describeServices(
             summaryState: known?.state ?? "unknown",
             instances,
             running: instances.some((instance) => instance.state === "running"),
-            attention: instances.some((instance) => !!instance.issue),
+            state: instances.length === 0 ? known?.state ?? "unknown" : serviceStateName(instances),
         };
     });
 }

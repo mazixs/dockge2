@@ -16,7 +16,8 @@ const container : ContainerRuntime = { id: "a".repeat(64),
     state: "running",
     health: "healthy",
     startedAt: NOW - 3_600_000,
-    restartCount: 2 };
+    restartCount: 2,
+    exitCode: 0 };
 const stacks = new Map([[ "demo", { name: "demo",
     path: "/stacks/demo",
     isManagedByDockge: true }]]);
@@ -36,6 +37,7 @@ test("collector persists runtime, maps project directory, and limits Docker samp
         assert.equal(result.stacks[0]?.name, "demo");
         assert.equal(result.stacks[0]?.managed, true);
         assert.equal(result.stacks[0]?.containers[0]?.uptimeMs, 3_660_000);
+        assert.equal(result.stacks[0]?.containers[0]?.exitCode, 0);
         assert.equal(result.stacks[0]?.containers[0]?.availability.coveredMs, MINUTE);
         assert.equal(JSON.stringify(result).includes("/stacks/demo"), false);
         assert.equal((await Database.getKnex()("container_observation")).length, 1);
@@ -60,6 +62,8 @@ test("stale or failed samples preserve history but expose no current green or up
         assert.equal(result.error, "dockerUnavailable");
         assert.equal(result.stacks[0]?.containers[0]?.state, "unknown");
         assert.equal(result.stacks[0]?.containers[0]?.uptimeMs, null);
+        // A stale reading does not vouch for a clean exit either
+        assert.equal(result.stacks[0]?.containers[0]?.exitCode, null);
         assert.equal(result.stacks[0]?.containers[0]?.availability.coveredMs, MINUTE);
         assert.equal(result.stacks[0]?.containers[0]?.availability.currentStatus, UNKNOWN);
         const restarted = new StabilityCollector(async () => [ container ]);
@@ -116,7 +120,8 @@ test("the panel's own containers are not recorded", async () => {
             state: "running",
             health: "healthy",
             startedAt: NOW - 60_000,
-            restartCount: 0 };
+            restartCount: 0,
+            exitCode: 0 };
 
         const collector = new StabilityCollector(async () => [ container, panel ]);
         await collector.observe(stacks, NOW, "dockge2");
