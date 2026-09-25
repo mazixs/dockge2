@@ -1,39 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { E2E_STACK_NAME } from "./constants";
-
-const SERVICE = "shellbox";
+import { openTerminal, terminalText } from "./terminal";
 
 /** Text with the characters a naive paste implementation loses */
 const TRICKY_TEXT = "echo \"a  b\" $HOME \\ 'q' ok";
-
-/**
- * Open the interactive container terminal and wait until the shell prompt is there
- * @param page Playwright page
- * @param shell Shell to open
- */
-async function openTerminal(page : Page, shell : "sh" | "bash") : Promise<void> {
-    await page.goto(`/terminal/${E2E_STACK_NAME}/${SERVICE}/${shell}`);
-    await expect(page.locator(".xterm-screen")).toBeVisible();
-
-    // The PTY needs a moment before it echoes anything back
-    await page.waitForTimeout(1500);
-
-    // A closed page never sends terminalLeave, so the session is shared between tests.
-    // Ctrl+U clears whatever a previous test left on the prompt, otherwise the counts
-    // below would depend on the order of the tests.
-    await page.locator(".xterm-screen").click();
-    await page.keyboard.press("Control+U");
-    await page.waitForTimeout(300);
-}
-
-/**
- * Read the visible terminal text
- * @param page Playwright page
- * @returns Text of the terminal rows
- */
-async function terminalText(page : Page) : Promise<string> {
-    return (await page.locator(".xterm-rows").innerText()).replace(/\u00a0/g, " ");
-}
 
 /**
  * Put a value into the real clipboard of the browser
@@ -54,12 +23,9 @@ test.describe("pasting into the container terminal", () => {
         await page.locator(".xterm-screen").click();
         await page.keyboard.press("Control+V");
 
-        // The pasted line is echoed by the shell, and nothing ran yet
+        // The pasted line is echoed by the shell; that it does not run is the last test
         await expect.poll(() => terminalText(page), { timeout: 15_000 })
             .toContain(TRICKY_TEXT);
-
-        const before = await terminalText(page);
-        expect(before).not.toContain("command not found");
     });
 
     test("Ctrl+Shift+V pastes once, not twice", async ({ page }) => {

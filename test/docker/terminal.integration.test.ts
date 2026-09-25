@@ -77,7 +77,8 @@ test("a container shell is gone after the last client leaves", { skip }, async (
             assert.equal(await countShellProcesses(stack, "box", "sh"), 0);
 
             const terminalName = await stack.joinContainerTerminal(socket, "box", "sh");
-            const terminal = Terminal.getTerminal(terminalName);
+            // A container shell is a private session filed under its owner
+            const terminal = Terminal.forClient(socket, terminalName);
             assert.ok(terminal, "the terminal should exist after joining");
 
             // The exec session is visible inside the container
@@ -99,7 +100,7 @@ test("a container shell is gone after the last client leaves", { skip }, async (
             }
 
             assert.equal(await countShellProcesses(stack, "box", "sh"), 0, "no exec session may be left behind");
-            assert.equal(Terminal.getTerminal(terminalName), undefined);
+            assert.equal(Terminal.forClient(socket, terminalName), undefined);
         } finally {
             await spawn("docker", stack.getComposeOptions("down", "-v"), {
                 cwd: stack.path,

@@ -66,8 +66,12 @@ export interface AgentEventShape {
     result : unknown;
 }
 
-/** A set of events, used to type both directions of the agent transport */
-export type AgentEventContract = Record<string, AgentEventShape>;
+/**
+ * A set of events, used to type both directions of the agent transport. A contract is
+ * checked against its own keys rather than given an index signature, which would make
+ * every string an event name and let a call to an event that does not exist compile.
+ */
+export type AgentEventContract<Contract = Record<string, AgentEventShape>> = { [E in keyof Contract] : AgentEventShape };
 
 /**
  * Requests a browser sends to an agent.
@@ -75,7 +79,7 @@ export type AgentEventContract = Record<string, AgentEventShape>;
  * The arguments are what the caller passes; the acknowledgement is added by the
  * transport and is not part of the tuple.
  */
-export interface AgentRequestContract extends AgentEventContract {
+export interface AgentRequestContract {
     // Stacks
     deployStack : {
         args : [ name : string, composeYAML : string, composeENV : string, isAdd : boolean, baseline : StackFileBaseline | undefined ];
@@ -178,7 +182,7 @@ export interface AgentRequestContract extends AgentEventContract {
  *
  * These have no acknowledgement: the browser is being told something, not answering.
  */
-export interface AgentBroadcastContract extends AgentEventContract {
+export interface AgentBroadcastContract {
     terminalWrite : { args : [ terminalName : string, data : string | Uint8Array ]; result : void };
     terminalExit : { args : [ terminalName : string, exitCode : number | null ]; result : void };
     /** A viewer is sent the reduced row, so a screen has to ask before reading a file field */

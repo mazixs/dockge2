@@ -30,7 +30,6 @@
         "build:docker-beta": "bash ./extra/release-only.sh",
         "release-nightly": "bash ./extra/release-only.sh",
         "start-docker": "docker run --rm -p 5001:5001 --name dockge2 ghcr.io/mazixs/dockge2:latest",
-        "mark-as-nightly": "tsx ./extra/mark-as-nightly.ts",
         "reset-account": "tsx ./extra/reset-account.ts",
         "update-docker": "bash ./extra/update-dockge.sh",
         "deploy-stack": "tsx ./extra/deploy-stack.ts",

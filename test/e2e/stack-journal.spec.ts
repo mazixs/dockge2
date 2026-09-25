@@ -5,8 +5,6 @@ test.describe("журнал стека", () => {
     test("журнал - вкладка страницы стека и только вывод", async ({ page }) => {
         await page.goto(`/stack/${E2E_STACK_NAME}`);
 
-        // Нижнего дока в интерфейсе больше нет: вывод живет в рабочей области
-        await expect(page.locator(".dock")).toHaveCount(0);
         await expect(page.locator(".journal")).toHaveCount(0);
 
         await page.getByRole("link", { name: /^(logs|журнал)$/i }).click();

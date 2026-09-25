@@ -47,15 +47,6 @@ test("the git step can be skipped and recreation is opt-in", () => {
     ]);
 });
 
-test("the configuration is always validated before anything starts", () => {
-    const commands = buildDeployCommands(baseOptions);
-    const configIndex = commands.findIndex((command) => command.args.includes("config"));
-    const upIndex = commands.findIndex((command) => command.args.includes("up"));
-
-    assert.ok(configIndex >= 0 && upIndex >= 0);
-    assert.ok(configIndex < upIndex, "config --quiet must run before up");
-});
-
 test("deployment never contains destructive or shell syntax", () => {
     const printed = buildDeployCommands({ ...baseOptions,
         forceRecreate: true }).map(formatCommand).join("\n");

@@ -6,7 +6,7 @@ import type { AgentEventContract } from "./agent-events";
  * @template Contract Events of this side
  * @template E Name of the event
  */
-export type AgentEventHandler<Contract extends AgentEventContract, E extends keyof Contract> =
+export type AgentEventHandler<Contract extends AgentEventContract<Contract>, E extends keyof Contract> =
     Contract[E]["result"] extends void
         ? (...args : Contract[E]["args"]) => void
         : (...args : [ ...Contract[E]["args"], ack : (response : Contract[E]["result"]) => void ]) => void;
@@ -54,7 +54,7 @@ export const BASELINE_PROTOCOL_VERSION = 2;
  * guard at the door.
  * @template Contract Events this side listens for
  */
-export class AgentSocket<Contract extends AgentEventContract = AgentEventContract> {
+export class AgentSocket<Contract extends AgentEventContract<Contract> = AgentEventContract> {
 
     eventList : Map<string, (...args : never[]) => void> = new Map();
 

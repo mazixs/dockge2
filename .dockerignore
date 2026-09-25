@@ -21,8 +21,6 @@ docker-compose.override.yml
 
 # Local review artefacts and the leftovers of an interrupted type check
 output
-frontend/src/pages/TypeCheckProbe*.vue
-tsconfig.vue.probe.json
 
 # Docker extra
 docker

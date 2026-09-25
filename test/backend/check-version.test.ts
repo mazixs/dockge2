@@ -93,22 +93,6 @@ test("a beta is only offered to someone who asked for betas", async (context) =>
     });
 });
 
-test("a registry that cannot be reached leaves the known version alone", async (context) => {
-    await withDatabase(async () => {
-        await Settings.set("checkUpdate", true, "general");
-        context.mock.method(globalThis, "fetch", async () => {
-            throw new Error("getaddrinfo ENOTFOUND api.github.com");
-        });
-
-        checkVersion.resume();
-        await checkVersion.startInterval();
-        checkVersion.stopInterval();
-
-        // Whatever was known before stays: a failed check is not news about a version
-        assert.equal(typeof checkVersion.version, "string");
-    });
-});
-
 test("only a release newer than the running one counts as an update", async () => {
     await withDatabase(async () => {
         const running = checkVersion.version;

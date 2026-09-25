@@ -1,27 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { E2E_STACK_NAME } from "./constants";
-
-const SERVICE = "shellbox";
-
-/**
- * Open the interactive container terminal of one shell
- * @param page Playwright page
- * @param shell Shell to open
- */
-async function openTerminal(page : Page, shell : string) : Promise<void> {
-    await page.goto(`/terminal/${E2E_STACK_NAME}/${SERVICE}/${shell}`);
-    await expect(page.locator(".xterm-screen")).toBeVisible();
-    await page.waitForTimeout(1500);
-}
-
-/**
- * Read the visible terminal text
- * @param page Playwright page
- * @returns Text of the terminal rows
- */
-async function terminalText(page : Page) : Promise<string> {
-    return page.locator(".xterm-rows").innerText();
-}
+import { openTerminal, SHELL_SERVICE, terminalText, waitForPrompt } from "./terminal";
 
 test.describe("switching the container shell", () => {
     test("the session really runs the requested shell", async ({ page }) => {
@@ -56,9 +35,9 @@ test.describe("switching the container shell", () => {
 
         // Switch to the other shell, which is a different session
         await page.getByRole("link", { name: /Switch to sh/ }).click();
-        await expect(page).toHaveURL(new RegExp(`/terminal/${E2E_STACK_NAME}/${SERVICE}/sh$`));
+        await expect(page).toHaveURL(new RegExp(`/terminal/${E2E_STACK_NAME}/${SHELL_SERVICE}/sh$`));
         await expect(page.locator(".xterm-screen")).toBeVisible();
-        await page.waitForTimeout(1500);
+        await waitForPrompt(page);
 
         // The new session starts clean, the marker of the bash session is not there
         expect(await terminalText(page)).not.toContain("bash-session-marker");
@@ -79,7 +58,7 @@ test.describe("switching the container shell", () => {
         await openTerminal(page, "zsh");
 
         // The panel title names the shell that is really used: service · shell
-        await expect(page.locator(".panel-title")).toHaveText(new RegExp(`${SERVICE}\\s*·\\s*sh$`));
+        await expect(page.locator(".panel-title")).toHaveText(new RegExp(`${SHELL_SERVICE}\\s*·\\s*sh$`));
         await expect(page.getByRole("link", { name: /Switch to bash/ })).toBeVisible();
 
         await page.locator(".xterm-screen").click();

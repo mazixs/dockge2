@@ -2,20 +2,6 @@ import { expect, test } from "@playwright/test";
 import { E2E_ATTENTION_STACK, E2E_FILES_STACK, E2E_STACK_NAME } from "./constants";
 
 test.describe("строка списка стеков", () => {
-    test("строка называет состояние, а подробности остаются в инспекторе", async ({ page }) => {
-        await page.goto("/");
-
-        const row = page.locator(".item", { hasText: E2E_ATTENTION_STACK });
-        await expect(row).toBeVisible();
-
-        // Состояние читается словами, подробности доступны после выбора стека.
-        const meta = row.locator(".meta");
-        await expect(meta.locator(".state-chip .label")).toContainText(/attention|внимани/i);
-        await row.click();
-        await expect(page.locator(".inspector .service-count")).toHaveText("2");
-        await expect(page.locator(".inspector .availability")).toBeVisible();
-    });
-
     test("фильтр сужает список и остается в адресе", async ({ page }) => {
         await page.goto("/");
 

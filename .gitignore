@@ -43,9 +43,6 @@ npm-debug.log*
 .vite
 .claude/settings.local.json
 
-# Left behind only by an interrupted run of test/frontend/sfc-type-check.test.ts
-/frontend/src/pages/TypeCheckProbe*.vue
-/tsconfig.vue.probe.json
 
 # Private, versioned deployment state and stopped-data snapshots
 .dockge2/

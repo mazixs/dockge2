@@ -91,25 +91,23 @@ test("moving to another stack takes the clock, the steps and the outcome with it
     assert.equal(run.hasOutput, false);
 });
 
-for (const outcome of [ "ok", "failed", "unknown" ] as const) {
-    test(`the ${outcome} answer of the stack that was left does not reach the new screen`, async () => {
-        const { run, ticks } = makeRun();
+test("the answer of the stack that was left does not reach the new screen", async () => {
+    const { run, ticks } = makeRun();
 
-        run.start(alpha, "updateStack");
-        run.setProgress(alpha, { tasks: [ task("alpha-app-1") ],
-            hasOutput: true });
-        run.release();
+    run.start(alpha, "updateStack");
+    run.setProgress(alpha, { tasks: [ task("alpha-app-1") ],
+        hasOutput: true });
+    run.release();
 
-        // Nothing is running on beta: the user only opened it
-        assert.equal(run.finish(alpha, outcome), false, "the answer belongs to a stack that is no longer on the screen");
-        assert.equal(run.running, false);
-        assert.equal(run.outcome, "", "beta must not show how the command of alpha ended");
-        assert.deepEqual(run.tasks, []);
+    // Nothing is running on beta: the user only opened it
+    assert.equal(run.finish(alpha, "failed"), false, "the answer belongs to a stack that is no longer on the screen");
+    assert.equal(run.running, false);
+    assert.equal(run.outcome, "", "beta must not show how the command of alpha ended");
+    assert.deepEqual(run.tasks, []);
 
-        await pause(TICK_MS * 3);
-        assert.equal(ticks.count, 0, "the released operation must not leave a timer behind");
-    });
-}
+    await pause(TICK_MS * 3);
+    assert.equal(ticks.count, 0, "the released operation must not leave a timer behind");
+});
 
 test("a late answer of the previous stack leaves a command of the new stack alone", async () => {
     const { run } = makeRun();

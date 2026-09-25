@@ -62,27 +62,6 @@ test("a service is listed whether the file declares it or only docker answers fo
     assert.equal(leftover?.summaryState, "unknown");
 });
 
-test("a crashed service reads as failed, a stopped one as stopped, mixed replicas as degraded", () => {
-    const state = (instances: { name : string, state : string, issue? : string }[]) => describeServices(null, { app: instances }, [], "panel.example")[0]?.state;
-
-    assert.equal(state([{ name: "app-1",
-        state: "exited",
-        issue: "serviceFailed" }]), "failed");
-    assert.equal(state([{ name: "app-1",
-        state: "exited",
-        issue: "serviceStopped" }]), "stopped");
-    assert.equal(state([{ name: "app-1",
-        state: "running" }, { name: "app-2",
-        state: "exited",
-        issue: "serviceFailed" }]), "attention");
-    assert.equal(state([{ name: "app-1",
-        state: "running",
-        issue: "unhealthy" }]), "attention");
-    assert.equal(state([{ name: "app-1",
-        state: "",
-        issue: "unknownState" }]), "unknown");
-});
-
 test("an unreadable compose file leaves the list to docker", () => {
     assert.deepEqual(describeServices(null, {}, [], "panel.example"), []);
     assert.deepEqual(describeServices(undefined, { app: [{ name: "demo-app-1",

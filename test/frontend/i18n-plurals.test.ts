@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { createI18n } from "vue-i18n";
-import { russianPluralRule } from "../../frontend/src/i18n";
+import { i18n, russianPluralRule, setI18nLocale } from "../../frontend/src/i18n";
+import ru from "../../frontend/src/lang/ru.json";
 
 test("русские формы выбираются по числу, а не по английскому правилу", () => {
     const forms = 3;
@@ -22,14 +22,9 @@ test("сообщение с двумя формами не выходит за �
 });
 
 test("правило подключено к экземпляру i18n приложения", () => {
-    const i18n = createI18n({
-        legacy: false,
-        locale: "ru",
-        messages: {
-            ru: { serviceCount: "{count} сервис | {count} сервиса | {count} сервисов" },
-        },
-        pluralRules: { ru: russianPluralRule },
-    });
+    // The catalogue is loaded the way the language mixin loads it
+    i18n.global.setLocaleMessage("ru", ru);
+    setI18nLocale(i18n, "ru");
 
     const t = i18n.global.t;
     assert.equal(t("serviceCount", 1), "1 сервис");

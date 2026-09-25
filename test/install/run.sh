@@ -9,15 +9,8 @@ node --test test/install/release.test.mjs test/install/bootstrap.test.mjs test/i
 for script in install.sh extra/update-dockge.sh extra/release-only.sh extra/release/verifier.sh test/install/docker.sh test/install/managed.sh test/install/unmanaged.sh; do bash -n "$script"; done
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
-mkdir -p "$work/deployment/.dockge2" "$work/bin"
-cat > "$work/deployment/.dockge2/update" <<'SH'
-#!/bin/sh
-printf '%s\n' "$@" > "$CAPTURE"
-SH
-chmod +x "$work/deployment/.dockge2/update"
-CAPTURE="$work/args" bash install.sh --update --dir "$work/deployment" --dry-run --version 1.2.3
-printf '%s\n' --update --dir "$work/deployment" --dry-run --version 1.2.3 > "$work/expected"
-cmp "$work/args" "$work/expected"
+# Forwarding of --update to the installed updater is covered by bootstrap.test.mjs
+mkdir -p "$work/bin"
 if bash install.sh --branch main > "$work/error" 2>&1; then echo 'Legacy branch path was accepted' >&2; exit 1; fi
 # A counterfeit verifier must never execute. Docker/Git are not called.
 cat > "$work/bin/curl" <<'SH'

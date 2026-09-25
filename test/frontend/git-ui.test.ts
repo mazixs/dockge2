@@ -1,15 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { canApplyGitChoices, isSafeGitRepository, diffLineRows } from "../../frontend/src/git-ui";
-
-test("Git source accepts HTTPS and server-configured SSH without embedded passwords", () => {
-    assert.equal(isSafeGitRepository("https://github.com/example/app.git"), true);
-    assert.equal(isSafeGitRepository("git@example.org:team/app.git"), true);
-    assert.equal(isSafeGitRepository("ssh://git@example.org/team/app.git"), true);
-    for (const repository of [ "", "file:///etc", "https://token@example.org/app", "ssh://git:password@example.org/app", "https://example.org/app?token=secret" ]) {
-        assert.equal(isSafeGitRepository(repository), false);
-    }
-});
+import { canApplyGitChoices, diffLineRows } from "../../frontend/src/git-ui";
 
 test("Every preview file requires its own explicit choice before applying", () => {
     const files = [{ path: "compose.yaml" }, { path: ".env" }];

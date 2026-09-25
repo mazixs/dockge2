@@ -174,18 +174,6 @@ test("an editor that changed the env file alone is still told about a changed co
     });
 });
 
-test("a save without a baseline still writes, so an explicit overwrite stays possible", async () => {
-    await withDatabase(async ({ dataDir, stacksDir }) => {
-        const { server, stackDir } = await makeStack(dataDir, stacksDir, { "compose.yaml": composeYAML });
-        const agentSocket = new AgentSocket();
-        new DockerSocketHandler().create(makeAuthenticatedSocket(), server, agentSocket);
-
-        const response = await call(agentSocket, "saveStack", "write-stack", editedYAML, "", false);
-        assert.equal(response.ok, true);
-        assert.equal(await readFile(path.join(stackDir, "compose.yaml"), "utf8"), editedYAML);
-    });
-});
-
 test("a baseline that is not a pair of hashes is refused before anything is written", async () => {
     await withDatabase(async ({ dataDir, stacksDir }) => {
         const { server, stackDir } = await makeStack(dataDir, stacksDir, { "compose.yaml": composeYAML });
@@ -521,9 +509,11 @@ test("a save that adopts an env file stores the selection that goes with it", as
         const agentSocket = new AgentSocket();
         new DockerSocketHandler().create(makeAuthenticatedSocket(), server, agentSocket);
 
+        // No baseline: an explicit overwrite stays possible
         const response = await call(agentSocket, "saveStack", "write-stack", editedYAML, "VALUE=new\n", false);
 
         assert.equal(response.ok, true);
+        assert.equal(await readFile(path.join(stackDir, "compose.yaml"), "utf8"), editedYAML);
         assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "VALUE=new\n");
         assert.deepEqual(await StackConfig.get("write-stack"), selection("compose.yaml", [ ".env" ]));
     });

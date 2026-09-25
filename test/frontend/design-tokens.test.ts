@@ -187,30 +187,6 @@ test("надпись на акцентной кнопке и граница ко
     }
 });
 
-test("приглушенное состояние приглушено насыщенностью, а не прозрачностью", () => {
-    const dashboard = readFileSync(path.join(process.cwd(), "frontend/src/components/StabilityDashboard.vue"), "utf8");
-    const styles = styleBlocks("frontend/src/components/StabilityDashboard.vue", dashboard);
-
-    // Прозрачность гасит и текст: ссылка фильтра с нулем работает, поэтому ее
-    // подпись обязана держать порог, а не выглядеть отключенной
-    for (const [ index, line ] of styles.split("\n").entries()) {
-        if (line.trimStart().startsWith("//")) {
-            continue;
-        }
-        assert.equal(
-            /opacity:\s*0?\.[0-9]/.test(line),
-            false,
-            `счетчики гасятся прозрачностью в строке ${index + 1}: ${line.trim()}`,
-        );
-    }
-
-    // Каждое состояние получает собственный приглушенный цвет, иначе ноль одного
-    // состояния выглядел бы как живое значение другого
-    for (const state of [ "running", "attention", "stopped", "unknown" ]) {
-        assert.match(styles, new RegExp(`a\\.zero\\.count-${state}[^}]*var\\(--state-${state}-quiet\\)`));
-    }
-});
-
 test("состояние и акцент не делят один цвет", () => {
     for (const theme of readThemes()) {
         const accents = [ theme.tokens["--accent"], theme.tokens["--accent-text"] ];

@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { STACK_GIT_STATE_KEY, stackSourceDiffers, stackSourceState, type StackSource } from "../../common/stack-source";
+import en from "../../frontend/src/lang/en.json";
 
 /**
  * Собрать ответ чтения каталога, переопределив только то, что проверяется
@@ -67,7 +68,8 @@ test("у каждого состояния Git есть строка в ката
 
     assert.equal(new Set(keys).size, keys.length, "две строки на одно состояние");
 
-    for (const state of [ "unreadable", "edited", "behind", "editedBehind", "clean", "unchecked" ] as const) {
-        assert.equal(typeof STACK_GIT_STATE_KEY[state], "string", state);
+    // The keys are used through this table, so the scan of $t() calls never sees them
+    for (const key of keys) {
+        assert.equal(typeof (en as Record<string, unknown>)[key], "string", `${key} is missing from en.json`);
     }
 });

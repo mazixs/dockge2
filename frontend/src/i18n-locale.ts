@@ -5,18 +5,11 @@ export interface LocaleHolder {
 }
 
 /**
- * Switch the active locale of a vue-i18n instance.
- * In Legacy API mode `locale` is a plain string, in Composition API mode it is a ref,
- * so writing `.value` unconditionally throws a TypeError on a string in strict mode.
+ * Switch the active locale of the application vue-i18n instance. It runs in Composition
+ * API mode (`legacy: false`), where `locale` is a ref rather than a plain string.
  * @param i18nInstance vue-i18n instance to update
  * @param lang Language code to activate
  */
 export function setI18nLocale(i18nInstance : LocaleHolder, lang : string) : void {
-    const global = i18nInstance.global as { locale : unknown };
-
-    if (typeof global.locale === "string") {
-        global.locale = lang;
-    } else {
-        (global.locale as { value : string }).value = lang;
-    }
+    (i18nInstance.global.locale as { value : string }).value = lang;
 }

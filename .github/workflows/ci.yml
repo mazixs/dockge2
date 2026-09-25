@@ -27,11 +27,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Только Linux: панель управляет Docker через сокет хоста и запускает
-        # docker compose, README поддержку Windows не обещает, а красный CI
-        # на неподдерживаемой системе никому ничего не говорит
-        node-version: ["22.23.2", "24.19.0"]
-    runs-on: ubuntu-latest
+        # Linux only: the panel drives Docker through the host socket. Checks that do
+        # not depend on the Node version run once, on the version .nvmrc pins.
+        include:
+          - node-version: "24.19.0"
+            static-checks: true
+          - node-version: "22.23.2"
+            static-checks: false
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -46,12 +49,15 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Lint
+        if: matrix.static-checks
         run: npm run lint
 
       - name: Check Typescript
+        if: matrix.static-checks
         run: npm run check-ts
 
       - name: Check single file components
+        if: matrix.static-checks
         run: npm run check-vue
 
       - name: Test with coverage and subsystem floors
@@ -61,15 +67,17 @@ jobs:
         run: npm run build:frontend
 
       - name: Check the first load against its budget
+        if: matrix.static-checks
         run: npm run check:bundle
 
       - name: Verified updater and bootstrap contracts
+        if: matrix.static-checks
         run: npm run test:install
 
   docker-integration:
     name: Docker Compose integration
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -86,8 +94,8 @@ jobs:
       - name: Show Docker Compose version
         run: docker compose version
 
-      # Тест поднимает отдельный экземпляр панели с NODE_ENV=production, а в этом
-      # режиме бэкенд без frontend-dist/index.html выходит с кодом 1
+      # The suite starts a separate panel with NODE_ENV=production, which exits
+      # without frontend-dist/index.html
       - name: Build the frontend
         run: npm run build:frontend
 
@@ -97,7 +105,7 @@ jobs:
   e2e:
     name: Browser end to end
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7

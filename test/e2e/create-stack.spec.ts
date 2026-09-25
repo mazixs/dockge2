@@ -77,8 +77,7 @@ test.describe("создание стека на отдельной страни�
         await expect(form.getByRole("textbox", { name: /^(что развернуть|what to deploy)$/i })).toHaveValue(broken);
     });
 
-    test("вставка с экрана стека открывает заполненную вкладку Compose", async ({ page, context }) => {
-        await context.grantPermissions([ "clipboard-read", "clipboard-write" ]);
+    test("вставка с экрана стека открывает заполненную вкладку Compose", async ({ page }) => {
         await page.goto(`/stack/${E2E_STACK_NAME}`);
         await page.waitForSelector(".inspector");
 

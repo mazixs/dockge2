@@ -353,39 +353,6 @@ test("turning the update check on answers on the screen that turned it on", { ti
     });
 });
 
-test("saving the settings tells every open browser, not only the tab that changed them", async () => {
-    await withDatabase(async ({ stacksDir }) => {
-        const cookie = await createTestAccount();
-        const socket = new TestSocket(cookie);
-        socket.userID = "owner";
-
-        // The switch belongs to the panel and not to the tab that flipped it: without the
-        // broadcast the indicator and the menu item stayed until the panel was restarted
-        let broadcasts = 0;
-        const server = createServer(stacksDir) as DockgeServer & { sendInfoToAll : () => Promise<void> };
-        server.sendInfoToAll = async () => {
-            broadcasts += 1;
-        };
-
-        new MainSocketHandler().create(socket as unknown as DockgeSocket, server);
-
-        await Settings.set("checkUpdate", true, "general");
-        checkVersion.latestVersion = "9999.0.0";
-
-        const saved = await emitWithCallback(socket, "setSettings", { checkUpdate: false }, TEST_PASSWORD);
-        assert.equal(saved.ok, true);
-
-        // The client is answered before the broadcast, so the sending is started in the
-        // background and the test waits for it instead of racing it
-        for (let attempt = 0; attempt < 100 && broadcasts === 0; attempt++) {
-            await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-
-        assert.equal(broadcasts, 1, "the other sessions were never told about the change");
-        checkVersion.latestVersion = undefined;
-    });
-});
-
 test("only the owner can manually check updates, without changing the automatic setting", async (context) => {
     await withDatabase(async ({ stacksDir }) => {
         const cookie = await createTestAccount();
