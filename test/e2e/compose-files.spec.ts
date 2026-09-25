@@ -53,7 +53,7 @@ test.describe("choosing stack files and handling secrets", () => {
             .fill("wrong-password");
         await page.locator(".modal").getByRole("button", { name: "Confirm" }).click();
 
-        await expect(page.getByText("Incorrect current password")).toBeVisible();
+        await expect(page.getByText("The password is wrong.")).toBeVisible();
         await expect(secretRow.locator("input.secret-value")).toHaveAttribute("type", "password");
 
         // The right password reveals it
