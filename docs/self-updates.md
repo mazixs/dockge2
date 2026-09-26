@@ -269,4 +269,5 @@ npm/nightly publishing commands now refuse to bypass this workflow.
 
 `npm run test:install` is local contract/failure testing, not evidence of a real deployment. The
 Docker gates require an isolated CI runner and operate only on uniquely named fixture projects.
-Publication and production acceptance remain unverified until that workflow actually passes.
+The gates do not exercise a power loss, a full disk or a host restart during cutover, and arm64
+runs only under QEMU; those checks on a real host are still open.

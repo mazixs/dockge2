@@ -39,6 +39,11 @@ one of these is the most useful translation work there is.
 - No HTML inside a string. Markup goes into the template through `<i18n-t>`, so that a translator
   never has to copy tags and never can break the page with them.
 - A string says what happens, not how it looks: `stackStopped`, not `redLabel`.
+- A message is translated whole. Never build a sentence out of separate label keys: word order and
+  grammar differ between languages.
+- An error names the object, the confirmed cause and what to do next.
+- The product speaks in a neutral voice, without "I" or "we".
+- When a translation reads wrong because the English is wrong, fix `en.json` first.
 - A key that is not in `en.json` is not translated anywhere. `test/frontend/i18n-catalogue.test.ts`
   fails on one, and on a language listed without a file or a file nobody can select.
 

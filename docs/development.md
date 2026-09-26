@@ -67,6 +67,17 @@ coverage floor of 70%. Build the frontend first: one of the tests starts a whole
 `frontend-dist/index.html`. The Docker integration tests are skipped unless
 `DOCKGE_DOCKER_INTEGRATION=1` is set; CI runs them in a separate Linux job.
 
+`npm run test` then runs `npm run coverage:floors`, line floors per subsystem on top of the global
+70%: access and sessions 80, stack files 80, container state 85, agent transport 70. The groups are
+listed by hand in `extra/check-coverage.ts`, and an empty group fails. `npm run check:bundle` limits
+the first load of a built frontend to 780 KiB raw and 250 KiB gzip. c8 and
+`node --test --experimental-test-coverage` measure the same code differently (81.09% against 90.01%
+of lines once), so a threshold does not carry over from one to the other.
+
+An unhandled rejection or an uncaught exception ends the server (`backend/fatal-error.ts`): it cleans
+up and exits with code 1, and the container's `restart: unless-stopped` brings it back. Do not catch
+such errors to keep a half-broken process alive.
+
 ### Browser tests
 
 ```bash
@@ -118,8 +129,27 @@ DOCKGE_PERF_CONTAINERS=500 DOCKGE_PERF_STACKS=50 DOCKGE_PERF_CYCLES=5 DOCKGE_PER
 | `DOCKGE_PERF_LIMITS=1` | A 30 minute screen under `MemoryMax=1G` and `CPUQuota=100%` in a systemd user scope, backend children included, Chromium and the Docker daemon excluded |
 
 This tests application scheduling, not the operating system's tab suspension, and it is not a
-substitute for qualification on a small VPS. Measured results, rejected experiments and what is
-left are in [the performance results](plans/2026-09-22-performance-results.md).
+substitute for qualification on a small VPS, which is open in the backlog of
+[the master plan](plans/2026-08-26-dockge2-master-plan.md).
+
+### Caches
+
+Every cache needs an owner, an identity key, a byte and entry budget, eviction, a freshness rule and
+invalidation tests; a timeout that does not release the object is not expiry. Current container
+state is never cached as truth: share one in-flight read, timestamp the sample, keep errors as
+errors. The budgets in use: Git previews 128 MiB of accounted payload, 10 entries, 10 minutes (not an
+RSS limit); source metadata 4 MiB, 512 entries, 60 seconds; terminal replay 1 MiB, 100 chunks, with a
+truncation notice. An unanswered write is an unknown outcome and is never replayed automatically.
+
+### Tried and rejected
+
+- An index on `stack_observation (observed_until, observed_at)` over 500,000 rows: the 7-day query
+  regressed, the 30-day one kept a full scan, and the 24-hour gain came from the existing index after
+  `ANALYZE`.
+- A virtualization dependency for long lists. Container rows are paged by 50 instead, after a
+  measured 500-row bottleneck: p95 511 ms before, 109 ms after, at CPU x4.
+- Until a measurement justifies them: history caches or rollups, workers, a delta protocol, a service
+  worker, pooled agent sockets, broad `KeepAlive`, blanket `markRaw`.
 
 ## Releases
 

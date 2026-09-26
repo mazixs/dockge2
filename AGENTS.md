@@ -204,7 +204,7 @@ require recovery from `.git/dockge-recovery-*`.
 | `docs/installation.md`, `docs/updating.md` | install, mounts, uninstall; update, rollback, migration of older installations |
 | `docs/configuration.md` | environment variables, reverse proxy, HTTPS |
 | `docs/git-stacks.md` | stacks from Git, private repositories, `deploy-stack` |
-| `docs/development.md` | running from source, the test suites, performance checks |
+| `docs/development.md` | running from source, the test suites, coverage floors, performance checks and the cache rules |
 | `docs/faq.md` | frequent questions |
 | `docs/assets/screenshots/` | README screenshots of the English interface, invented data only |
 | `.github/CONTRIBUTING.md` | what kind of change is accepted and how to submit it |
@@ -214,5 +214,6 @@ require recovery from `.git/dockge-recovery-*`.
 | `docs/mcp.md` | the MCP contract, limits and verified clients |
 | `docs/design-system.md` | tokens and the current layout |
 | `frontend/src/lang/README.md` | which languages, and how to translate |
-| `docs/plans/2026-08-26-dockge2-master-plan.md` | the running journal of requirements and decisions - read it before a feature |
-| `docs/plans/`, `docs/design/` | historical plans and audits, in Russian. They record what was decided and why; the code is the current state, not these |
+| `docs/releases/` | release notes, one file per tag; `release.yml` publishes `docs/releases/<version>.md` with the release |
+| `docs/plans/2026-08-26-dockge2-master-plan.md` | the running journal of requirements and decisions and the only backlog - read it before a feature |
+| `docs/plans/` | besides the master plan, only the decomposition of unfinished work. A finished plan is folded into the master plan and deleted; git history keeps it |

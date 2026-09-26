@@ -23,13 +23,13 @@
 
 | Page | What it covers |
 | --- | --- |
-| [Development](development.md) | Running from source, the test suites, performance checks |
+| [Development](development.md) | Running from source, the test suites, coverage floors, performance checks, cache rules |
 | [Contributing](../.github/CONTRIBUTING.md) | What kind of change is accepted and how to submit it |
 | [Security policy](../.github/SECURITY.md) | How to report a vulnerability |
 | [Design system](design-system.md) | Tokens and the current layout (in Russian) |
 | [Translations](../frontend/src/lang/README.md) | Which languages, and how to translate |
 | [AGENTS.md](../AGENTS.md) | The project guide: scope, architecture, rules about the user's files |
 
-`plans/` and `design/` hold historical plans and audits, in Russian. They record what was decided and
-why; the code is the current state. The running journal of decisions is
-[the master plan](plans/2026-08-26-dockge2-master-plan.md).
+The running journal of decisions and the backlog is
+[the master plan](plans/2026-08-26-dockge2-master-plan.md), in Russian. `plans/` holds it and the
+decomposition of unfinished work; a finished plan is folded into the master plan and deleted.

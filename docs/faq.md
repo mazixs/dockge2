@@ -22,6 +22,14 @@ A stack directory keeps working with plain `docker compose`, with or without the
 Yes. Both are [Compose V2](https://docs.docker.com/compose/migrate/) file names, and the panel
 recognises `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml`.
 
+### Why does a stack need attention when its init container exited cleanly?
+
+A service that exited with code 0 is a stopped service, unless it is marked as one-shot: a
+migration, an init step or a job that is meant to finish. Mark it in the service with
+`x-dockge: { lifecycle: one-shot }` (or the flat key `x-dockge.lifecycle: one-shot`), or with the
+container label `dockge.lifecycle=one-shot` for a stack that was not created in the panel. A one-shot service that exits with another code is shown as
+a failed job.
+
 ### Does Dockge2 phone home?
 
 No. The release check is off until the owner runs it or enables automatic checks under

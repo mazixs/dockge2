@@ -89,6 +89,14 @@ Patch release = the third digit ([Semantic Versioning](https://semver.org/))
 
 If for security / bug / other reasons, a library must be updated, breaking changes need to be checked by the person proposing the change.
 
+TypeScript stays below 7 for now: `vue-tsc` does not run with it.
+
+A pull request ported from upstream Dockge must not bring back the libraries this fork replaced:
+`redbean-node` and `@louislam/sqlite3` (Knex and `better-sqlite3`), `jsonwebtoken`, `bcryptjs` and
+`jwt-decode` (Better Auth), `promisify-child-process` (`backend/child-process.ts`), `command-exists`
+(`backend/terminal.ts`), `thememirror` (`@codemirror/theme-one-dark`), `vue-toastification`
+(`vue3-toastify`), `vite-plugin-compression` (`vite-plugin-compression2`) and `timezones-list`.
+
 ## Translations
 
 Please add **all** the strings which are translatable to `frontend/src/lang/en.json` (If translation keys are omitted, they can not be translated).

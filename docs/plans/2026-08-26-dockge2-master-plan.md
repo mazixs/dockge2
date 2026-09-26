@@ -8,7 +8,9 @@
 
 **Tech Stack:** Node.js 24.19.0 LTS как основной runtime; совместимость с Node.js 22.23.2 LTS; TypeScript strict; Vue 3; Vite; Express; Socket.IO; Knex; better-sqlite3; YAML; Node test runner; c8; Docker Compose; GitHub Actions.
 
-**Spec:** Этот файл является главным журналом требований и решений текущего диалога. Подробный исполняемый план upstream-исправлений находится в docs/plans/2026-08-26-upstream-dockge-fixes.md, план интерфейса терминала, статусов и Compose/Git-файлов — в docs/plans/2026-08-26-console-status-compose-git.md, а план масштабируемого интерфейса, dashboard, глобального Docker-обзора и версии 2.x — в docs/plans/2026-08-26-product-dashboard-scope-branding.md. Все новые требования пользователя и все принятые совместные решения добавляются сюда до начала соответствующей реализации.
+**Spec:** Этот файл является главным журналом требований и решений и единственным трекером. Все новые требования пользователя и все принятые совместные решения добавляются сюда до начала соответствующей реализации.
+
+**Удаленные планы.** Подчиненные планы, аудиты и ревью, на которые ссылаются записи журнала ниже, удалены из дерева 2026-09-26: их открытые пункты перенесены в разделы "(бэклог, ...)" и чеклист, правила - в `docs/*.md`, остальное - история. Найти удаленный файл: `git log --diff-filter=D --name-only -- docs/plans docs/design`, прочитать: `git show <коммит>^:<путь>`. В дереве остается только декомпозиция незавершенной работы; завершенный план сворачивается сюда и удаляется.
 
 ## Global Constraints
 
@@ -198,7 +200,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - Синхронизировать `package.json`, lockfile, frontend version constant, git tags, Docker tags, `compose.yaml`, README, favicon/icon и GitHub Actions; не публиковать новый форк под upstream tag `:1`.
 - Иконку и визуальный стиль обновлять отдельной P3-задачей после фиксации имени; проверить favicon/PWA, светлую/тёмную тему, контраст, alt/accessible labels и отсутствие растянутых ассетов.
 
-Подробная декомпозиция и acceptance-критерии сохранены в docs/plans/2026-08-26-product-dashboard-scope-branding.md.
+Открытые задачи этого направления с критериями приемки - в разделе "Интерфейс и Docker-обзор: открытые задачи" ниже.
 
 ### Сохранность стеков: рецепт, тома, снимки (бэклог, 2026-09-15)
 
@@ -230,7 +232,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 Запрос пользователя от 2026-09-16: вести проект преимущественно на английском и оставить набор языков из самых распространенных в мире. Набор утвержден и уже сокращен в коде (коммит 8f06651); остальное - работа с содержанием, и она идет в бэклог.
 
-**Что сделано и закрыто.** `languageList` сокращен до одиннадцати языков: английский, русский, китайский упрощенный, испанский, арабский, французский, португальский, индонезийский, урду, немецкий, японский. Удалены 22 каталога, которых нет в списке, и два фантома (`mag`, `mai`), выбор которых бросал исключение. `test/frontend/i18n-catalogue.test.ts` не дает списку и файлам снова разойтись.
+**Что сделано и закрыто.** `languageList` сокращен до одиннадцати языков: английский, русский, китайский упрощенный, испанский, арабский, французский, португальский, индонезийский, урду, немецкий, японский. Удалены 22 каталога, которых нет в списке, и два фантома (`mag`, `mai`), выбор которых бросал исключение. `test/frontend/i18n-catalogue.test.ts` не дает списку и файлам снова разойтись. Позже в меню оставлены только полностью переведенные английский и русский; каталоги остальных девяти лежат в `frontend/src/lang/` до доперевода (комментарий к `languageList` в `frontend/src/i18n.ts`).
 
 **Порядок и выбор до входа (2026-09-24).** В переключателе первым стоит английский, вторым русский, остальные по названию в английской сортировке: сортировка по локали браузера в русском браузере ставила "Русский" выше "English". Язык выбирается и на экране входа, рядом с темой (`LanguagePicker`), чтобы сброшенный выбор не оставлял форму входа на чужом языке. Язык по умолчанию - английский: язык браузера больше не учитывается, первый запуск, очищенное хранилище и сохраненный код, которого нет в меню, открывают интерфейс на английском. Русский и остальные - только явный выбор.
 
@@ -238,7 +240,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 **Задача 2: хинди (`hi`) и бенгальский (`bn`).** Каталогов нет вообще. Намеренно не заведены файлы-заглушки: пункт меню, дающий стопроцентно английский экран, - обещание, которого продукт не выполняет. Заводить вместе с настоящим переводом, не раньше. Гэп записан в `frontend/src/lang/README.md`.
 
-**Задача 3: RTL. Отдельная работа, и она не про арабский.** Атрибут `dir` переключается верно, `rtlLangs` содержит `ar` и `ur`. Верстка к этому не готова: 70 физических CSS-объявлений (`margin-left`, `padding-right`, `left:`, `right:`), ноль правил `[dir="rtl"]`, два логических свойства. Арабский и урду дадут текст справа налево внутри левосторонней раскладки. Урду в обязательном наборе, поэтому вопрос не в том, брать ли арабский, а в том, делать ли RTL. Работа: перевести объявления на логические свойства (`margin-inline-start` и далее), добавить прогон RTL в визуальную приемку и переутвердить эталон партией.
+**Задача 3: RTL. Отдельная работа, и она не про арабский.** Атрибут `dir` переключается верно, но `rtlLangs` пуст, пока `ar` и `ur` нет в меню; вернуть их туда вместе с переводом. Верстка к этому не готова: 70 физических CSS-объявлений (`margin-left`, `padding-right`, `left:`, `right:`), ноль правил `[dir="rtl"]`, два логических свойства. Арабский и урду дадут текст справа налево внутри левосторонней раскладки. Урду в обязательном наборе, поэтому вопрос не в том, брать ли арабский, а в том, делать ли RTL. Работа: перевести объявления на логические свойства (`margin-inline-start` и далее), добавить прогон RTL в визуальную приемку и переутвердить эталон партией.
 
 **Открытый вопрос, без ответа на который не начинать задачу 1.** Кто переводит. Машинный перевод строк интерфейса без носителя дает то же, что есть сейчас: экран, который выглядит переведенным. Развилка: принимать переводы через pull request от носителей (медленно, бесплатно, качество проверяемо), заказывать (быстро, деньги, нужен глоссарий терминов Compose) или оставить английский единственным полным и честно это сказать в интерфейсе.
 
@@ -255,11 +257,46 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 Остается, с измеренным объемом:
 
 - `docs/design-system.md` - 155 строк, 81 КБ плотной прозы с точными пикселями и именами токенов. Переводить отдельной аккуратной задачей: спецификация с перевранным значением хуже русской, но верной.
-- `docs/plans/` и `docs/design/` - 1857 строк. Это исторические журналы решений, а не документация продукта; карта документации в `AGENTS.md` уже помечает их как архив. Перевод не планируется.
+- `docs/plans/` - этот журнал и декомпозиция текущей работы, а не документация продукта. Завершенные планы и `docs/design/` удалены 2026-09-26. Перевод журнала не планируется.
 - Около 2000 строк русских комментариев и имен тестов, в основном `frontend/src` и `test/e2e`. Работа механическая; делать попутно при правке файла, а не отдельным проходом.
 - `test/visual/scene.ts` рисует эталон с `locale = "ru"`. Переключение на английский потребует переутверждения всех 28 снимков партией. Решение не принято.
 
 **Статус:** бэклог, низкий приоритет. Пользователь сказал, что частичный русский приемлем.
+
+### Интерфейс и Docker-обзор: открытые задачи (бэклог, перенесено 2026-09-26)
+
+Перенесено из удаленного плана product-dashboard (Tasks 3, 5, 6, 7, 9); состояние сверено с кодом 2026-09-26.
+
+1. **Масштабируемый список и связи сервисов.** Есть: поиск по стеку и сервису, пять фильтров с `?filter=` в URL, группировка по серверу, свертка неуправляемых проектов (`StackList.vue`). Открыто: постраничный вывод списка до 50 строк на сервер, как в `StabilityDashboard`, или замер, доказывающий, что он не нужен (порог - 200 ms на первую отрисовку 500 строк; виртуализация, кандидат `@tanstack/vue-virtual`, только при превышении и после отдельного аудита). Поиск еще по образу и серверу, строка поиска в URL вместе с фильтром. Экран связей только для чтения: `depends_on`, сети, опубликованные порты, тома, Compose secrets - по фактическому compose и Docker, а не по совпадению имен; открытие не пишет YAML и не расширяет права. Ключ строки: endpoint + stack + service + containerId. Массовые start/stop/restart - только по согласованию, для выбранных управляемых стеков, с предпросмотром и результатом по каждому. Приемка: e2e на поиск, фильтр "внимание", сохранение query, клавиатуру и телефон; у неуправляемого стека нет действий.
+2. **Контейнеры вне `stacksDir`.** Есть: внешние Compose-проекты видны свернутыми и только для чтения, сервер отказывает в действиях (`container-operations.ts`, `docker-socket-handler.ts`, `terminal-socket-handler.ts`); standalone-контейнеры есть только в обзоре стабильности. Открыто: внешние проекты видны всегда, без настройки, - решить, нужен ли переключатель `all-readonly` или показ по умолчанию принят, и записать решение. Источник классифицировать по меткам `com.docker.compose.project`, `.service`, `.project.working_dir`, `.project.config_files`: managed / external-compose / standalone / unknown, никогда по имени. Standalone-контейнеры - в списке с источником и last seen, `docker inspect` только при открытии подробностей. `all-control` - отдельная настройка владельца, по умолчанию выключена; start/stop/restart требуют capability, проверки роли и endpoint и подтверждения; delete/kill/exec - только после отдельной модели доступа. Env и secret внешних проектов не читаются. Приемка: Docker-тест с проектом во временной папке вне `stacksDir`.
+3. **Собственный контейнер панели.** Есть: консоль включает владелец с паролем; проект панели скрыт из списка и истории (`readOwnProjectName` в `stack-state.ts`); обновление из веба - работа 0.0.14. Открыто: если compose панели лежит внутри `stacksDir`, это обычный стек с рабочими stop/down/delete. Опознавать себя по ID контейнера или метке, не по имени; down/delete для себя запретить, stop - только с предупреждением о потере интерфейса. Карточка панели только для чтения (например, в "О программе"): образ и digest, здоровье, uptime, число перезапусков, монтирования, docker.sock с пояснением риска; нечитаемое - "неизвестно". Приемка: тест для размещения и вне, и внутри `stacksDir`.
+4. **Corpus-аудит `docker run` -> Compose.** Есть: конвертер `composerize@1.7.6`, отчет по флагам (`common/docker-run-flags.ts`), возврат команды, предпросмотр, сохранение без запуска. Открыто: корпус `test/fixtures/docker-run/` - ports, volumes, env/env-file, restart, user, network, healthcheck, read-only, cap-add/drop, devices/GPU, labels, `--init`, `--entrypoint`, command/args, неизвестный флаг. Для каждой фикстуры записать, что обязано сохраниться, что дает предупреждение и что нельзя добавлять (default network, `version`, privileged); каждый вывод прогонять через `docker compose config --quiet` во временном каталоге. Ограничить размер входа события `composerize`. По итогам решить: оставить `composerize` или заменить.
+5. **Итоговая UX/accessibility/performance-проверка.** Есть: визуальные эталоны, e2e, обход Tab по маршрутам, контраст в тестах токенов, `npm run test:performance`; замер 2026-09-22 на 500 контейнерах (CPU x4): p95 фильтра 510.8 ms при полном рендере и 108.9 ms при страницах по 50 строк. Открыто: 2000 контейнеров и список из сотен стеков - обновление снимка не перерисовывает весь список, слушатели не копятся. Матрица состояний: загрузка, пусто, устарело, Docker недоступен, отказ в правах, ATTENTION, UNKNOWN, нет истории. Масштаб 200%, длинные имена. При 1440x1000 видны первые пять стеков без прокрутки; на 390x844 заголовок и первое поле формы создания видны на первом экране.
+6. **Переименование агента.** Серверный `updateAgent` есть (`manage-agent-socket-handler.ts`), интерфейса нет.
+
+### Эксплуатационная приемка (бэклог, 2026-09-26)
+
+Перенесено из удаленных отчетов о самообновлении и производительности 2026-09-22. До прохождения минимальные требования к памяти не объявлять.
+
+- **Малый хост.** Выделенный VPS 1 vCPU / 1 GiB: установка и обновление опубликованного образа, 30 минут скрининга, затем 24 часа soak, три удаленных агента, настоящая приостановка скрытой вкладки ОС, backpressure журналов при нескольких зрителях, пиковый RSS при параллельных Git-превью у лимита, снимки retaining path в браузере. Локально пройден только 30-минутный экран под `MemoryMax=1G` (147-187 MiB в простое, пик 261 MiB). Длительность soak зашита в `extra/performance-audit.ts` (30 минут), для 24 часов нужен параметр.
+- **Обновление на настоящем хосте.** Обрыв питания или SIGKILL и заполнение диска во время cutover; перезагрузка хоста после успешного и неудачного обновления - сохраняются ли идентичность установки и статус восстановления. Инъекции в `extra/updater/engine_test.go` проверяют решения журнала, но не долговечность файловой системы, Docker и SQLite. Гейт релиза гоняет arm64 только под QEMU.
+- **Production deployment.** Bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy, откат образа - на выделенном хосте, а не на стенде.
+
+### Техдолг из ревью и аудитов (бэклог, 2026-09-26)
+
+Перенесено из удаленных ревью 2026-09-20 и аудита 2026-09-19; код сверен 2026-09-26.
+
+- **Дедлайн ack.** Около 19 вызовов `emitAgent` с callback ждут без срока (`SecretEditor.vue`, `gitListBranches`, `abortCompose`, `checkMainTerminal`, `requestStackList`, `getDockerNetworkList`, терминал). Перевести на `emitAgentRequest`; после потери ack deploy/update перечитывать состояние, а не повторять.
+- **Причина отказа MCP в настройках.** `/api/mcp` отвечает одинаковым 403 на чужой Origin и на отсутствие активного владельца; вернуть код причины, `Mcp.vue` должен назвать действие вместо общего `mcpLoadDenied`.
+- **Причина отказа в Git-потоке.** `validate()`/`result()` в `git-socket-handler.ts` глотают причину отказа `compose config` и deploy. Писать ее в серверный лог; клиенту - прежние ключи, вывод Docker не отдавать (в нем бывают учетные данные из URL).
+- **Синхронное чтение.** `composeYAML`/`composeENV` в `backend/stack.ts` читают файлы синхронно - заменить асинхронным снимком. Глобальное состояние (`Settings.cacheList`, `Terminal.terminalMap`, `Database`) постепенно привязать к экземпляру сервера; крупные модули дробить только вместе со сменой сценария.
+- **Покрытие фронтенда.** SFC и `frontend/src/mixins` вне `.c8rc.json`; выбрать инструмент тестов компонентов. Ленивые chunk бюджетом не ограничены; `extra/check-bundle.ts` делит на 1024, а пишет `kB`.
+- **Заголовки безопасности.** CSP, `X-Frame-Options`, `nosniff` не выставляются; строгий CSP - спайк с `EditorView.cspNonce`. Страница о модели угроз Docker socket: сокет равен root, `:ro` его не ограничивает.
+- **Поставка.** npm `min-release-age`, npm в dependabot, shellcheck для `install.sh`, визуальный набор в CI после стабилизации эталонов в образе Playwright.
+- **Мажорные обновления по одному.** TypeScript 6 как мост (7 не запускает `vue-tsc`), vue-router 5, Express 5 до конца поддержки 4.x в октябре 2026 (маршруты `${AUTH_BASE_PATH}/*` и `app.get("*")`), `@types/node`. Рантайм образа `node --import tsx` сравнить с нативным снятием типов Node 24. Без новой причины не рассматривать `node:sqlite` вместо `better-sqlite3`, Vue Vapor и замену Express.
+- **Тестовый стенд.** Rootless-демон Docker для интеграционных тестов и замеров на 500/2000 контейнерах. `test/e2e/teardown.ts` останавливает `e2e-files` через `-f compose.yaml`, а spec файлов меняет выбор compose/env - контейнер и сеть приходилось удалять руками; spec прогресса зависит от окружения из spec файлов и в одиночку падает.
+- **`docker events` вместо опроса** - необязательно. Замеры 2026-09-19: тик 85-155 ms (около 0.85 ms на контейнер), событие приходит за 1.88 ms против 5 s опроса. Нужен автомат с переподпиской и сверкой.
+- **Мелочи.** `"mysql"` в `DBConfig.type`; `Database.getSize()` и `Database.shrink()` вызываются только из тестов; 87 ключей `en.json` не в `camelCase`; `Cmd+V` в терминале проверен только логикой обработчика (`metaKey`), CI идет на Linux; перевыпуска MCP-ключа с перекрытием нет - создать новый и отозвать старый.
 
 ## Текущее состояние
 
@@ -283,29 +320,24 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 ## План реализации
 
-- [x] Выполнить docs/plans/2026-08-26-upstream-dockge-fixes.md: Tasks 1–4 — #997, #979, #950, #991.
-- [x] Выполнить там Task 5: полный набор проверок, покрытие, отсутствие ложных заглушек и связь с issues.
-- [x] Выполнить там Task 6: безопасный CLI Git → Docker Compose с dry-run и документацией.
-- [x] Выполнить docs/plans/2026-08-26-console-status-compose-git.md: Tasks 1–2 — вставка в терминал, жизненный цикл shell-сессии и рабочий `Switch to sh`.
-- [x] Выполнить там Task 3: типизированный статус сервисов/экземпляров с `ATTENTION`, worker/init-правилами и реальным Docker-тестом.
-- [x] Выполнить там Task 4: основной Compose-файл, активные env-файлы, `.secret` и Compose secrets с отдельной авторизацией.
-- [x] Выполнить там Task 5: сохранение Git/YAML без потери исходника, явный `-f`, проверка `config --quiet`, `include`/custom tags и устранение `networks: {}`.
-- [x] Выполнить там Task 6: браузерные, файловые и Docker-интеграционные проверки новых сценариев; подключить их к CI без ложных заглушек.
-- [x] Выполнить там Task 0: UX baseline, устранение блокирующей ошибки Vue I18n и утверждение одного design direction до изменения интерфейса.
-- [x] Выполнить docs/plans/2026-08-26-product-dashboard-scope-branding.md: Task 1 — общий типизированный global overview contract.
-- [x] Выполнить там Task 2: dashboard без выбранного агента с агентскими/stack/container-счётчиками и доступностью.
-- [ ] Выполнить там Task 3: масштабируемый StackList, фильтры, постраничный вывод и read-only связи сервисов. Сделаны поиск и фильтры; постраничного вывода и экрана связей сервисов нет.
-- [x] Выполнить там Task 4: история доступности, стабильности и retention 30 дней.
-- [ ] Выполнить там Task 5: inventory контейнеров вне `stacksDir` с раздельными режимами read-only/control. Не начиналось: панель показывает только каталоги из `stacksDir`.
-- [ ] Выполнить там Task 6: аудит и безопасное управление self-container Dockge 2 и основной консолью. Консоль уже включается осознанно (владелец в настройках безопасности, по умолчанию выключена), но собственный стек панели стоит в списке наравне с прочими, и остановить его можно обычной кнопкой.
-- [ ] Выполнить там Task 7: corpus-аудит `docker run` → Compose, предупреждения и preview. Конвертер работает, аудита на корпусе команд не было.
-- [x] Выполнить там Task 8: бренд, иконка, repository map и SemVer 2.x. Версия `2.0.0`, свой namespace образов и адреса, проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию. Тестов release guard (`test/backend/version-policy.test.ts`) нет - публикации пока тоже.
-- [ ] Выполнить там Task 9: итоговая UX/accessibility/performance-проверка. Есть визуальные снимки и e2e, но поведение на 500 и 2000 контейнерах не измерялось.
-- [x] Провести отдельный аудит и миграцию Better Auth после стабилизации Stack/Compose/YAML-изменений.
-- [ ] Перевести оставшиеся Vue SFC на строгий TypeScript и добавить frontend-проверку в покрытие там, где это не ухудшает архитектуру. Тестовый каталог test/frontend уже подключён к `npm run test:unit`.
-- [x] Миграция vue-i18n с Legacy API mode на Composition API mode: `legacy: false`, `globalInjection`, замена `$i18n.messages[lang]`/`$i18n.availableLocales` и проверка компонента `<i18n-t>`. Причина - deprecation в vue-i18n 11 и удаление в 12.
-- [ ] Проверить production deployment: bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy и rollback образа.
-- [x] Довести проект до прод-теста по docs/plans/2026-09-16-prod-readiness-fixes.md: зеленый e2e, бренд и адреса без upstream, фиксация тега, чистый образ, кэш статики, разметка плана и раздел README о боевом развертывании. Все восемь задач того плана закрыты; CI зеленый на всех трех джобах, свежий клон проходит `npm run check`.
+Выполненные подчиненные планы свернуты в строки ниже и удалены из дерева 2026-09-26 (как их прочитать - в шапке файла). Номера "пункт N" ведут в раздел "Интерфейс и Docker-обзор: открытые задачи".
+
+- [x] Upstream-исправления #997, #979, #950, #991 с полным набором проверок; безопасный CLI Git -> Docker Compose с dry-run (позже заменен `update-dockge.sh` и Go-обновителем).
+- [x] Консоль, статусы, Compose-файлы и Git-деплой: вставка в терминал, отдельная shell-сессия `sh`/`bash`, статус `ATTENTION` с worker/init-правилами, основной Compose-файл, env-файлы, `.secret` и Compose secrets, сохранение исходного YAML с явным `-f` и `config --quiet`, браузерные и Docker-тесты в CI.
+- [x] UX baseline, блокирующая ошибка Vue I18n, выбор направления "Знакомый Dockge".
+- [x] Контракт общего обзора, dashboard без выбранного агента, история доступности и стабильности с retention 30 дней.
+- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.13`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
+- [ ] Масштабируемый список и связи сервисов. Есть поиск, фильтры и свертка неуправляемых проектов; нет постраничного вывода списка и экрана связей. Пункт 1.
+- [ ] Контейнеры вне `stacksDir`. Внешние Compose-проекты уже видны только для чтения, но без настройки видимости, классификации по меткам и standalone-контейнеров в списке. Пункт 2.
+- [ ] Собственный контейнер панели. При стандартной установке проект панели скрыт, но compose панели внутри `stacksDir` остается обычным стеком с рабочими stop/down/delete. Пункт 3.
+- [ ] Corpus-аудит `docker run` -> Compose. Конвертер и отчет о флагах работают, корпуса фикстур нет. Пункт 4.
+- [ ] Итоговая UX/accessibility/performance-проверка. 500 контейнеров замерены 2026-09-22; 2000 контейнеров, сотни стеков и матрица состояний не проверены. Пункт 5.
+- [x] Better Auth: отдельный аудит и миграция после стабилизации Stack/Compose/YAML.
+- [ ] Строгий TypeScript во Vue SFC: из 52 компонентов 2 на `lang="ts"` и 6 с `@ts-check`; `check-vue` уже входит в `npm run check`. Покрытие SFC и mixins - в разделе "Техдолг из ревью и аудитов".
+- [x] Миграция vue-i18n с Legacy API mode на Composition API mode.
+- [x] Готовность к прод-тесту: зеленый e2e, бренд и адреса без upstream, фиксация тега, чистый образ, кэш статики, раздел README о развертывании; CI зеленый, свежий клон проходит `npm run check`.
+- [ ] Бэклог: эксплуатационная приемка - малый хост, обновление при сбоях на настоящем хосте, production deployment. Постановка в разделе "Эксплуатационная приемка".
+- [ ] Бэклог: техдолг из ревью и аудитов 2026-09-19 и 2026-09-20 - дедлайн ack, причины отказов, заголовки безопасности, поставка, мажорные обновления. Постановка в разделе "Техдолг из ревью и аудитов".
 - [ ] Бэклог: языки интерфейса - доперевод девяти каталогов с 14-17%, заведение хинди и бенгальского, отдельно RTL для арабского и урду. Постановка в разделе "Языки интерфейса"; не начинать до ответа на вопрос о том, кто переводит.
 - [ ] Бэклог: остаток документации на английский - `docs/design-system.md` и комментарии в коде. Низкий приоритет, частичный русский признан приемлемым.
 - [ ] Бэклог: сохранность стеков - копирование рецепта, томов и дайджестов образов с уровнями на стек. Постановка и открытые вопросы в разделе "Сохранность стеков"; к реализации не приступать до ответа на вопрос о консистентности тома.
@@ -1319,8 +1351,8 @@ HTTP-фикстуру: список веток, клон байт в байт, `
 
 Статус на 2026-09-13: реализация выполнена 11 сентября, визуальная приемка открыта повторно. Исторические результаты проверок ниже не подтверждают завершение визуальной доводки.
 
-- [ ] Завершить визуальную приемку A6 и повторную доводку R0-R6 из [аудита Sites](../design/2026-09-11-sites-audit-and-plan.md): общий каркас, палитра, плотность, обзор/источник, создание, редактирование результата Git до записи и мобильная навигация. Приемка по одинаковым сценам и парным снимкам, а не только наличию кнопок.
-- [x] Выполнить M0-M7 из [плана MCP и ключей](2026-09-11-mcp-access-plan.md): подключение своих ИИ-агентов, отдельные отзываемые ключи, роли и ограничения серверов/стеков, журнал и защита каждого вызова. Наблюдатель не получает действия записи ни напрямую, ни через сервер исполнения.
+- [x] Визуальная приемка A6 и повторная доводка R0-R6 из аудита Sites (файл удален 2026-09-26): общий каркас, палитра, плотность, обзор/источник, создание, редактирование результата Git до записи и мобильная навигация. Заменено: эталон убран из дерева, приемку ведут снимки `test/visual/baseline/`, проходы 2026-09-15 и сведение страницы "Новый стек"; два оставшихся критерия перенесены в "Интерфейс и Docker-обзор: открытые задачи", пункт 5.
+- [x] Выполнить M0-M7 из плана MCP и ключей (файл удален 2026-09-26, контракт - `docs/mcp.md`): подключение своих ИИ-агентов, отдельные отзываемые ключи, роли и ограничения серверов/стеков, журнал и защита каждого вызова. Наблюдатель не получает действия записи ни напрямую, ни через сервер исполнения.
 - [x] Сохранить закрытую выдачу учетных записей, темы, uptime, конвертацию docker run, исходный текст Compose и различие сохранения/развертывания.
 
 Приемка 2026-09-11: 311 модульных проверок, 9 Docker-интеграционных и 18 браузерных сценариев прошли; сборка и проверка типов прошли. MCP M7 ограничен фактически проверенным SDK 1.30.0 / протоколом 2025-11-25 с Bearer. OAuth, stdio и конкретные настольные клиенты не реализованы; отдельный подписанный межсерверный канал не заменяет прежний браузерный канал агентов. Подробности: `docs/mcp.md`. Коммит и публикация рабочего окружения не выполнялись.
@@ -1328,7 +1360,7 @@ HTTP-фикстуру: список веток, клон байт в байт, `
 
 ## Дополнение 2026-09-20: правки по повторному ревью перед 0.0.6
 
-Выполнены все восемь замечаний [повторного ревью](2026-09-20-code-and-visual-review.md) и обе группы
+Выполнены все восемь замечаний повторного ревью 2026-09-20 (файл удален 2026-09-26) и обе группы
 языковых: Q01-Q05, UI01-UI03, L01-L08 и E01-E20. Что именно сделано и чем закреплено - в разделе
 "Что исправлено перед 0.0.6" самого отчета.
 
@@ -1378,7 +1410,7 @@ HTTP-фикстуру: список веток, клон байт в байт, `
 Проверки: `npm run check` (537 тестов, 88,09% строк, все минимумы подсистем), сборка фронтенда и
 бюджет первой загрузки, визуальный набор `--workers=1` без переутверждения эталонов. Новые проверки
 сломаны мутацией рабочего кода и на ней падают. Подробности и замеры - в разделе "Закрытие Q02, Q03
-и UI02 после сверки" отчета [повторного ревью](2026-09-20-code-and-visual-review.md).
+и UI02 после сверки" отчета повторного ревью (файл удален 2026-09-26).
 
 ## Дополнение 2026-09-21: уборка рудиментов и закрытая дыра в контексте сборки
 
@@ -1486,7 +1518,7 @@ the selected period"; экраны ведут себя как прежде, ус
 
 ## 2026-09-24: MCP on the current protocol, easy to connect, fully logged
 
-Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest specification, SDK v2, Supabase MCP and our own tool-design research).
+Measured against the MCP best practices checklist (the latest specification, SDK v2, Supabase MCP and our own tool-design research; deleted 2026-09-26, its refusals moved to `docs/mcp.md`).
 
 - The endpoint serves protocol 2026-07-28 through `@modelcontextprotocol/server` 2.1.0 (`createMcpHandler`, stateless, `server/discover`, the per-request `_meta` envelope). 2025-11-25 clients keep working through the SDK's stateless legacy path. POST only; OAuth discovery paths answer 404 JSON; a 401 carries `WWW-Authenticate: Bearer`.
 - Tools are listed in a fixed order with titles, honest hints, field descriptions and server instructions describing the flow and naming logs, files and diffs as untrusted. Argument errors name the field; conditions a client can fix say how; access and existence stay one generic sentence.
@@ -1495,7 +1527,7 @@ Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest speci
 - The access log did not record connections or refusals. It now records `initialize`, `server/discover` and `tools/list` with client name, version and protocol; refusals with reason and address; requests the SDK rejects before a tool runs; owner actions including operation approval. Repeats are counted per source and minute, refusals are capped separately (1000 rows) from history (10000 rows), and arguments, secrets and results are never stored.
 - A startup crash found by the browser suite: `mountMcp` opened the database before it was connected. Keys are now looked up per request; a unit test mounts the routes without a database.
 - `docs/mcp.md` rewritten in English: quick start, client configurations, tools, rights, approval, reserved names, security including prompt injection through logs, reaching the endpoint (proxy, opt-in HTTP, SSH tunnel), troubleshooting by status code, the log, executing servers, limits, verification.
-- Not done, with reasons in the checklist: OAuth 2.1, elicitation instead of owner approval, Server Cards, random boundaries around untrusted output.
+- Not done, with reasons in `docs/mcp.md` ("Not implemented, and why"): OAuth 2.1, elicitation instead of owner approval, Server Cards, random boundaries around untrusted output.
 
 ## 2026-09-24: env on edit, image update check without buildx
 
@@ -1523,3 +1555,25 @@ Measured against `docs/plans/2026-09-24-mcp-best-practices.md` (the latest speci
 - Follows the entry above, at the user's request: the setting is the only switch. The variable forced the console on and hid the toggle, so an owner could not take the console back without editing `.env` and restarting.
 - No migration: an installation that ran with `DOCKGE_ENABLE_CONSOLE=true` comes up with the console off until an owner turns it on. The `--enableConsole` flag and the "forced" state of `checkMainTerminal` are gone; the gate is `MainTerminal.enabled()`.
 - The frozen `docker-compose.yml` still passes the variable and the updater still writes `DOCKGE_ENABLE_CONSOLE=false` into a new `.env`; both are harmless now.
+
+## 2026-09-26: documentation cleanup
+
+- Deleted from the tree: 22 finished plans, audits and reviews in `docs/plans/` and all of
+  `docs/design/` (7 files, a 213 KB mockup among them). Their open items are now the backlog sections
+  "Интерфейс и Docker-обзор: открытые задачи", "Эксплуатационная приемка" and "Техдолг из ревью и
+  аудитов"; the checklist no longer points into deleted files. The header says how to read one from
+  history.
+- Rules moved to where they are read: MCP refusals to `docs/mcp.md`; the cache contract, rejected
+  experiments and coverage floors to `docs/development.md`; dependency rules to
+  `.github/CONTRIBUTING.md`; one-shot marking to `docs/faq.md`; editing rules to
+  `frontend/src/lang/README.md`; muted states by saturation to `docs/design-system.md`.
+- Stale statements corrected: the checklist status of the product tasks, `rtlLangs`, and the end of
+  `docs/self-updates.md`, which still said the release workflow had never passed.
+- Left in the tree: this journal and the decomposition of unfinished work. The plan of the panel
+  self-update and its review fold in here once 0.0.14 ships.
+- The frozen design export removed on 2026-09-16 comes back with
+  `git checkout 0983aff^ -- docs/design/reference`; `39f78b2`, named in its old pointer, is
+  unreachable after the history rewrite.
+- Privacy pass over `docs/`: no names, contacts, hosts, local paths or keys; the screenshots show
+  invented data only. The 2026-09-22 privacy review found one gitleaks match in history, the RFC 6238
+  test vector of a removed TOTP test, which is not a secret.

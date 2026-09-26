@@ -434,3 +434,18 @@ refusal reasons, proxy headers, the plain HTTP opt-in, reservations, approval an
 `test/docker/mcp-remote.test.ts` runs two isolated panels with real Docker, including a Git clone,
 preview and apply with exact bytes, and `test/e2e/mcp.spec.ts` drives the settings page in Chromium.
 The desktop client configurations above are not part of these suites.
+
+## Not implemented, and why
+
+- **OAuth 2.1.** Its only reason would be web clients that cannot send a header. Dynamic client
+  registration is deprecated in 2026-07-28, and a self-hosted panel would have to run its own
+  authorization server. Keys stay.
+- **Elicitation instead of owner approval.** The client renders the form and can answer it itself.
+  Approval in the panel with the owner password and replay protection is stronger.
+- **Server Cards.** SEP-2127 is not part of 2026-07-28, and its path is not settled.
+- **Random boundaries around untrusted output.** Cheap, and not a defence. The server instructions
+  name logs, files and diffs as untrusted, and [the attack is documented](#security) instead.
+- **Rotating a key with an overlap period.** Create a new key, move the client to it, then revoke the
+  old one.
+- **A stdio adapter.** Clients connect over HTTP with a header, see
+  [client configuration](#client-configuration).
