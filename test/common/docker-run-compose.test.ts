@@ -309,7 +309,7 @@ test("the rest of the flags land in their compose keys", () => {
         options: { tag: "web" } });
     assert.deepEqual(service.tmpfs, [ "/run", "/tmp" ]);
     assert.deepEqual(service.healthcheck, { disable: true });
-    assert.equal(service.memswap_limit, "-1");
+    assert.equal(service.memswap_limit, -1);
     assert.deepEqual(report.dropped.map((item) => [ item.flag, item.reason ]), [
         [ "--cidfile", "flagNoComposeKey" ],
         [ "--umask", "flagNoComposeKey" ],

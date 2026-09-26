@@ -1827,3 +1827,10 @@ is here, so it is not reopened without a new one.
 already carries the new updater. The review VPS reaches rc.1 with the host command, then updates
 from About with **Include beta releases** on, to rc.2 or 0.0.14. `latest` stays on 0.0.13 until
 the stable tag; its notes are `docs/releases/0.0.14.md`, the candidate's `0.0.14-rc.1.md`.
+
+The first CI run of the candidate caught two things the local runs could not. Compose 2.38 on
+the runner refuses `memswap_limit: "-1"` as a size while 5.5 accepts it; the converter writes the
+number -1, which both take, and all 51 commands of the corpus pass `config` on both versions. The
+reference screenshot job, new in this release, ran `npm ci` in the Playwright image, where npm's
+default node-gyp build of better-sqlite3 has no `make`; the scene loads no native module, so the
+job installs with `--ignore-scripts`, reproduced in the same image with 71 passed.

@@ -551,7 +551,8 @@ const HANDLERS : Record<string, Handler> = {
     "--memory": set("mem_limit"),
     // compose refuses mem_reservation next to the reservations a GPU request writes
     "--memory-reservation": set("deploy.resources.reservations.memory"),
-    "--memory-swap": set("memswap_limit"),
+    // Unlimited is the number: Compose 2.38 refuses the string "-1" as a size, and every version takes -1
+    "--memory-swap": set("memswap_limit", (value) => value === "-1" ? -1 : value),
     "--memory-swappiness": set("mem_swappiness", integer),
     "--mount": mount,
     "--name": set("container_name"),
