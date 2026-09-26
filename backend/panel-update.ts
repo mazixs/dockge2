@@ -181,8 +181,6 @@ interface Reading {
 interface JournalEntry {
     journal : PanelUpdateJournalLine | undefined;
     at : number;
-    /** The updater answered; otherwise Docker never ran it and it is asked again later */
-    final : boolean;
 }
 
 /**
@@ -1006,7 +1004,8 @@ export class PanelUpdate {
 
     private journalOf(installation : PanelInstallation, helper : PanelUpdateHelper) : Promise<PanelUpdateJournalLine | undefined> {
         const cached = this.journals.get(helper.requestId);
-        if (cached && (cached.final || this.now() - cached.at < RETRY_MS)) {
+        // Host recovery can change the journal even after a terminal phase or an unreadable answer.
+        if (cached && this.now() - cached.at < RETRY_MS) {
             return Promise.resolve(cached.journal);
         }
         let pending = this.journalReads.get(helper.requestId);
@@ -1033,14 +1032,12 @@ export class PanelUpdate {
         }), { timeoutMs: STATUS_HELPER_TIMEOUT_MS,
             maxBuffer: LOG_MAX_BUFFER });
         const journal = parseLines(res.stdout).filter((line) : line is PanelUpdateJournalLine => line.dockge2 === "journal").at(-1);
-        // 125 and -1: Docker never ran the updater (a name conflict, a timeout), so it is asked again later
-        const final = journal !== undefined || (res.code >= 0 && res.code !== 125);
-        if (!final) {
+        // 125 and -1: Docker never ran the updater (a name conflict, a timeout).
+        if (journal === undefined && (res.code < 0 || res.code === 125)) {
             log.warn("panel-update", `The status helper did not run: ${firstLine(res.stderr)}`);
         }
         this.journals.set(helper.requestId, { journal,
-            at: this.now(),
-            final });
+            at: this.now() });
         return journal;
     }
 

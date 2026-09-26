@@ -823,7 +823,7 @@ test("an update that left no result is read from the journal by one status helpe
     assert.ok(statusRuns[0]?.includes("--status"));
     assert.ok(statusRuns[0]?.includes(`io.dockge2.update.request=${REQUEST}`));
 
-    // The journal of that request is kept; asking again starts no second helper
+    // The journal is cached briefly; asking again immediately starts no second helper
     await panel.status();
     assert.equal(docker.callsOf("run").length, 1);
 });
@@ -837,6 +837,48 @@ test("a journal that reached a final phase gives the outcome", async () => {
     docker.statusResult = ok(`${journal("recovered")}\n`);
     const status = await panel.status();
     assert.equal(status.operation?.result?.outcome, "recovered");
+});
+
+test("journal observations expire so host recovery is visible without restarting the panel", async (t) => {
+    for (const initial of [
+        { name: "interrupted phase",
+            response: ok(`${journal("prepared")}\n`),
+            outcome: "failed-before-cutover" },
+        { name: "recovery required",
+            response: ok(`${journal("recovery-required")}\n`),
+            outcome: "recovered" },
+        { name: "missing journal",
+            response: ok(""),
+            outcome: "failed-before-cutover" },
+        { name: "unreadable journal",
+            response: fail("cannot read operation.json", 1),
+            outcome: "failed-before-cutover" },
+        { name: "unrelated journal",
+            response: ok(`${journal("recovered", "older-operation")}\n`),
+            outcome: "failed-before-cutover" },
+    ]) {
+        await t.test(initial.name, async () => {
+            const docker = new FakeDocker();
+            const { panel } = observe(docker);
+            docker.add("apply", { requestId: REQUEST,
+                exitCode: 137,
+                lines: [ phase("prepared") ] });
+            docker.statusResult = initial.response;
+            const before = await panel.status();
+
+            docker.statusResult = ok(`${journal(initial.outcome)}\n`);
+            assert.deepEqual((await panel.status()).operation, before.operation);
+            assert.equal(docker.callsOf("run").length, 1, "immediate reads share the cached observation");
+
+            docker.clock += 31_000;
+            const refreshed = await Promise.all([ panel.status(), panel.status() ]);
+            for (const status of refreshed) {
+                assert.equal(status.operation?.result?.outcome, initial.outcome);
+            }
+            assert.equal(docker.callsOf("run").length, 2, "concurrent refreshes share one status helper");
+            panel.stop();
+        });
+    }
 });
 
 test("the journal of an earlier update is not the result of a helper killed before its first line", async () => {

@@ -314,7 +314,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [x] Консоль, статусы, Compose-файлы и Git-деплой: вставка в терминал, отдельная shell-сессия `sh`/`bash`, статус `ATTENTION` с worker/init-правилами, основной Compose-файл, env-файлы, `.secret` и Compose secrets, сохранение исходного YAML с явным `-f` и `config --quiet`, браузерные и Docker-тесты в CI.
 - [x] UX baseline, блокирующая ошибка Vue I18n, выбор направления "Знакомый Dockge".
 - [x] Контракт общего обзора, dashboard без выбранного агента, история доступности и стабильности с retention 30 дней.
-- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14-rc.3`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
+- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14-rc.4`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
 - [x] Масштабируемый список и связи сервисов: поиск по образу и серверу, `?q=` в адресе, постраничный вывод, связи только для чтения. Массовые действия не согласованы и остаются в пункте 1.
 - [x] Контейнеры вне `stacksDir`: классификация по меткам, standalone-контейнеры в списке, страница контейнера, управление по настройке владельца. Пункт 2.
 - [x] Собственный контейнер панели: опознание по ID, запрет down/delete/recreate, карточка в "О программе". Пункт 3.
@@ -1822,11 +1822,11 @@ is here, so it is not reopened without a new one.
 
 ## 2026-09-26: 0.0.14 goes out as a release candidate first
 
-`v0.0.14-rc.3` is a GitHub prerelease. Every tag so far was stable, so the prerelease branch of
+`v0.0.14-rc.4` is a GitHub prerelease. Every tag so far was stable, so the prerelease branch of
 `release.yml` has never run, and the update from the web interface needs a starting point that
-already carries the new updater. The review VPS reaches rc.3 with the host command, then updates
-from About with **Include beta releases** on, to rc.4 or 0.0.14. `latest` stays on 0.0.13 until
-the stable tag; its notes are `docs/releases/0.0.14.md`, the candidate's `0.0.14-rc.3.md`. The tags
+already carries the new updater. The review VPS reached rc.3 with the host command, then updates
+from About with **Include beta releases** on, to rc.4. `latest` stays on 0.0.13 until the stable
+tag; its notes are `docs/releases/0.0.14.md`, the candidate's `0.0.14-rc.4.md`. The tags
 `v0.0.14-rc.1` and `v0.0.14-rc.2` stopped at the release gate and have no release; a failed
 candidate's number is skipped rather than the pushed tag moved.
 
@@ -1862,3 +1862,71 @@ index digest, and the classic image store keeps one image per digest reference. 
 pulls `--platform linux/<its own architecture>`, which it already required of the image afterwards.
 Reproduced in a `docker:28-dind` with the classic store: a pinned pull, then a plain one fails with
 the same message, and a pinned one passes again.
+
+## 2026-09-26: no reserved scrollbar gutter, a socket note that says what to do
+
+The strip right of the header, left open on 2026-09-17 as a trade-off, is closed by removing
+`html { scrollbar-gutter: stable }`. The gutter came in with the redesign without a stated reason;
+upstream Dockge never had it. On a system with classic scrollbars it left 15px of page background
+beside the header on every page too short to scroll, which is open Bootstrap issue #42546. The
+jump it was meant to prevent did not go away either: Bootstrap 5.3 modals add the scrollbar width
+as body padding on their own, so on a scrolling page the two together moved the content 15px left
+when a modal opened. Vue libraries reserve the gutter only while a dialog locks the scroll (Quasar,
+VitePress, Vuetify's block strategy, Element Plus's lock screen), or scroll an inner container. The
+cost is the one every such app pays: content 15px wider on pages that do not scroll. The 28 desktop
+reference screenshots were re-approved for exactly that; phone screens use overlay scrollbars and
+did not change.
+
+The Docker socket note in About now says why the risk exists, that it is not a fault, and what
+reduces it, with a link to the threat model instead of one sentence about root.
+
+## 2026-09-26: dependencies brought up to what the release age allows
+
+Everything published by 2026-09-19 was taken, the edge `min-release-age=7` in `.npmrc` sets:
+better-auth 1.7.5, zod 4.6.5, yaml 2.9.1, type-fest 5.10.0, tsx 4.23.13, Vue 3.5.43, vite 8.3.0,
+bootstrap-vue-next 1.2.1, vue-i18n 11.4.12, sass 1.104.1, ESLint 10.11 with its plugins,
+Playwright 1.63.0 and its image, Node 24.21.0, Go 1.27.1, and the actions pinned in `release.yml`.
+The visual suite passed in the new Playwright image without a re-approval.
+
+vue-tsc moved from 2 to 3, which checks the type of a `v-model` event. vue-codemirror6 emits the
+document as a string but types it as an optional string or CodeMirror `Text`, so the three editors
+bind the value and the event separately through `editorText` instead of `v-model`.
+
+Better Auth 1.7.3 reverted the account `issuer` that 1.7.0 introduced: every installation from
+0.0.10 to 0.0.13 has a required `issuer` column and a unique index on it, and the newer library no
+longer writes it, so the next account created would have failed. The Knex migration
+`2026-09-26-1200-account-issuer` drops both, following the SQLite steps of the upgrade guide, and
+does nothing on a fresh installation, where the auth tables do not exist yet; its `down` gives
+every password account back the `local:credential` value 1.7.2 wrote. Tested on a copy of a real
+0.0.13 database: the existing account signs in and a new one can be added. An older panel refuses a
+database with a migration it does not know, as before; the updater restores the data backup on a
+rollback. Since 1.7.4 the library also checks the schema as the instance starts, so its migrations
+now run before the instance is built; the other way round a fresh installation logged a
+"Database schema mismatch" error about tables it was just about to create.
+
+Held back, with the reason:
+- everything newer than the release age, to be taken after it matures: better-auth 1.7.6,
+  socket.io 4.8.4, vite 8.3.1, sass 1.105, vue-codemirror6 1.7.0, @types/node 24.19, Node 22.23.3,
+  the MCP SDK 1.30.1. `npm update --before` stops on the MCP server and client 2.1.0 pinned on
+  2026-09-24 (published 09-23), so the transitive dependencies were not refreshed as a whole;
+- dotenv 18: a major with four patch releases in its first week, it waits for the 14 day major
+  cooldown Dependabot uses;
+- TypeScript 7: vue-tsc still cannot run on it;
+- @types/node 26: the types follow the Node 24 runtime.
+
+## 2026-09-27: 0.0.14-rc.4 before the stable tag
+
+rc.3 passed its release gate, but the dependency update and the `issuer` migration above came after
+it, and only the gate has Compose 2.38, arm64 under QEMU and the update from the 0.0.13 release. A
+stable tag that stopped there would lose its number, so they go out as rc.4 first. rc.4 is also the
+first candidate an installation reaches from About: the review VPS runs rc.3, and its update to
+rc.4 is the first real cutover from the page, with a schema change and the data snapshot. 0.0.14
+follows from the same code with only the version changed.
+
+The migration ran against the schema of the review VPS, a database that went from 0.0.3 to rc.3,
+with an invented owner and no data from the server: the column and its index are gone, the owner
+signs in, a viewer created through `usersCreate` signs in, and Better Auth reports no mismatch; a
+fresh data directory starts without one either. The local checks ran on Node 24.21.0 with its npm
+11.19, as CI does. That npm warns about install scripts not listed in `allowScripts`
+(better-sqlite3, node-pty, esbuild, vue-demi, @parcel/watcher) but still runs them, and the native
+modules load from their prebuilds either way.

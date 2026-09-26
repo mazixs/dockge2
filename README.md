@@ -20,12 +20,13 @@ what needs attention, and how to open or add a stack. A stack is a directory wit
 the panel reads and runs it, and `docker compose` keeps working on the same directory without it.
 
 - Start, stop, restart and update stacks, read their logs, open a terminal in a container.
+- Manage all your Docker hosts from one panel: the stacks of every server in one list, grouped by
+  server, and one overview across all of them ([how](#several-servers-one-panel)).
 - Edit Compose as text or structurally, without losing comments or formatting; paste a
   `docker run` command to turn it into a stack.
 - Deploy a stack from a Git repository and update it file by file.
 - Accounts for the people who share the server, with roles and two-factor authentication.
 - Uptime and availability of every container over 24 hours, 7 and 30 days.
-- Several Docker hosts in one interface, through agents.
 
 Dockge2 is a fork of [Dockge](https://github.com/louislam/dockge) by Louis Lam. It is not a drop-in
 replacement, and issues of this fork belong [here](https://github.com/mazixs/dockge2/issues), not
@@ -43,6 +44,11 @@ upstream.
 - **Availability history.** Every container's state is recorded, so uptime and availability come
   from what was observed. Without a fresh observation the figures say "unknown" instead of
   assuming the best.
+- **Several servers, one panel.** Dockge introduced agents; here they are part of every screen. The
+  header switches between all servers, this one and each agent; the list groups stacks by server;
+  the overview shows the stability of every server side by side and marks one that stopped
+  answering as offline. Every operation passed to an agent is checked against the local user's role
+  first.
 - **Stacks from Git.** Clone a stack from a repository, see how far its branch has moved, compare
   each changed file with the server copy and choose which version to keep before anything is
   written or deployed.
@@ -97,6 +103,14 @@ sudo cat /opt/dockge2/data/bootstrap-token
 
 Stacks live in `/opt/stacks`. Ports, paths, SSH keys for private repositories and HTTPS are in
 [installation](docs/installation.md) and [configuration](docs/configuration.md).
+
+## Several servers, one panel
+
+Install Dockge2 on each host the same way, then choose one panel to work from and add the others
+to it under Settings -> Dockge Agents: the address of each panel and an account on it. The
+connection is made by the server, so the other panels have to be reachable from it, not from your
+browser. Use a dedicated account with the role you need and without a second factor; its console
+and permissions are set in that agent's own panel. Details are in [agents](docs/authentication.md#agents).
 
 ## Update
 

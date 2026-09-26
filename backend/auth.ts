@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { betterAuth } from "better-auth";
+import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { fromNodeHeaders } from "better-auth/node";
 import { twoFactor, username } from "better-auth/plugins";
@@ -222,11 +222,14 @@ export async function initAuth(server : DockgeServer) : Promise<Auth> {
         }
     }
     const secret = await resolveSecret();
-    const auth = buildAuth(server, secret);
+    const options = authOptions(server, secret);
 
     const hadRoles = await DockgeDatabase.getKnex().schema.hasColumn("user", "role");
-    const { runMigrations } = await getMigrations(auth.options);
+    // Before the instance exists: it checks the schema as it starts, and on a fresh
+    // installation it would report the tables that are about to be created as missing
+    const { runMigrations } = await getMigrations(options);
     await runMigrations();
+    const auth = buildAuth(options);
 
     instance = auth;
     // The access rules reach the library through this port and never import it back
@@ -245,20 +248,18 @@ export async function initAuth(server : DockgeServer) : Promise<Auth> {
 }
 
 /**
- * Build the auth instance.
- * Kept separate so its exact type can be derived, because betterAuth() is generic
- * over the options that are passed in.
+ * The options of the auth instance.
  * @param server Dockge server
  * @param secret Secret that signs session cookies
- * @returns Auth instance
+ * @returns Auth options
  */
-function buildAuth(server : DockgeServer, secret : string) {
+function authOptions(server : DockgeServer, secret : string) {
     // A second connection to the same SQLite file: the database runs in WAL mode,
     // and better-auth needs its own driver instance for its Kysely dialect
     const authDatabase = new Database(DockgeDatabase.sqlitePath);
     authDatabase.pragma("journal_mode = WAL");
 
-    return betterAuth({
+    return {
         appName: "Dockge",
         database: authDatabase,
         secret,
@@ -344,7 +345,18 @@ function buildAuth(server : DockgeServer, secret : string) {
             }),
         ],
 
-    });
+    } satisfies BetterAuthOptions;
+}
+
+/**
+ * Build the auth instance.
+ * Kept separate so its exact type can be derived, because betterAuth() is generic
+ * over the options that are passed in.
+ * @param options Auth options
+ * @returns Auth instance
+ */
+function buildAuth(options : ReturnType<typeof authOptions>) {
+    return betterAuth(options);
 }
 
 export type Auth = ReturnType<typeof buildAuth>;

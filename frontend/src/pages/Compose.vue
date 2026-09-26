@@ -94,7 +94,7 @@
                         <div class="editor-box" :class="{'edit-mode' : isEditMode}">
                             <code-mirror
                                 ref="composeEditor"
-                                v-model="stack.composeYAML"
+                                :model-value="stack.composeYAML"
                                 :extensions="extensions"
                                 minimal
                                 wrap
@@ -102,6 +102,7 @@
                                 tab
                                 :disabled="!isEditMode"
                                 :readonly="!isEditMode"
+                                @update:model-value="stack.composeYAML = editorText($event)"
                                 @change="yamlCodeChange"
                             />
                         </div>
@@ -167,7 +168,7 @@
                         <div v-show="envShown && (isEditMode || !envIsEmpty)" class="editor-box" :class="{'edit-mode' : isEditMode}">
                             <code-mirror
                                 ref="envEditor"
-                                v-model="stack.composeENV"
+                                :model-value="stack.composeENV"
                                 :extensions="extensionsEnv"
                                 minimal
                                 wrap
@@ -175,6 +176,7 @@
                                 tab
                                 :disabled="!isEditMode"
                                 :readonly="!isEditMode"
+                                @update:model-value="stack.composeENV = editorText($event)"
                                 @change="yamlCodeChange"
                             />
                         </div>
@@ -334,7 +336,7 @@ import type TerminalComponent from "../components/Terminal.vue";
 import dotenv from "dotenv";
 import { defineComponent, markRaw, ref, type PropType } from "vue";
 import { RequestTracker } from "../request-tracker";
-import { errorText } from "../util-frontend";
+import { editorText, errorText } from "../util-frontend";
 
 /**
  * The stack this editor is on.
@@ -852,6 +854,8 @@ export default defineComponent({
         clearTimeout(dockerStatsTimeout);
     },
     methods: {
+        editorText,
+
         startServiceStatusTimeout() {
             clearTimeout(serviceStatusTimeout);
             serviceStatusTimeout = setTimeout(async () => {

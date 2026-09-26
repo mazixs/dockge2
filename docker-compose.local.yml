@@ -8,7 +8,7 @@ name: dockge2-local
 services:
   dev:
     # Тот же базовый образ, что и у production - буквально та же ступень того же
-    # файла: node 24.19.0 из .nvmrc плюс docker CLI и плагин compose. Голый node
+    # файла: node 24.21.0 из .nvmrc плюс docker CLI и плагин compose. Голый node
     # не подходит - панель выполняет команды docker compose внутри контейнера,
     # а без клиента их выполнить нечем.
     build:

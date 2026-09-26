@@ -4,7 +4,7 @@
 # Built on the machine that runs the build, not under emulation: healthcheck.go
 # is plain Go with no cgo, so cross compiling it for the target is both correct
 # and minutes faster than running a foreign toolchain through QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.27.0-bookworm AS build_healthcheck
+FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm AS build_healthcheck
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v}
 # The panel shells out to `docker compose`, so the CLI and the compose plugin
 # are part of the runtime, not of the build. git and ssh are here for the same
 # reason: a stack from a repository is a product feature.
-FROM node:24.19.0-bookworm-slim AS base
+FROM node:24.21.0-bookworm-slim AS base
 RUN apt update && apt install --yes --no-install-recommends \
     curl \
     ca-certificates \
@@ -72,7 +72,7 @@ RUN npm ci --omit=dev --ignore-scripts
 # gigabyte of memory: under emulation that is both slow and the most likely
 # thing to be killed by the out-of-memory reaper on a small machine. Plain node
 # is enough here - the docker CLI from `base` is of no use to a bundler.
-FROM --platform=$BUILDPLATFORM node:24.19.0-bookworm-slim AS build_frontend
+FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim AS build_frontend
 WORKDIR /app
 COPY --chown=node:node  ./package.json ./package.json
 COPY --chown=node:node  ./package-lock.json ./package-lock.json

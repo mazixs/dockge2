@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { errorText, setPageLocale } from "../../frontend/src/util-frontend";
+import { Text } from "@codemirror/state";
+import { editorText, errorText, setPageLocale } from "../../frontend/src/util-frontend";
 
 test("the page says which language it is in and which way it reads", () => {
     const attributes : Record<string, string> = {};
@@ -43,4 +44,15 @@ test("what is shown for a failure is a message, whatever was thrown", () => {
     // caller still gets a string and the screen is not asked to render an absent value
     assert.equal(typeof errorText(undefined), "string");
     assert.equal(typeof errorText(null), "string");
+});
+
+test("a code editor's document reaches the stack as the same text", () => {
+    const compose = "services:\n  web:\n    image: nginx # pinned later\n";
+
+    assert.equal(editorText(compose), compose);
+
+    // The editor's typings also allow a CodeMirror document or nothing at all; either has to
+    // become the text itself, never "[object Object]" or "undefined" written into compose.yaml
+    assert.equal(editorText(Text.of(compose.split("\n"))), compose);
+    assert.equal(editorText(undefined), "");
 });

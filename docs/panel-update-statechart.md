@@ -165,6 +165,10 @@ Stateless per I4: every status is derived from Docker.
   allows. The journal counts only when it belongs to that helper: the same `from` and `to`, and the
   same operation id, or, for a helper killed before its first line, an operation that began after
   the helper started. The journal of an earlier update is never read as this one's result.
+  Journal observations, including final phases and unreadable answers, expire after 30 seconds:
+  the next status request rereads them so host recovery becomes visible without restarting the
+  panel. Concurrent reads share one status helper. A result line in the exited apply helper's own
+  logs remains authoritative and does not need this fallback.
 - **Start failures**: `docker run` exit 126/127 or an entrypoint that cannot run means the updater
   is missing: `refused` with `updater-missing`, and `managed: "no"` with the same reason. Exit 2
   with nothing on stdout is an installed updater older than `--progress json` (Go's flag parser
@@ -342,6 +346,9 @@ Refinements made while implementing and after the review (`frontend/src/panel-up
   old code.
 - `DISMISS` and `CLOSE` do nothing while the page reloads: the screen offers neither, and closing
   would drop the record the new build shows.
+- An owner's `DISMISS` without a connection hides the outcome locally but does not mark the helper
+  dismissed. The next status after reconnecting shows it again, so the owner can remove it before
+  checking another update. A non-owner's local `CLOSE` remains local across reconnections.
 - `LINK_UP` fires on `authIdentity`, not after the stacks loaded: a panel that restarts slowly must
   not keep a followed update offline behind an inert page.
 - `Preview.Checking` waits on the clock once its acknowledgement arrived (before it a status may not
@@ -433,5 +440,5 @@ result, and reload on it rather than on the first new version they see.
 - **Docker integration**: a fake launcher printing scripted lines with scripted exit codes; the
   observer follows it and derives the status.
 - **Release gate**: through the helper on both architectures, a dry run and a same-version run
-  (`no-change`) on the candidate. The first real cutover from the page is 0.0.14 -> 0.0.15 on the
-  review VPS.
+  (`no-change`) on the candidate. The first real cutover from the page is 0.0.14-rc.3 -> 0.0.14-rc.4
+  on the review VPS, with a schema change.

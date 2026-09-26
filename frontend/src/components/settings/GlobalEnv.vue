@@ -12,12 +12,13 @@
         <div class="editor-box">
             <code-mirror
                 ref="editor"
-                v-model="settings.globalENV"
+                :model-value="settings.globalENV"
                 :extensions="extensionsEnv"
                 minimal
                 wrap
                 dark
                 tab
+                @update:model-value="settings.globalENV = editorText($event)"
                 @change="onChange"
             />
         </div>
@@ -34,6 +35,7 @@ import { lineNumbers, EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { defineComponent, ref, type ComponentPublicInstance } from "vue";
 import InterfaceIcon from "../InterfaceIcon.vue";
+import { editorText } from "../../util-frontend";
 
 /** What the settings page keeps for the sections it shows */
 interface SettingsPage {
@@ -97,6 +99,8 @@ export default defineComponent({
     },
 
     methods: {
+        editorText,
+
         /** Save the settings */
         saveGeneral() {
             this.saveSettings();

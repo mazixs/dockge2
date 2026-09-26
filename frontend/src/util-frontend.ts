@@ -1,3 +1,4 @@
+import type { Text } from "@codemirror/state";
 import { localeDirection, currentLocale } from "./i18n";
 
 /**
@@ -21,4 +22,16 @@ export function setPageLocale() {
  */
 export function errorText(error : unknown) : string {
     return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The document a code editor reported through `update:modelValue`.
+ *
+ * vue-codemirror6 emits the document as a string but types the value as an optional string or
+ * CodeMirror `Text`, so it cannot be bound to a string field with `v-model` directly.
+ * @param value What the editor emitted
+ * @returns The document as text
+ */
+export function editorText(value? : string | Text) : string {
+    return value === undefined ? "" : value.toString();
 }

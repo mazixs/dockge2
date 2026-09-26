@@ -35,7 +35,12 @@
                 </dd>
             </dl>
 
-            <p v-if="container.dockerSocket" class="socket-risk">{{ $t("panelContainerSocketRisk") }}</p>
+            <div v-if="container.dockerSocket" class="socket-risk" role="note">
+                <strong>{{ $t("panelContainerSocketRiskTitle") }}</strong>
+                <p>{{ $t("panelContainerSocketRisk") }}</p>
+                <p>{{ $t("panelContainerSocketRiskAdvice") }}</p>
+                <a href="https://github.com/mazixs/dockge2/blob/main/docs/threat-model.md#reducing-the-risk" target="_blank" rel="noopener noreferrer">{{ $t("panelContainerSocketRiskGuide") }}</a>
+            </div>
         </template>
     </div>
 </template>
@@ -148,6 +153,10 @@ export default defineComponent({
 }
 
 .socket-risk {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-xs);
+    align-items: flex-start;
     margin: 0;
     padding: var(--gap-sm) var(--gap-md);
     border-left: 3px solid var(--state-attention);
@@ -155,6 +164,14 @@ export default defineComponent({
     font-size: var(--text-sm);
     line-height: var(--line-sm);
     color: var(--text-strong);
+
+    strong {
+        font-weight: var(--weight-medium);
+    }
+
+    p {
+        margin: 0;
+    }
 }
 
 @media (max-width: 560px) {

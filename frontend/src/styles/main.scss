@@ -1181,7 +1181,6 @@ body.dark {
         --stack-letter-color: var(--stack-#{$color}-text);
     }
 }
-html { scrollbar-gutter: stable; }
 button, input, select, textarea { font-family: var(--font-ui); }
 h1, h2, h3 { font-weight: var(--weight-medium); }
 h1 { font-weight: var(--weight-strong); letter-spacing: var(--tracking-title); line-height: var(--line-xl); }

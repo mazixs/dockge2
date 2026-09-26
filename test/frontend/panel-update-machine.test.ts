@@ -1002,12 +1002,43 @@ test("a failed dismiss lets the result come back to be closed again", () => {
     assert.equal(node(again.state, "outcome").sub, "rolled-back");
 });
 
+test("an owner who closes an outcome offline can dismiss it after reconnecting and check again", () => {
+    const finished = status(applyOp(APPLY_ID, { outcome: "recovered" }));
+    const done = drive(running("stopping"), push(finished)).state;
+    const hidden = drive(done, { type: "LINK_DOWN",
+        now: T0 }, { type: "DISMISS",
+        owner: true,
+        now: T0 });
+    assert.equal(hidden.state.node.name, "idle");
+    assert.deepEqual(hidden.effects, [{ type: "clearPersist" }]);
+
+    const back = reconnect(hidden.state, finished);
+    assert.equal(node(back.state, "outcome").sub, "rolled-back");
+    assert.ok(!back.effects.some((effect) => effect.type === "emit"), "reconnecting does not delete a helper");
+    const dismissed = drive(back.state, { type: "DISMISS",
+        owner: true,
+        now: T0 });
+    assert.ok(dismissed.effects.some((effect) => effect.type === "emit" && effect.kind === "dismiss" && effect.args[0] === APPLY_ID));
+    const removed = drive(dismissed.state, { type: "ACK",
+        kind: "dismiss",
+        requestId: APPLY_ID,
+        result: { kind: "ok",
+            status: status() },
+        now: T0 });
+    const checked = drive(removed.state, { type: "CHECK",
+        owner: true,
+        requestId: NEXT_ID });
+    assert.equal(node(checked.state, "preview").sub, "checking");
+    assert.ok(checked.effects.some((effect) => effect.type === "emit" && effect.kind === "preview"));
+});
+
 test("closing an outcome locally keeps it closed and clears the record", () => {
     const done = drive(running("stopping"), push(status(applyOp(APPLY_ID, { outcome: "recovered" })))).state;
     const run = drive(done, { type: "CLOSE" });
     assert.equal(run.state.node.name, "idle");
     assert.deepEqual(run.effects, [{ type: "clearPersist" }]);
     assert.equal(drive(run.state, push(status(applyOp(APPLY_ID, { outcome: "recovered" })))).state.node.name, "idle");
+    assert.equal(reconnect(run.state, status(applyOp(APPLY_ID, { outcome: "recovered" }))).state.node.name, "idle");
 });
 
 test("presentation: overlay for a signed-in owner, banner for others, suppressions while running", () => {

@@ -412,12 +412,6 @@ function ask(state : PanelUpdateState, probe : boolean) : PanelUpdateStep {
     };
 }
 
-function then(step : PanelUpdateStep, more : (state : PanelUpdateState) => PanelUpdateStep) : PanelUpdateStep {
-    const next = more(step.state);
-    return { state: next.state,
-        effects: [ ...step.effects, ...next.effects ] };
-}
-
 // --- Idle ---------------------------------------------------------------------------
 
 /**
@@ -1227,15 +1221,14 @@ function dismiss(state : PanelUpdateState, event : Extract<PanelUpdateEvent, { t
     if (!event.owner || node.name !== "outcome" || node.updated === "reloading") {
         return stay(state);
     }
+    const clear : PanelUpdateEffect = { type: "clearPersist" };
+    if (state.ctx.link.kind !== "online") {
+        // Hide it locally without marking the helper dismissed: the next status must show it again.
+        return withNode(state, classify(state.ctx), [ clear ]);
+    }
     const closed : PanelUpdateState = { ...state,
         ctx: { ...state.ctx,
             closed: node.request } };
-    const clear : PanelUpdateEffect = { type: "clearPersist" };
-    if (state.ctx.link.kind !== "online") {
-        // Nothing can be sent: close it here, the helper stays until the next dismiss
-        return then({ state: closed,
-            effects: [ clear ] }, (s) => enterIdle(s, event.now));
-    }
     // Row 30
     return withNode(closed, idleNode("loading", { requestedAt: event.now }), [{ type: "emit",
         kind: "dismiss",

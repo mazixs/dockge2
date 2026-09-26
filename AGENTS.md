@@ -4,7 +4,7 @@ Guidance for anyone - human or AI agent - working in this repository. `CLAUDE.md
 so there is one description of the project rather than two that drift apart.
 
 Dockge2 is a fork of Dockge: a self-hosted manager for `compose.yaml` stacks. Work happens on
-`main`. Node 22.23.2 or 24.19.0; `.nvmrc` pins 24.19.0.
+`main`. Node 22.23.2 or 24.21.0; `.nvmrc` pins 24.21.0.
 
 The project is led in English: code, comments, documentation, commit messages and interface
 strings. The interface is translated into the most widely spoken languages, so English is the

@@ -31,7 +31,7 @@ docker compose -p dockge2-local -f docker-compose.local.yml down
 
 ## On the host
 
-Node.js 22.23.2 or 24.19.0 (`.nvmrc` pins 24.19.0), Git, and Docker for anything that runs
+Node.js 22.23.2 or 24.21.0 (`.nvmrc` pins 24.21.0), Git, and Docker for anything that runs
 containers.
 
 ```bash

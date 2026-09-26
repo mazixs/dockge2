@@ -1,7 +1,6 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmod, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createLocalAccountIssuer } from "better-auth/db";
 import { APIError, createAuthEndpoint, formCsrfMiddleware, originCheckMiddleware } from "better-auth/api";
 import { Database } from "./database";
 import { Settings } from "./settings";
@@ -111,7 +110,6 @@ export async function issueUser(input : unknown, bootstrap = false) {
         await trx("account").insert({ id: randomUUID(),
             accountId: id,
             providerId: "credential",
-            issuer: createLocalAccountIssuer("credential"),
             userId: id,
             password,
             createdAt: now,
