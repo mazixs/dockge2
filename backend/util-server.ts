@@ -139,6 +139,31 @@ export function callbackResult<C>(result : ResponseOf<C>, callback : C) : void {
     callback(result);
 }
 
+/**
+ * A packet middleware that checks packets side by side and admits them in the order they
+ * arrived. A check takes a varying number of turns of the event loop, and a packet let
+ * through as soon as its own check finished overtook the one before it: in a terminal, a
+ * key typed second reached the shell first.
+ * @param check Settles when the packet may pass, rejects with the reason it may not
+ * @param deny Tells the client why its packet did not pass
+ * @returns Middleware for `socket.use`
+ */
+export function admitInOrder<P>(check : (packet : P) => Promise<void>, deny : (packet : P, error : unknown) => void) : (packet : P, next : () => void) => void {
+    let admitted : Promise<void> = Promise.resolve();
+
+    return (packet, next) => {
+        // Settled at once, so a refusal waiting for its turn is not an unhandled rejection
+        const outcome = Promise.resolve().then(() => check(packet)).then(() => null, (error : unknown) => ({ error }));
+        admitted = admitted.then(() => outcome).then((refused) => {
+            if (refused) {
+                deny(packet, refused.error);
+            } else {
+                next();
+            }
+        }).catch((error) => log.error("server", String(error)));
+    };
+}
+
 /** How many wrong passwords a client may offer before it has to wait */
 const PASSWORD_ATTEMPT_LIMIT = 5;
 

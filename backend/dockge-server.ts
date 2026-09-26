@@ -22,7 +22,7 @@ import { Settings } from "./settings";
 import checkVersion from "./check-version";
 import dayjs from "dayjs";
 import { isDev, LooseObject } from "../common/util-common";
-import { Arguments, Config, DockgeSocket, dropRevokedSessions } from "./util-server";
+import { admitInOrder, Arguments, Config, DockgeSocket, dropRevokedSessions } from "./util-server";
 import { GitSocketHandler } from "./agent-socket-handlers/git-socket-handler";
 import { StabilitySocketHandler } from "./agent-socket-handlers/stability-socket-handler";
 import { ContainerSocketHandler } from "./agent-socket-handlers/container-socket-handler";
@@ -432,33 +432,29 @@ export class DockgeServer {
         });
         dockgeSocket.instanceManager = new AgentManager(dockgeSocket);
         // Default deny at the transport boundary, including future handlers.
-        dockgeSocket.use(async (packet, next) => {
-            const [ event, ...args ] = packet;
+        const authorize = async ([ event, ...args ] : [ string, ...unknown[] ]) => {
             if (event === "needsSetup") {
-                next();
                 return;
             }
-            try {
-                await identityReady;
-                if (event === "agent") {
-                    if (typeof args[1] !== "string") {
-                        throw new Error("authPermissionDenied");
-                    }
-                    await authorizeSocketEvent(dockgeSocket, args[1], true);
-                } else {
-                    await authorizeSocketEvent(dockgeSocket, event);
+            await identityReady;
+            if (event === "agent") {
+                if (typeof args[1] !== "string") {
+                    throw new Error("authPermissionDenied");
                 }
-                next();
-            } catch (error) {
-                const callback = args[args.length - 1];
-                if (typeof callback === "function") {
-                    callback({ ok: false,
-                        msg: error instanceof Error ? error.message : "authPermissionDenied",
-                        msgi18n: true });
-                }
-                // Do not call next: a denied packet must not reach its handler.
+                await authorizeSocketEvent(dockgeSocket, args[1], true);
+            } else {
+                await authorizeSocketEvent(dockgeSocket, event);
             }
-        });
+        };
+        dockgeSocket.use(admitInOrder(authorize, (packet, error) => {
+            const callback = packet[packet.length - 1];
+            if (typeof callback === "function") {
+                callback({ ok: false,
+                    msg: error instanceof Error ? error.message : "authPermissionDenied",
+                    msgi18n: true });
+            }
+            // Do not call next: a denied packet must not reach its handler.
+        }));
         dockgeSocket.emitAgent = (event : string, ...args : unknown[]) => {
             if (!dockgeSocket.connected || (dockgeSocket.userRole === "viewer" && event !== "stackList")) {
                 return;

@@ -6,9 +6,10 @@ import { AgentManager } from "../../backend/agent-manager";
 import { AgentProxySocketHandler } from "../../backend/socket-handlers/agent-proxy-socket-handler";
 import { AgentSocket } from "../../common/agent-socket";
 import type { AgentRequestContract } from "../../common/agent-events";
-import { ALL_ENDPOINTS } from "../../common/util-common";
+import { ALL_ENDPOINTS, sleep } from "../../common/util-common";
 import { resolveSocketIdentity } from "../../backend/auth";
 import { issueUser } from "../../backend/auth-access";
+import { getAuthRuntime, setAuthRuntime } from "../../backend/auth-runtime";
 import { getAuth } from "../../backend/auth";
 import { ManageAgentSocketHandler } from "../../backend/socket-handlers/manage-agent-socket-handler";
 import type { DockgeServer } from "../../backend/dockge-server";
@@ -302,5 +303,37 @@ test("an event goes to the agent it names: this one, all of them, or a remote on
         assert.equal(badEvent.ok, false);
 
         assert.equal(handled.length, 1);
+    });
+});
+
+test("events reach an endpoint in the order they arrived, however long each authorization takes", async () => {
+    await withDatabase(async () => {
+        const cookie = await createTestAccount();
+        const identity = await resolveSocketIdentity({ cookie });
+        const socket = Object.assign(new EventEmitter(), makeAuthenticatedSocket({ cookie,
+            userID: identity.userID ?? "" }));
+        const runtime = getAuthRuntime();
+        // The first key waits longest for its session, as a lookup that misses a cache does
+        const delays = [ 30, 0, 10 ];
+        setAuthRuntime({ ...runtime,
+            identify: async (headers) => {
+                await sleep(delays.shift() ?? 0);
+                return runtime.identify(headers);
+            } });
+        try {
+            const agentSocket = new AgentSocket<AgentRequestContract>();
+            const typed : string[] = [];
+            agentSocket.on("terminalInput", (_terminalName, cmd, callback) => {
+                typed.push(String(cmd));
+                callback({ ok: true });
+            });
+            new AgentProxySocketHandler().create2(socket, {} as never, agentSocket);
+
+            await Promise.all([ "c", "m", "d" ].map((key) => new Promise(
+                (resolve) => socket.emit("agent", "", "terminalInput", "shell", key, resolve))));
+            assert.deepEqual(typed, [ "c", "m", "d" ]);
+        } finally {
+            setAuthRuntime(runtime);
+        }
     });
 });

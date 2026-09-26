@@ -1845,3 +1845,11 @@ and a run of the same version recreated the panel instead of ending in no change
 asks its Compose with a one-line probe what an omitted value means and writes the value into every
 bind of a snapshot, so both versions render the release file to the same bytes and read a snapshot
 the same way; a recorded snapshot from before is read as the current Compose would render it.
+
+The CI run of that fix failed the browser suite once, on the Cmd+V paste: the terminal showed
+`echo mcd` for a typed `echo cmd`, and eight local repeats reproduced `ehco` and `cdm`. Not a flaky
+test: since 0.0.1 the transport middleware admitted each packet the moment its own permission check
+finished, and the agent proxy then checked again before dispatching, so a check that took a turn
+longer let the next key overtake it. Packets are now checked side by side and admitted in arrival
+order (`admitInOrder` in `backend/util-server.ts`), and the proxy forwards each endpoint's events
+one after another. 25 repeats of the paste test and 8 of both terminal specs passed.

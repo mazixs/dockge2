@@ -10,8 +10,27 @@ import { ALL_ENDPOINTS } from "../../common/util-common";
 export class AgentProxySocketHandler extends SocketHandler {
 
     create2(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
+        // Events reach each endpoint in the order they arrived. Authorization takes a
+        // varying number of turns of the event loop, and unchained, a key typed second
+        // reached the shell first
+        const queues = new Map<unknown, Promise<void>>();
+
         // Agent - proxying requests if needed
-        socket.on("agent", async (endpoint : unknown, eventName : unknown, ...args : unknown[]) => {
+        socket.on("agent", (endpoint : unknown, eventName : unknown, ...args : unknown[]) => {
+            const key = endpoint === socket.endpoint ? "" : endpoint;
+            const turn : Promise<void> = (queues.get(key) ?? Promise.resolve())
+                .then(() => forward(endpoint, eventName, args))
+                .catch((e) => log.error("agent", String(e)))
+                .finally(() => {
+                    // Endpoint names come from the client: an idle one keeps no entry
+                    if (queues.get(key) === turn) {
+                        queues.delete(key);
+                    }
+                });
+            queues.set(key, turn);
+        });
+
+        const forward = async (endpoint : unknown, eventName : unknown, args : unknown[]) => {
             // The last argument is the ack callback when the client passed one
             const callback = typeof args[args.length - 1] === "function" ? args[args.length - 1] as (res : unknown) => void : undefined;
 
@@ -57,7 +76,7 @@ export class AgentProxySocketHandler extends SocketHandler {
                 // Without this the browser keeps waiting for an answer that never comes
                 callbackError(e, callback);
             }
-        });
+        };
     }
 
     create(socket : DockgeSocket, server : DockgeServer) {
