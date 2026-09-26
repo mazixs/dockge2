@@ -5,7 +5,8 @@ import { Stack } from "../stack";
 import { readAvailability } from "../observations";
 import { readImageUpdates } from "../image-updates";
 import { readStackSource } from "../stack-source";
-import { hasBuildServices, readComposeImages } from "../../common/compose-status";
+import { COMPOSE_PROJECT_LABEL, COMPOSE_WORKING_DIR_LABEL, hasBuildServices, readComposeImages } from "../../common/compose-status";
+import { readStackRelations, type RelationsDocker } from "../stack-relations";
 import { Terminal } from "../terminal";
 import { getComposeTerminalName } from "../../common/util-common";
 import { ContainerInstanceStatus } from "../../common/compose-status";
@@ -88,6 +89,13 @@ function readSaveCallback(baselineOrCallback : unknown, maybeCallback : unknown)
 const AVAILABILITY_WINDOWS = [ 24, 168, 720 ];
 
 export class DockerSocketHandler extends AgentSocketHandler {
+    /**
+     * @param relationsDocker How Docker is asked for the relations of a stack; a test replaces it
+     */
+    constructor(private readonly relationsDocker? : RelationsDocker) {
+        super();
+    }
+
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket<AgentRequestContract>) {
         // Do not call super.create()
 
@@ -100,7 +108,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
-                    msg: "Deployed",
+                    msg: "deployed",
                     msgi18n: true,
                     fileHashes,
                 }, callback);
@@ -116,7 +124,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 const { fileHashes } = await this.saveStack(server, name, composeYAML, composeENV, isAdd, readSaveBaseline(baselineOrCallback));
                 callbackResult({
                     ok: true,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                     fileHashes,
                 }, callback);
@@ -144,7 +152,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
-                    msg: "Deleted",
+                    msg: "deleted",
                     msgi18n: true,
                 }, callback);
 
@@ -179,7 +187,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 runInBackground("stack list", () => server.sendStackList());
                 callbackResult({
                     ok: true,
-                    msg: "Updated",
+                    msg: "updated",
                     msgi18n: true,
                 }, callback);
             } catch (e) {
@@ -200,7 +208,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 await stack.start(socket);
                 callbackResult({
                     ok: true,
-                    msg: "Started",
+                    msg: "started",
                     msgi18n: true,
                 }, callback);
                 runInBackground("stack list", () => server.sendStackList());
@@ -223,7 +231,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 await stack.stop(socket);
                 callbackResult({
                     ok: true,
-                    msg: "Stopped",
+                    msg: "stopped",
                     msgi18n: true,
                 }, callback);
                 runInBackground("stack list", () => server.sendStackList());
@@ -247,7 +255,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 await stack.restart(socket);
                 callbackResult({
                     ok: true,
-                    msg: "Restarted",
+                    msg: "restarted",
                     msgi18n: true,
                 }, callback);
                 runInBackground("stack list", () => server.sendStackList());
@@ -269,7 +277,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 await stack.update(socket);
                 callbackResult({
                     ok: true,
-                    msg: "Updated",
+                    msg: "updated",
                     msgi18n: true,
                 }, callback);
                 runInBackground("stack list", () => server.sendStackList());
@@ -291,7 +299,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 await stack.down(socket);
                 callbackResult({
                     ok: true,
-                    msg: "Downed",
+                    msg: "downed",
                     msgi18n: true,
                 }, callback);
                 runInBackground("stack list", () => server.sendStackList());
@@ -331,6 +339,31 @@ export class DockerSocketHandler extends AgentSocketHandler {
             }
         });
 
+        // How the services are tied together: read when asked, never written back
+        agentSocket.on("stackRelations", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                const managed = stack.isManagedByDockge;
+                callbackResult({
+                    ok: true,
+                    relations: await readStackRelations({
+                        project: stack.name,
+                        containerLabel: managed ? `${COMPOSE_WORKING_DIR_LABEL}=${stack.path}` : `${COMPOSE_PROJECT_LABEL}=${stack.name}`,
+                        composeConfigArgs: managed ? stack.getComposeOptions("config", "--format", "json") : null,
+                        cwd: stack.path,
+                    }, this.relationsDocker),
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         // What an update would do: what the working copy says and what the registry serves.
         // Nothing is pulled and nothing is started here - this is the preview state.
         agentSocket.on("stackUpdatePreview", async (stackName : unknown, callback) => {
@@ -344,7 +377,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 const stack = await Stack.getStack(server, stackName);
 
                 if (!stack.isManagedByDockge) {
-                    throw new ValidationError("This stack is not managed by Dockge.");
+                    throw new ValidationError("stackNotManagedByDockgeMsg");
                 }
 
                 // Images come from the file the server parsed itself, never from the client
@@ -378,7 +411,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 const terminal = Terminal.getTerminal(getComposeTerminalName(socket.endpoint, stackName));
 
                 if (!terminal) {
-                    throw new ValidationError("Nothing is running for this stack.");
+                    throw new ValidationError("stackNothingRunning");
                 }
 
                 await terminal.end();
@@ -405,7 +438,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 // Only the windows the UI offers: an arbitrary number would let a client
                 // ask for a scan of the whole history
                 if (typeof(windowHours) !== "number" || !AVAILABILITY_WINDOWS.includes(windowHours)) {
-                    throw new ValidationError("Unsupported availability window");
+                    throw new ValidationError("requestNotUnderstood");
                 }
 
                 // The name is validated by the same path every stack call uses
@@ -455,7 +488,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 callbackResult({
                     ok: true,
                     config: stored,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                 }, callback);
 
@@ -484,7 +517,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                 }, callback);
             } catch (e) {
@@ -558,7 +591,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                     secretFiles: await stack.listSecretFiles(),
                 }, callback);
@@ -585,7 +618,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Deleted",
+                    msg: "deleted",
                     msgi18n: true,
                     secretFiles: await stack.listSecretFiles(),
                 }, callback);
@@ -617,7 +650,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                     secretFiles: await stack.listSecretFiles(),
                 }, callback);
@@ -642,7 +675,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                     secretFiles: await stack.listSecretFiles(),
                 }, callback);
@@ -830,7 +863,7 @@ function parseSecretBindings(raw : unknown) : StackFileConfig["secretBindings"] 
     }
 
     if (raw.length > MAX_FILE_LIST_LENGTH) {
-        throw new ValidationError("Too many secret bindings");
+        throw new ValidationError("secretBindingsTooMany");
     }
 
     const bindings : StackFileConfig["secretBindings"] = [];
@@ -839,7 +872,7 @@ function parseSecretBindings(raw : unknown) : StackFileConfig["secretBindings"] 
         const binding = item as Record<string, unknown>;
 
         if (typeof binding?.name !== "string" || typeof binding?.fileName !== "string") {
-            throw new ValidationError("A secret binding needs a name and a file name");
+            throw new ValidationError("secretBindingIncomplete");
         }
 
         const services = binding.services;
@@ -848,7 +881,7 @@ function parseSecretBindings(raw : unknown) : StackFileConfig["secretBindings"] 
         }
 
         if (Array.isArray(services) && services.length > MAX_FILE_LIST_LENGTH) {
-            throw new ValidationError("Too many services for one secret");
+            throw new ValidationError("secretServicesTooMany");
         }
 
         bindings.push({
@@ -886,7 +919,7 @@ function parseStackFileConfig(config : unknown) : StackFileConfig {
 
     // A stack directory never holds this many files, and every entry costs filesystem calls
     if (raw.envFileNames.length > MAX_FILE_LIST_LENGTH) {
-        throw new ValidationError("Too many env files");
+        throw new ValidationError("envFilesTooMany");
     }
 
     if (raw.activeEnvFileName !== undefined && typeof raw.activeEnvFileName !== "string") {

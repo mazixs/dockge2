@@ -1,0 +1,32 @@
+{
+    "description": "A command copied from a guide often starts with sudo. Everything before run is skipped.",
+    "command": "sudo docker run -d -p 80:80 nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "ports"
+        ],
+        "values": {
+            "image": "nginx",
+            "ports": [
+                "80:80"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "-p"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

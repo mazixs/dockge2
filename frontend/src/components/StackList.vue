@@ -9,8 +9,8 @@
                     <button v-else class="search-icon" type="button" :aria-label="$t('clearSearch')" @click="clearSearchText">
                         <font-awesome-icon icon="times" />
                     </button>
-                    <form @submit.prevent>
-                        <input v-model="searchText" class="form-control search-input" autocomplete="off" :placeholder="$t('searchStacksPlaceholder')" :aria-label="$t('searchStacksPlaceholder')" />
+                    <form role="search" @submit.prevent>
+                        <input v-model="searchText" type="search" class="form-control search-input" autocomplete="off" :placeholder="$t('searchStacksPlaceholder')" :aria-label="$t('searchStacksPlaceholder')" />
                     </form>
                 </div>
 
@@ -21,7 +21,7 @@
                         <button
                             v-for="filter in filters" :key="filter.key"
                             class="filter" type="button"
-                            :aria-pressed="String(activeFilter === filter.key)"
+                            :aria-pressed="activeFilter === filter.key"
                             :class="{ on: activeFilter === filter.key }"
                             @click="toggleFilter(filter.key)"
                         >
@@ -69,64 +69,113 @@
                 </EmptyState>
             </div>
 
-            <div v-for="agent in agentStackList" :key="agent.endpoint" class="stack-list-inner">
+            <div v-for="group in groups" :key="group.key" class="stack-list-inner">
                 <button
                     v-if="$root.agentCount > 1"
                     class="agent-select" type="button"
-                    :aria-expanded="String(!closedAgents.get(agent.endpoint))"
-                    @click="closedAgents.set(agent.endpoint, !closedAgents.get(agent.endpoint))"
+                    :aria-expanded="!closedAgents.has(group.key)"
+                    @click="toggleAgent(group.key)"
                 >
-                    <font-awesome-icon :icon="closedAgents.get(agent.endpoint) ? 'chevron-circle-right' : 'chevron-circle-down'" />
-                    <span v-if="agent.endpoint === 'current'">{{ $t("currentEndpoint") }}</span>
-                    <span v-else>{{ agent.endpoint }}</span>
-                    <span class="count">{{ agent.stacks.length }}</span>
+                    <font-awesome-icon :icon="closedAgents.has(group.key) ? 'chevron-circle-right' : 'chevron-circle-down'" />
+                    <span>{{ group.server }}</span>
+                    <span class="count">{{ group.total }}</span>
                 </button>
 
-                <template v-if="$root.agentCount === 1 || !closedAgents.get(agent.endpoint)">
-                    <StackListItem
-                        v-for="item in agent.managed" :key="item.name" :stack="item" :isSelectMode="selectMode"
-                        :isSelected="isSelected" :select="select" :deselect="deselect"
-                    />
+                <template v-if="$root.agentCount === 1 || !closedAgents.has(group.key)">
+                    <StackListItem v-for="item in rowsOf(group, 'managed')" :key="`${group.key}/${item.name}`" :stack="item" />
+                    <button v-if="hiddenCount(group, 'managed') > 0" class="more-rows" type="button" @click="showMore(group, 'managed')">
+                        {{ $t("listShowMore", [ Math.min(hiddenCount(group, 'managed'), pageSize) ]) }}
+                    </button>
 
                     <!-- Compose projects started past the panel: listed, since they run on
                          the machine, but folded away so they do not bury the owner's stacks -->
-                    <template v-if="agent.foreign.length > 0">
+                    <template v-if="group.foreign.length > 0">
                         <button
-                            class="foreign-toggle" type="button"
-                            :aria-expanded="String(isForeignOpen(agent))"
+                            class="fold-toggle" type="button"
+                            :aria-expanded="isFoldOpen(group, 'foreign')"
                             :title="$t('otherProjectsHint')"
-                            @click="toggleForeign(agent.endpoint)"
+                            @click="toggleFold(group, 'foreign')"
                         >
                             <font-awesome-icon icon="chevron-down" class="chevron" />
                             <span>{{ $t("otherProjects") }}</span>
-                            <span class="count">{{ agent.foreign.length }}</span>
+                            <span class="count">{{ group.foreign.length }}</span>
                         </button>
-                        <template v-if="isForeignOpen(agent)">
-                            <StackListItem
-                                v-for="item in agent.foreign" :key="item.name" :stack="item" :isSelectMode="selectMode"
-                                :isSelected="isSelected" :select="select" :deselect="deselect"
-                            />
+                        <template v-if="isFoldOpen(group, 'foreign')">
+                            <StackListItem v-for="item in rowsOf(group, 'foreign')" :key="`${group.key}/${item.name}`" :stack="item" />
+                            <button v-if="hiddenCount(group, 'foreign') > 0" class="more-rows" type="button" @click="showMore(group, 'foreign')">
+                                {{ $t("listShowMore", [ Math.min(hiddenCount(group, 'foreign'), pageSize) ]) }}
+                            </button>
+                        </template>
+                    </template>
+
+                    <!-- Containers of no compose project: docker run and other tools -->
+                    <template v-if="group.standalone.length > 0">
+                        <button
+                            class="fold-toggle" type="button"
+                            :aria-expanded="isFoldOpen(group, 'standalone')"
+                            :title="$t('standaloneContainersHint')"
+                            @click="toggleFold(group, 'standalone')"
+                        >
+                            <font-awesome-icon icon="chevron-down" class="chevron" />
+                            <span>{{ $t("standaloneContainers") }}</span>
+                            <span class="count">{{ group.standalone.length }}</span>
+                        </button>
+                        <template v-if="isFoldOpen(group, 'standalone')">
+                            <ContainerListItem v-for="item in rowsOf(group, 'standalone')" :key="`${group.key}/${item.id}`" :container="item" :endpoint="group.endpoint" />
+                            <button v-if="hiddenCount(group, 'standalone') > 0" class="more-rows" type="button" @click="showMore(group, 'standalone')">
+                                {{ $t("listShowMore", [ Math.min(hiddenCount(group, 'standalone'), pageSize) ]) }}
+                            </button>
                         </template>
                     </template>
                 </template>
             </div>
         </div>
     </div>
-
-    <Confirm ref="confirmPause" :yes-text="$t('Yes')" :no-text="$t('No')" @yes="pauseSelected">
-        {{ $t("pauseStackMsg") }}
-    </Confirm>
 </template>
 
-<script>
-import Confirm from "../components/Confirm.vue";
+<script lang="ts">
+import { defineComponent } from "vue";
 import EmptyState from "../components/EmptyState.vue";
 import StackListItem from "../components/StackListItem.vue";
-import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, UNKNOWN, isStackFailed, stackNeedsAttention } from "../../../common/util-common";
+import ContainerListItem from "../components/ContainerListItem.vue";
+import { RUNNING, UNKNOWN, stackNeedsAttention } from "../../../common/util-common";
+import {
+    LIST_PAGE_SIZE,
+    compareStacks,
+    containerMatchesFilter,
+    containerSearchFields,
+    isStackStopped,
+    matchesSearch,
+    pageRows,
+    readListFilter,
+    stackMatchesFilter,
+    stackSearchFields,
+    withListQuery,
+    type ListFilter,
+    type ListedStack,
+} from "../stack-list-model";
+import type { StandaloneContainer } from "../../../common/types/container";
 
-export default {
+/** Rows of one server in the list */
+interface ListGroup {
+    /** "current" for this server, the endpoint for an agent */
+    key : string;
+    /** Endpoint of the server, empty for this one */
+    endpoint : string;
+    /** Name of the server as the header shows it */
+    server : string;
+    managed : ListedStack[];
+    foreign : ListedStack[];
+    standalone : StandaloneContainer[];
+    total : number;
+}
+
+type GroupKind = "managed" | "foreign" | "standalone";
+type FoldKind = Exclude<GroupKind, "managed">;
+
+export default defineComponent({
     components: {
-        Confirm,
+        ContainerListItem,
         EmptyState,
         StackListItem,
     },
@@ -138,97 +187,87 @@ export default {
     },
     data() {
         return {
-            searchText: "",
-            selectMode: false,
-            selectAll: false,
-            disableSelectAllWatcher: false,
-            selectedStacks: {},
-            /** Нажатый фильтр: attention, stopped, updates или пусто. Живет в адресе,
-             *  поэтому счетчик в шапке может привести сразу к нужному срезу */
-            activeFilter: this.$route.query.filter ?? "",
-            closedAgents: new Map(),
-            /** Servers whose foreign projects the user unfolded; folded by default */
-            openForeign: new Set(),
+            /** Строка поиска живет в адресе вместе с фильтром: срез можно открыть ссылкой */
+            searchText: typeof this.$route.query.q === "string" ? this.$route.query.q : "",
+            /** Нажатый фильтр. Живет в адресе, поэтому счетчик в шапке может привести сразу к нужному срезу */
+            activeFilter: readListFilter(this.$route.query.filter),
+            closedAgents: new Set<string>(),
+            /** Folded groups the user unfolded, as "server:kind"; folded by default */
+            openGroups: new Set<string>(),
+            /** Rows drawn per group, as "server:kind", beyond the first page */
+            limits: {} as Record<string, number>,
+            pageSize: LIST_PAGE_SIZE,
         };
     },
     computed: {
+        needle() : string {
+            return this.searchText.trim().toLowerCase();
+        },
+
+        /** Stacks of the servers in view, before search and filter */
+        stacksInView() : ListedStack[] {
+            return Object.values(this.$root.completeStackList).filter(stack => this.inView(stack.endpoint || ""));
+        },
+
+        /** Containers outside every project of the servers in view, before search and filter */
+        containersInView() : { endpoint : string; container : StandaloneContainer }[] {
+            return Object.entries(this.$root.hostContainers)
+                .filter(([ endpoint ]) => this.inView(endpoint))
+                .flatMap(([ endpoint, host ]) => host.standalone.map((container) => ({ endpoint,
+                    container })));
+        },
+
         /**
-         * Returns a sorted list of stacks based on the applied filters and search text.
-         * @returns {Array} The sorted list of stacks.
+         * Rows after search and filter, grouped by server: this server first, the rest
+         * by name; stacks by state with the alarming ones on top
+         * @returns Groups of the list
          */
-        agentStackList() {
-            let result = Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint);
-
-            result = result.filter(stack => this.matchesSearch(stack) && this.matchesFilter(stack));
-
-            result.sort((m1, m2) => {
-
-                // sort by managed by dockge
-                if (m1.isManagedByDockge && !m2.isManagedByDockge) {
-                    return -1;
-                } else if (!m1.isManagedByDockge && m2.isManagedByDockge) {
-                    return 1;
+        groups() : ListGroup[] {
+            const groups = new Map<string, ListGroup>();
+            const groupOf = (endpoint : string) : ListGroup => {
+                const key = endpoint || "current";
+                let group = groups.get(key);
+                if (!group) {
+                    group = { key,
+                        endpoint,
+                        server: this.serverName(endpoint),
+                        managed: [],
+                        foreign: [],
+                        standalone: [],
+                        total: 0 };
+                    groups.set(key, group);
                 }
+                return group;
+            };
 
-                // Sort by status, alert first: a crashed or degraded stack is the one
-                // the user came to look at, so it goes above the healthy ones
-                const rank = (stack) => {
-                    switch (stack.status) {
-                        case EXITED:
-                            return isStackFailed(stack.status, stack.issues) ? 0 : 3;
-                        case ATTENTION:
-                            return 1;
-                        case RUNNING:
-                            return 2;
-                        case CREATED_STACK:
-                            return 4;
-                        case CREATED_FILE:
-                            return 5;
-                        default:
-                            // UNKNOWN and anything unexpected go last
-                            return 6;
-                    }
-                };
-
-                if (rank(m1) !== rank(m2)) {
-                    return rank(m1) - rank(m2);
+            for (const stack of this.stacksInView) {
+                const endpoint = stack.endpoint || "";
+                if (stackMatchesFilter(stack, this.activeFilter) && matchesSearch(this.needle, stackSearchFields(stack, this.serverName(endpoint)))) {
+                    const group = groupOf(endpoint);
+                    (stack.isManagedByDockge ? group.managed : group.foreign).push(stack);
                 }
-                return m1.name.localeCompare(m2.name);
+            }
+            for (const { endpoint, container } of this.containersInView) {
+                if (containerMatchesFilter(container, this.activeFilter) && matchesSearch(this.needle, containerSearchFields(container, this.serverName(endpoint)))) {
+                    groupOf(endpoint).standalone.push(container);
+                }
+            }
+
+            for (const group of groups.values()) {
+                group.managed.sort(compareStacks);
+                group.foreign.sort(compareStacks);
+                group.total = group.managed.length + group.foreign.length + group.standalone.length;
+            }
+
+            return [ ...groups.values() ].sort((a, b) => {
+                if (a.key === "current" || b.key === "current") {
+                    return a.key === "current" ? -1 : 1;
+                }
+                return a.server.localeCompare(b.server);
             });
-
-            // Group stacks by endpoint, sorting them so the local endpoint is first
-            // and the rest are sorted alphabetically
-            result = [
-                ...result.reduce((acc, stack) => {
-                    const endpoint = stack.endpoint || "current";
-                    if (!acc.has(endpoint)) {
-                        acc.set(endpoint, []);
-                    }
-                    acc.get(endpoint).push(stack);
-                    return acc;
-                }, new Map()).entries()
-            ].map(([ endpoint, stacks ]) => ({
-                endpoint,
-                stacks,
-                managed: stacks.filter((stack) => stack.isManagedByDockge),
-                foreign: stacks.filter((stack) => !stack.isManagedByDockge),
-            })).sort((a, b) => {
-                if (a.endpoint === "current" && b.endpoint !== "current") {
-                    return -1;
-                } else if (a.endpoint !== "current" && b.endpoint === "current") {
-                    return 1;
-                }
-                return a.endpoint.localeCompare(b.endpoint);
-            });
-
-            return result;
         },
 
-        isDarkTheme() {
-            return document.body.classList.contains("dark");
-        },
-
-        stackListStyle() {
+        stackListStyle() : Record<string, string> {
             // Шапка списка: поиск с фильтрами плюс строка заголовков колонок
             return {
                 "height": "calc(100% - 96px)"
@@ -236,20 +275,15 @@ export default {
         },
 
         /** Сколько строк осталось после поиска и фильтра */
-        visibleCount() {
-            return this.agentStackList.reduce((sum, agent) => sum + agent.stacks.length, 0);
+        visibleCount() : number {
+            return this.groups.reduce((sum, group) => sum + group.total, 0);
         },
 
         /** Список сужен рукой: пусто из-за поиска или фильтра, а не из-за отсутствия стеков */
-        isNarrowed() {
-            return this.searchText !== "" || Boolean(this.activeFilter);
+        isNarrowed() : boolean {
+            return this.needle !== "" || Boolean(this.activeFilter);
         },
 
-        /**
-         * Фильтры со своими счетчиками. Счетчик считается по всему списку, а не по
-         * отфильтрованному, иначе кнопка меняла бы свое число от собственного нажатия.
-         * @returns {Array<object>} Ключ, подпись и счетчик
-         */
         /**
          * Whether the first stack list is still on its way.
          *
@@ -257,53 +291,89 @@ export default {
          * "the server has not answered yet" from "the server answered, there is
          * nothing". Before this the two looked identical and the waiting screen
          * offered to create a first stack.
-         * @returns {boolean} Признак ожидания первого списка
+         * @returns Признак ожидания первого списка
          */
-        awaitingFirstList() {
+        awaitingFirstList() : boolean {
             return this.$root.stackListAt === 0;
         },
 
-        filters() {
-            const all = Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint);
+        /**
+         * Фильтры со своими счетчиками. Счетчик считается по всему списку, а не по
+         * отфильтрованному, иначе кнопка меняла бы свое число от собственного нажатия.
+         * Отдельные контейнеры считаются тоже: число обещает ровно те строки, которые
+         * покажет нажатие
+         * @returns Ключ, подпись и счетчик
+         */
+        filters() : { key : ListFilter; label : string; count : number }[] {
+            const stacks = this.stacksInView;
+            const containers = this.containersInView.map((row) => row.container);
+            const count = (filter : ListFilter) => containers.filter((container) => containerMatchesFilter(container, filter)).length;
 
             return [
                 { key: "running",
                     label: this.$t("filterRunning"),
-                    count: all.filter((stack) => stack.status === RUNNING).length },
+                    count: stacks.filter((stack) => stack.status === RUNNING).length + count("running") },
                 { key: "attention",
                     label: this.$t("filterAttention"),
-                    count: all.filter((stack) => stackNeedsAttention(stack)).length },
+                    count: stacks.filter((stack) => stackNeedsAttention(stack)).length + count("attention") },
                 { key: "stopped",
                     label: this.$t("filterStopped"),
-                    count: all.filter((stack) => this.isStopped(stack)).length },
+                    count: stacks.filter((stack) => isStackStopped(stack)).length + count("stopped") },
                 { key: "unknown",
                     label: this.$t("filterUnknown"),
-                    count: all.filter((stack) => stack.status === UNKNOWN).length },
+                    count: stacks.filter((stack) => stack.status === UNKNOWN).length + count("unknown") },
                 { key: "updates",
                     label: this.$t("filterUpdates"),
-                    count: all.filter((stack) => (stack.source?.behind ?? 0) > 0).length },
+                    count: stacks.filter((stack) => stackMatchesFilter(stack, "updates")).length },
             ];
         },
     },
     watch: {
-        "$route.query.filter"(value) {
-            this.activeFilter = value ?? "";
+        "$route.query.filter"(value : unknown) {
+            this.activeFilter = readListFilter(value);
+        },
+        "$route.query.q"(value : unknown) {
+            const text = typeof value === "string" ? value : "";
+            if (text !== this.searchText) {
+                this.searchText = text;
+            }
+        },
+        searchText(value : string) {
+            const current = typeof this.$route.query.q === "string" ? this.$route.query.q : "";
+            if (value !== current) {
+                this.$router.replace({ path: this.$route.path,
+                    query: withListQuery(this.$route.query, "q", value) });
+            }
         },
     },
     methods: {
+        /**
+         * Whether a server is in view: all of them, or the one chosen in the switcher
+         * @param endpoint Endpoint, empty for this server
+         * @returns Whether its rows are listed
+         */
+        inView(endpoint : string) : boolean {
+            return this.$root.selectedEndpoint === null || endpoint === this.$root.selectedEndpoint;
+        },
+
+        /**
+         * Name of a server as the list shows it and the search finds it
+         * @param endpoint Endpoint, empty for this server
+         * @returns Its name
+         */
+        serverName(endpoint : string) : string {
+            return endpoint ? this.$root.endpointDisplayFunction(endpoint) || endpoint : this.$t("currentEndpoint");
+        },
 
         /**
          * Clear the search bar
-         * @returns {void}
          */
         clearSearchText() {
             this.searchText = "";
         },
 
         /**
-         * Вернуть весь список: снять поиск и нажатый фильтр разом. Фильтр живет еще
-         * и в адресе, поэтому очистить одно поле мало - его снимает toggleFilter.
-         * @returns {void}
+         * Вернуть весь список: снять поиск и нажатый фильтр разом
          */
         resetSearchAndFilter() {
             this.clearSearchText();
@@ -314,173 +384,113 @@ export default {
         },
 
         /**
-         * Совпадает ли стек с поиском. Ищем по имени и по именам сервисов: владелец
-         * помнит "gotenberg", а не то, в каком стеке он лежит.
-         * @param {object} stack Стек из списка
-         * @returns {boolean} Показывать ли строку
+         * Fold or unfold every row of one server
+         * @param key Key of the server group
          */
-        matchesSearch(stack) {
-            if (this.searchText === "") {
-                return true;
-            }
-
-            const needle = this.searchText.toLowerCase();
-
-            if (stack.name.toLowerCase().includes(needle)) {
-                return true;
-            }
-
-            return (stack.services ?? []).some((service) => service.name.toLowerCase().includes(needle));
-        },
-
-        /**
-         * Whether the foreign projects of a server are shown. A search, a filter or an
-         * open foreign stack unfolds them: the user asked for exactly these rows
-         * @param {object} agent Server group of the list
-         * @returns {boolean} Whether the group is unfolded
-         */
-        isForeignOpen(agent) {
-            if (this.openForeign.has(agent.endpoint) || this.isNarrowed) {
-                return true;
-            }
-            const current = this.$route.params.stackName;
-            return !!current && agent.foreign.some((stack) => stack.name === current && (stack.endpoint || "") === (this.$route.params.endpoint ?? ""));
-        },
-
-        /**
-         * Fold or unfold the foreign projects of a server
-         * @param {string} endpoint Server of the group
-         * @returns {void}
-         */
-        toggleForeign(endpoint) {
-            const agent = this.agentStackList.find((item) => item.endpoint === endpoint);
-            if (agent && this.isForeignOpen(agent) && !this.openForeign.has(endpoint)) {
-                // Unfolded by a search or an open stack: the click keeps it open for good
-                this.openForeign.add(endpoint);
-                return;
-            }
-            if (this.openForeign.has(endpoint)) {
-                this.openForeign.delete(endpoint);
+        toggleAgent(key : string) {
+            if (this.closedAgents.has(key)) {
+                this.closedAgents.delete(key);
             } else {
-                this.openForeign.add(endpoint);
+                this.closedAgents.add(key);
             }
         },
 
         /**
-         * Stopped by someone rather than crashed: a crash belongs under attention
-         * @param {object} stack Stack from the list
-         * @returns {boolean} Whether the stack is quietly stopped
+         * Rows of one part of a group to draw now
+         * @param group Server group
+         * @param kind Part of the group
+         * @returns The first pages, and the open row if it lies further down
          */
-        isStopped(stack) {
-            return (stack.status === EXITED && !isStackFailed(stack.status, stack.issues)) || stack.status === CREATED_FILE || stack.status === CREATED_STACK;
+        rowsOf<K extends GroupKind>(group : ListGroup, kind : K) : ListGroup[K] {
+            const limit = this.limits[`${group.key}:${kind}`] ?? LIST_PAGE_SIZE;
+            if (kind === "standalone") {
+                return pageRows(group.standalone, limit, (row) => this.isCurrentContainer(group, row)) as ListGroup[K];
+            }
+            return pageRows(group[kind] as ListedStack[], limit, (row) => this.isCurrentStack(row)) as ListGroup[K];
         },
 
         /**
-         * Совпадает ли стек с нажатым фильтром
-         * @param {object} stack Стек из списка
-         * @returns {boolean} Показывать ли строку
+         * How many rows of one part of a group are not drawn yet
+         * @param group Server group
+         * @param kind Part of the group
+         * @returns Rows left
          */
-        matchesFilter(stack) {
-            switch (this.activeFilter) {
-                case "running":
-                    return stack.status === RUNNING;
-                case "attention":
-                    return stackNeedsAttention(stack);
-                case "stopped":
-                    return this.isStopped(stack);
-                case "unknown":
-                    return stack.status === UNKNOWN;
-                case "updates":
-                    return (stack.source?.behind ?? 0) > 0;
-                default:
-                    return true;
+        hiddenCount(group : ListGroup, kind : GroupKind) : number {
+            return group[kind].length - this.rowsOf(group, kind).length;
+        },
+
+        /**
+         * Draw the next page of one part of a group
+         * @param group Server group
+         * @param kind Part of the group
+         */
+        showMore(group : ListGroup, kind : GroupKind) {
+            const key = `${group.key}:${kind}`;
+            this.limits[key] = (this.limits[key] ?? LIST_PAGE_SIZE) + LIST_PAGE_SIZE;
+        },
+
+        /**
+         * @param stack Stack of the list
+         * @returns Whether it is the stack the page shows
+         */
+        isCurrentStack(stack : ListedStack) : boolean {
+            return this.$route.params.stackName === stack.name && (this.$route.params.endpoint ?? "") === (stack.endpoint || "");
+        },
+
+        /**
+         * @param group Server group
+         * @param container Container of the list
+         * @returns Whether it is the container the page shows
+         */
+        isCurrentContainer(group : ListGroup, container : StandaloneContainer) : boolean {
+            return this.$route.params.containerId === container.id && (this.$route.params.endpoint ?? "") === group.endpoint;
+        },
+
+        /**
+         * Whether a folded part of a server is shown. A search, a filter or an open row
+         * unfolds it: the user asked for exactly these rows
+         * @param group Server group
+         * @param kind Folded part
+         * @returns Whether it is unfolded
+         */
+        isFoldOpen(group : ListGroup, kind : FoldKind) : boolean {
+            if (this.openGroups.has(`${group.key}:${kind}`) || this.isNarrowed) {
+                return true;
+            }
+            return kind === "standalone"
+                ? group.standalone.some((row) => this.isCurrentContainer(group, row))
+                : group.foreign.some((row) => this.isCurrentStack(row));
+        },
+
+        /**
+         * Fold or unfold a part of a server
+         * @param group Server group
+         * @param kind Folded part
+         */
+        toggleFold(group : ListGroup, kind : FoldKind) {
+            const key = `${group.key}:${kind}`;
+            // A part unfolded by a search or an open row is not in the set yet: the
+            // click keeps it open for good rather than folding what the user sees
+            if (this.openGroups.has(key)) {
+                this.openGroups.delete(key);
+            } else {
+                this.openGroups.add(key);
             }
         },
 
         /**
          * Нажатие на фильтр включает его или снимает: фильтр - переключатель, а не вкладка.
          * Значение уходит в адрес, чтобы срез можно было открыть ссылкой.
-         * @param {string} key Ключ фильтра
-         * @returns {void}
+         * @param key Ключ фильтра
          */
-        toggleFilter(key) {
+        toggleFilter(key : ListFilter) {
             const next = this.activeFilter === key ? "" : key;
             this.activeFilter = next;
-
-            const query = { ...this.$route.query };
-
-            if (next) {
-                query.filter = next;
-            } else {
-                delete query.filter;
-            }
-
             this.$router.replace({ path: this.$route.path,
-                query });
-        },
-        /**
-         * Deselect a stack
-         * @param {number} id ID of stack
-         * @returns {void}
-         */
-        deselect(id) {
-            delete this.selectedStacks[id];
-        },
-        /**
-         * Select a stack
-         * @param {number} id ID of stack
-         * @returns {void}
-         */
-        select(id) {
-            this.selectedStacks[id] = true;
-        },
-        /**
-         * Determine if stack is selected
-         * @param {number} id ID of stack
-         * @returns {bool} Is the stack selected?
-         */
-        isSelected(id) {
-            return id in this.selectedStacks;
-        },
-        /**
-         * Disable select mode and reset selection
-         * @returns {void}
-         */
-        cancelSelectMode() {
-            this.selectMode = false;
-            this.selectedStacks = {};
-        },
-        /**
-         * Show dialog to confirm pause
-         * @returns {void}
-         */
-        pauseDialog() {
-            this.$refs.confirmPause.show();
-        },
-        /**
-         * Pause each selected stack
-         * @returns {void}
-         */
-        pauseSelected() {
-            Object.keys(this.selectedStacks)
-                .filter(id => this.$root.stackList[id].active)
-                .forEach(id => this.$root.getSocket().emit("pauseStack", id, () => { }));
-
-            this.cancelSelectMode();
-        },
-        /**
-         * Resume each selected stack
-         * @returns {void}
-         */
-        resumeSelected() {
-            Object.keys(this.selectedStacks)
-                .filter(id => !this.$root.stackList[id].active)
-                .forEach(id => this.$root.getSocket().emit("resumeStack", id, () => { }));
-
-            this.cancelSelectMode();
+                query: withListQuery(this.$route.query, "filter", next) });
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>
@@ -523,15 +533,18 @@ export default {
 .stack-list { overflow-y: auto; overflow-x: hidden; height: auto !important; }
 .agent-select { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); padding: 0 var(--gap-sm); background: none; border: 0; color: var(--text-faint); font-size: var(--text-sm); }
 .agent-select .count { margin-left: auto; }
-.foreign-toggle { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); margin-top: var(--gap-sm); padding: 0 var(--gap-sm); background: none; border: 0; border-top: 1px solid var(--line-hair); color: var(--text-muted); font-size: var(--text-sm); text-align: start; }
-.foreign-toggle:hover { color: var(--text-strong); }
-.foreign-toggle:focus-visible { outline: var(--focus-ring); outline-offset: calc(var(--focus-offset) * -1); }
-.foreign-toggle .count { margin-left: auto; font-variant-numeric: tabular-nums; }
-.foreign-toggle .chevron { font-size: var(--icon-sm); transition: transform var(--motion-fast) var(--motion-ease); }
-.foreign-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
-[dir="rtl"] .foreign-toggle[aria-expanded="false"] .chevron { transform: rotate(90deg); }
+.fold-toggle { display: flex; align-items: center; gap: var(--gap-xs); width: 100%; min-height: var(--control-height); margin-top: var(--gap-sm); padding: 0 var(--gap-sm); background: none; border: 0; border-top: 1px solid var(--line-hair); color: var(--text-muted); font-size: var(--text-sm); text-align: start; }
+.fold-toggle:hover { color: var(--text-strong); }
+.more-rows { display: block; width: 100%; min-height: var(--control-height); margin-bottom: var(--gap-xs); padding: 0 var(--gap-sm); background: none; border: 1px dashed var(--line-hair); border-radius: var(--radius-panel); color: var(--text-muted); font-size: var(--text-sm); }
+.more-rows:hover { color: var(--text-strong); border-color: var(--line-control); }
+.more-rows:focus-visible { outline: var(--focus-ring); outline-offset: calc(var(--focus-offset) * -1); }
+.fold-toggle:focus-visible { outline: var(--focus-ring); outline-offset: calc(var(--focus-offset) * -1); }
+.fold-toggle .count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.fold-toggle .chevron { font-size: var(--icon-sm); transition: transform var(--motion-fast) var(--motion-ease); }
+.fold-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
+[dir="rtl"] .fold-toggle[aria-expanded="false"] .chevron { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
-    .foreign-toggle .chevron { transition: none; }
+    .fold-toggle .chevron { transition: none; }
 }
 @media (max-width: 800px) {
     .search-icon { width: 44px; }

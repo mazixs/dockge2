@@ -8,6 +8,9 @@ import { Settings } from "./settings";
 import { getAuthRuntime, type UserRole } from "./auth-runtime";
 import type { DockgeSocket } from "./util-server";
 import type { StackSummaryDTO, ViewerStackSummary } from "../common/types/stack";
+import { PANEL_UPDATE_EVENTS } from "../common/panel-update";
+import { PANEL_CONTAINER_EVENT } from "../common/types/panel-container";
+import { SET_CONTAINER_CONTROL_EVENT } from "../common/types/container";
 
 let bootstrapPath = "";
 
@@ -162,7 +165,7 @@ export const OPERATOR_EVENTS = new Set([
     "restartStack", "updateStack", "downStack", "stackUpdatePreview", "abortCompose", "getStackFiles",
     "setStackFiles", "saveEnvFile", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
     "bindSecret", "unbindSecret", "dockerStats", "startService", "stopService", "restartService", "updateService",
-    "getDockerNetworkList", "terminalInput", "mainTerminal", "checkMainTerminal", "interactiveTerminal",
+    "getDockerNetworkList", "stackRelations", "inspectContainer", "controlContainer", "terminalInput", "mainTerminal", "checkMainTerminal", "interactiveTerminal",
     "terminalJoin", "terminalLeave", "joinCombinedTerminal", "leaveCombinedTerminal", "terminalResize",
 ]);
 /**
@@ -171,15 +174,17 @@ export const OPERATOR_EVENTS = new Set([
  */
 const CONSOLE_EVENTS = new Set([ "mainTerminal", "checkMainTerminal" ]);
 export const CONSOLE_OPERATORS_SETTING = "consoleOperators";
-const ACCOUNT_EVENTS = new Set([ "getSettings", "disconnectOtherSocketClients" ]);
-const ADMIN_EVENTS = new Set([ "checkForUpdates", "setSettings", "setConsoleEnabled", "setConsoleOperators", "addAgent", "removeAgent", "updateAgent", "usersList", "usersCreate", "usersUpdate", "usersResetPassword", "usersDelete" ]);
+// Every account sees whether the panel is being updated; only an owner changes that
+const ACCOUNT_EVENTS = new Set([ "getSettings", "disconnectOtherSocketClients", PANEL_UPDATE_EVENTS.status ]);
+const ADMIN_EVENTS = new Set([ "checkForUpdates", "setSettings", "setConsoleEnabled", "setConsoleOperators", SET_CONTAINER_CONTROL_EVENT, "addAgent", "removeAgent", "updateAgent", "usersList", "usersCreate", "usersUpdate", "usersResetPassword", "usersDelete",
+    PANEL_UPDATE_EVENTS.preview, PANEL_UPDATE_EVENTS.apply, PANEL_UPDATE_EVENTS.cancel, PANEL_UPDATE_EVENTS.dismiss, PANEL_CONTAINER_EVENT ]);
 
 /** Explicit allowlists cover both direct and forwarded agent operations. */
 export function roleAllowsEvent(role : UserRole, event : string, agent = false) : boolean {
     if (agent) {
         return (role === "viewer" ? VIEWER_EVENTS : OPERATOR_EVENTS).has(event);
     }
-    return ACCOUNT_EVENTS.has(event) || (event === "composerize" && role !== "viewer") || (role === "admin" && ADMIN_EVENTS.has(event));
+    return ACCOUNT_EVENTS.has(event) || (event === "convertDockerRun" && role !== "viewer") || (role === "admin" && ADMIN_EVENTS.has(event));
 }
 
 /** Revalidate the cookie and current role before every protected operation. */
@@ -288,7 +293,8 @@ export function viewerStackSummary(input : StackSummaryDTO) : ViewerStackSummary
         availability: input.availability,
         services: Array.isArray(input.services) ? input.services.map((service) => ({ name: service.name,
             state: service.state,
-            isOneShot: service.isOneShot })) : [],
+            isOneShot: service.isOneShot,
+            ...(typeof service.image === "string" ? { image: service.image } : {}) })) : [],
         issues: Array.isArray(input.issues) ? input.issues.map((issue) => ({ service: issue.service,
             name: issue.name,
             reason: issue.reason })) : [],

@@ -1,0 +1,36 @@
+{
+    "description": "docker refuses an alias on its own bridge network, but the default network of a stack is user-defined: the alias goes there, and no network is declared.",
+    "command": "docker run -d --network-alias web nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "networks"
+        ],
+        "values": {
+            "image": "nginx",
+            "networks": {
+                "default": {
+                    "aliases": [
+                        "web"
+                    ]
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--network-alias"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

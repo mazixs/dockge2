@@ -6,7 +6,7 @@ const path = require("node:path");
 const args = process.argv.slice(2);
 const count = Number(process.env.DOCKGE_PERF_CONTAINERS);
 const stacks = Number(process.env.DOCKGE_PERF_STACKS);
-if (!Number.isInteger(count) || count < 1 || count > 1000 || !Number.isInteger(stacks) || stacks < 1 || stacks > 1000) {
+if (!Number.isInteger(count) || count < 1 || count > 5000 || !Number.isInteger(stacks) || stacks < 1 || stacks > 1000) {
     throw new Error("Invalid synthetic Docker fixture sizes");
 }
 const rows = Array.from({ length: count }, (_, index) => {

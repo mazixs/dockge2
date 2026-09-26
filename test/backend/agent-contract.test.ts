@@ -6,6 +6,7 @@ import type { AgentRequestContract } from "../../common/agent-events";
 import { DockerSocketHandler } from "../../backend/agent-socket-handlers/docker-socket-handler";
 import { GitSocketHandler } from "../../backend/agent-socket-handlers/git-socket-handler";
 import { StabilitySocketHandler } from "../../backend/agent-socket-handlers/stability-socket-handler";
+import { ContainerSocketHandler } from "../../backend/agent-socket-handlers/container-socket-handler";
 import { TerminalSocketHandler } from "../../backend/agent-socket-handlers/terminal-socket-handler";
 import { OPERATOR_EVENTS, roleAllowsEvent, VIEWER_EVENTS } from "../../backend/auth-access";
 import type { DockgeServer } from "../../backend/dockge-server";
@@ -20,7 +21,7 @@ function registeredEvents() : string[] {
     const socket = { on: () => undefined } as unknown as DockgeSocket;
     const server = {} as DockgeServer;
 
-    for (const handler of [ new DockerSocketHandler(), new StabilitySocketHandler(), new GitSocketHandler(), new TerminalSocketHandler() ]) {
+    for (const handler of [ new DockerSocketHandler(), new StabilitySocketHandler(), new ContainerSocketHandler(), new GitSocketHandler(), new TerminalSocketHandler() ]) {
         handler.create(socket, server, agentSocket);
     }
     return [ ...agentSocket.eventList.keys() ];

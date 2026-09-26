@@ -3,11 +3,11 @@
          поэтому имена групп звучат так же тихо, как подписи остальных полей -->
     <div class="networks form-stack">
         <fieldset class="field">
-            <legend class="form-label">{{ $t("Internal Networks") }}</legend>
+            <legend class="form-label">{{ $t("internalNetworks") }}</legend>
             <ul class="value-list">
                 <li v-for="(networkRow, index) in networkList" :key="index" class="value-row">
-                    <input v-model="networkRow.key" type="text" class="value-input" :placeholder="$t(`Network name...`)" @change="applyToYAML(false)" />
-                    <button class="value-remove" type="button" :aria-label="$t('removeListItem', [ $t('Internal Networks') ])" @click="remove(index)">
+                    <input v-model="networkRow.key" type="text" class="value-input" :placeholder="$t(`networkNamePlaceholder`)" @change="applyToYAML(false)" />
+                    <button class="value-remove" type="button" :aria-label="$t('removeListItem', [ $t('internalNetworks') ])" @click="remove(index)">
                         <font-awesome-icon icon="times" />
                     </button>
                 </li>
@@ -16,9 +16,9 @@
         </fieldset>
 
         <fieldset class="field">
-            <legend class="form-label">{{ $t("External Networks") }}</legend>
+            <legend class="form-label">{{ $t("externalNetworks") }}</legend>
 
-            <p v-if="externalNetworkList.length === 0" class="form-text">{{ $t("No External Networks") }}</p>
+            <p v-if="externalNetworkList.length === 0" class="form-text">{{ $t("noExternalNetworks") }}</p>
 
             <!-- Переключатель сети по контракту системы: button с role="switch",
                  подпись слева, вид сети справа. Чекбокс Bootstrap не давал ни
@@ -28,7 +28,7 @@
                 <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
                 <button
                     class="switch" type="button" role="switch"
-                    :aria-checked="String(!!selectedExternalList[networkName])"
+                    :aria-checked="!!selectedExternalList[networkName]"
                     :aria-label="networkName"
                     @click="toggleExternal(networkName)"
                 >
@@ -45,7 +45,7 @@
                     <span class="network-kind">{{ $t("externalNetworkKind") }}</span>
                     <button
                         class="switch" type="button" role="switch"
-                        :aria-checked="String(!!selectedExternalList[networkName])"
+                        :aria-checked="!!selectedExternalList[networkName]"
                         :aria-label="networkName"
                         @click="toggleExternal(networkName)"
                     >
@@ -56,20 +56,57 @@
         </fieldset>
     </div>
 </template>
-<script>
+<script lang="ts">
+import { defineComponent, type ComponentPublicInstance } from "vue";
+import type { ComposeModel } from "../../../common/compose-editor";
+
 /** How many other networks are listed unfolded */
 const OTHER_SHOWN = 3;
 
-export default {
+/** A network as the compose file declares it */
+interface NetworkDefinition {
+    external? : boolean;
+    [key : string] : unknown;
+}
+
+/** A row of the internal networks; a network declared without settings is null */
+interface NetworkRow {
+    key : string;
+    value : NetworkDefinition | null;
+}
+
+/** What the network editor uses of the compose page it is rendered in */
+interface ComposePageApi {
+    jsonConfig : ComposeModel;
+    stack : { name : string };
+    editorFocus : boolean;
+    endpoint : string;
+    applyNetworksEdit(networks : Record<string, NetworkDefinition | null>, options? : { explicitRemoval? : boolean }) : void;
+}
+
+/**
+ * The compose page this editor is rendered in, through the transition of the page
+ * @param parent Parent of the editor
+ * @returns The page
+ */
+function composePage(parent : ComponentPublicInstance | null) : ComposePageApi {
+    const page = parent?.$parent;
+    if (!page || !("applyNetworksEdit" in page)) {
+        throw new Error("The network editor is rendered outside the compose page");
+    }
+    return page as ComponentPublicInstance & ComposePageApi;
+}
+
+export default defineComponent({
     data() {
         return {
             OTHER_SHOWN,
-            networkList: [],
-            externalList: {},
-            selectedExternalList: {},
-            externalNetworkList: [],
+            networkList: [] as NetworkRow[],
+            externalList: {} as Record<string, NetworkDefinition>,
+            selectedExternalList: {} as Record<string, boolean>,
+            externalNetworkList: [] as string[],
             /** External networks the file declared when it was read: they stay on top while toggled */
-            declaredExternal: [],
+            declaredExternal: [] as string[],
             /** True while the editor is filled from the compose file */
             loading: true,
             /** True when the last change of the model came from this component */
@@ -77,27 +114,27 @@ export default {
         };
     },
     computed: {
-        jsonConfig() {
-            return this.$parent.$parent.jsonConfig;
+        jsonConfig() : ComposeModel {
+            return composePage(this.$parent).jsonConfig;
         },
 
-        stack() {
-            return this.$parent.$parent.stack;
+        stack() : { name : string } {
+            return composePage(this.$parent).stack;
         },
 
-        editorFocus() {
-            return this.$parent.$parent.editorFocus;
+        editorFocus() : boolean {
+            return composePage(this.$parent).editorFocus;
         },
 
-        endpoint() {
-            return this.$parent.$parent.endpoint;
+        endpoint() : string {
+            return composePage(this.$parent).endpoint;
         },
 
-        ownExternal() {
+        ownExternal() : string[] {
             return this.externalNetworkList.filter((name) => this.declaredExternal.includes(name));
         },
 
-        otherExternal() {
+        otherExternal() : string[] {
             return this.externalNetworkList.filter((name) => !this.declaredExternal.includes(name));
         },
     },
@@ -145,10 +182,9 @@ export default {
          * Включить или выключить внешнюю сеть.
          * Watcher на selectedExternalList дописывает сервис в compose, поэтому
          * здесь меняется только состояние.
-         * @param {string} networkName Имя внешней сети
-         * @returns {void}
+         * @param networkName Имя внешней сети
          */
-        toggleExternal(networkName) {
+        toggleExternal(networkName : string) {
             this.selectedExternalList[networkName] = !this.selectedExternalList[networkName];
         },
 
@@ -157,10 +193,10 @@ export default {
             this.networkList = [];
             this.externalList = {};
 
-            for (const key in this.jsonConfig.networks) {
-                let obj = {
+            for (const [ key, value ] of Object.entries(this.jsonConfig.networks ?? {})) {
+                let obj : NetworkRow = {
                     key: key,
-                    value: this.jsonConfig.networks[key],
+                    value: value,
                 };
 
                 if (obj.value && obj.value.external) {
@@ -184,7 +220,7 @@ export default {
         },
 
         loadExternalNetworkList() {
-            this.$root.emitAgent(this.endpoint, "getDockerNetworkList", (res) => {
+            this.$root.emitAgentRequest(this.endpoint, "getDockerNetworkList", []).then((res) => {
                 if (res.ok) {
                     this.externalNetworkList = res.dockerNetworkList.filter((n) => {
                         // Filter out this stack networks
@@ -211,7 +247,7 @@ export default {
             });
         },
 
-        remove(index) {
+        remove(index : number) {
             const removed = this.networkList[index];
             this.networkList.splice(index, 1);
 
@@ -226,15 +262,14 @@ export default {
         /**
          * Hand the configured networks to the page, which decides how to write them.
          * Nothing happens while the editor is still being filled from the file.
-         * @param {boolean} explicitRemoval True when the user removed the last network
-         * @returns {void}
+         * @param explicitRemoval True when the user removed the last network
          */
         applyToYAML(explicitRemoval = false) {
             if (this.editorFocus || this.loading) {
                 return;
             }
 
-            const networks = {};
+            const networks : Record<string, NetworkDefinition | null> = {};
 
             // Internal networks
             for (const networkRow of this.networkList) {
@@ -242,16 +277,16 @@ export default {
             }
 
             // External networks
-            for (const networkName in this.externalList) {
-                networks[networkName] = this.externalList[networkName];
+            for (const [ networkName, network ] of Object.entries(this.externalList)) {
+                networks[networkName] = network;
             }
 
             this.selfApplied = true;
-            this.$parent.$parent.applyNetworksEdit(networks, { explicitRemoval });
+            composePage(this.$parent).applyNetworksEdit(networks, { explicitRemoval });
         }
 
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

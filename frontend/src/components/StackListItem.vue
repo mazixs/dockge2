@@ -3,7 +3,7 @@
         :to="url"
         class="item"
         :class="{ 'dim': !stack.isManagedByDockge, 'fresh': isFresh, 'active': isCurrent }"
-        :aria-current="isCurrent ? 'page' : null"
+        :aria-current="isCurrent ? 'page' : undefined"
     >
         <!-- Навигатор: имя и одна мета-строка. Подробности живут в рабочей области -->
         <span class="stack-letter" :class="`stack-color-${stackColor(stackName)}`" aria-hidden="true">{{ stackName.slice(0, 1).toUpperCase() }}</span>
@@ -24,96 +24,55 @@
     </router-link>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { stackColor } from "../stack-color";
 import Uptime from "./Uptime.vue";
 import { formatDuration } from "../format";
+import { listQuery } from "../stack-list-model";
 import { stackSourceState } from "../../../common/stack-source";
+import type { StackSource } from "../../../common/stack-source";
+import type { StackSummaryDTO, ViewerStackSummary } from "../../../common/types/stack";
 
-/** Сколько сервисов показывается до сворачивания в "+N" */
-const SHOWN_SERVICES = 3;
-
-export default {
+export default defineComponent({
     components: { InterfaceIcon,
         Uptime
     },
     props: {
         /** Stack this represents */
         stack: {
-            type: Object,
-            default: null,
-        },
-        /** If the user is in select mode */
-        isSelectMode: {
-            type: Boolean,
-            default: false,
-        },
-        /** Callback to determine if stack is selected */
-        isSelected: {
-            type: Function,
-            default: () => {}
-        },
-        /** Callback fired when stack is selected */
-        select: {
-            type: Function,
-            default: () => {}
-        },
-        /** Callback fired when stack is deselected */
-        deselect: {
-            type: Function,
-            default: () => {}
+            type: Object as PropType<StackSummaryDTO | ViewerStackSummary>,
+            required: true,
         },
     },
     computed: {
-        url() {
+        url() : { path : string; query : Record<string, string> } {
             // Вкладка едет за человеком: кто читает журналы, переключает стеки
             // ради журналов, и возврат на обзор каждый раз стоил бы ему двух
             // лишних действий. Обзор и отдельные экраны стека ведут на обзор
-            const tab = { stackFiles: "files",
+            const tab = ({ stackFiles: "files",
                 stackLogs: "logs",
                 stackTerminal: "terminal",
-                stackGitChanges: "git" }[String(this.$route.name)] ?? "";
+                stackGitChanges: "git" } as Record<string, string>)[String(this.$route.name)] ?? "";
 
             const path = `/stack/${this.stack.name}${tab ? `/${tab}` : ""}`;
-            return this.stack.endpoint ? `${path}/${this.stack.endpoint}` : path;
+            // Поиск и фильтр едут за человеком тоже: иначе первый же клик по
+            // найденному стеку возвращал бы весь список
+            return { path: this.stack.endpoint ? `${path}/${this.stack.endpoint}` : path,
+                query: listQuery(this.$route.query) };
         },
 
-        stackName() {
+        stackName() : string {
             return this.stack.name;
         },
 
-        /** Где стек живет: свой сервер или агент по имени */
-        agentLabel() {
-            if (!this.stack.endpoint) {
-                return this.$t("thisServer");
-            }
-            return this.$root.endpointDisplayFunction(this.stack.endpoint) || this.stack.endpoint;
-        },
-
-        services() {
-            return Array.isArray(this.stack.services) ? this.stack.services : [];
-        },
-
-        shownServices() {
-            return this.services.slice(0, SHOWN_SERVICES);
-        },
-
-        hiddenServices() {
-            return Math.max(this.services.length - SHOWN_SERVICES, 0);
-        },
-
-        /** Скрытые сервисы названы в подсказке: молча обрезать список нельзя */
-        hiddenServiceNames() {
-            return this.services.slice(SHOWN_SERVICES).map((service) => service.name).join(", ");
-        },
-
-        source() {
-            return this.stack.source ?? null;
+        source() : StackSource | null {
+            return "source" in this.stack ? this.stack.source : null;
         },
 
         /** Состояние источника словами общего слоя: рейка и панель говорят одинаково */
-        sourceState() {
+        sourceState() : string {
             return stackSourceState(this.source);
         },
 
@@ -125,9 +84,9 @@ export default {
          * повисает в конце первой половины. Стек, у которого расхождений нет,
          * молчит - рейка отвечает, что требует внимания, а давность проверки
          * и совпадение с Git объясняет панель источника на самой странице
-         * @returns {string[]} Пометки в порядке чтения, пустой список если сверять нечего
+         * @returns Пометки в порядке чтения, пустой список если сверять нечего
          */
-        sourceFacts() {
+        sourceFacts() : string[] {
             const behind = this.source?.behind ?? 0;
 
             switch (this.sourceState) {
@@ -143,15 +102,16 @@ export default {
         },
 
         /** Подсказка пометок: адрес, ветвь и когда последний раз спрашивали origin */
-        sourceFactsTitle() {
-            if (this.source?.kind !== "git") {
+        sourceFactsTitle() : string {
+            const source = this.source;
+            if (source?.kind !== "git") {
                 return "";
             }
 
-            const parts = [ this.source.remote, this.source.branch ].filter((part) => !!part);
+            const parts = [ source.remote, source.branch ].filter((part) => !!part);
 
-            parts.push(this.source.checkedAt
-                ? this.$t("familiarGitCheckedAgo", [ formatDuration(Date.now() - this.source.checkedAt, this.$t) ])
+            parts.push(source.checkedAt
+                ? this.$t("familiarGitCheckedAgo", [ formatDuration(Date.now() - source.checkedAt, this.$t) ])
                 : this.$t("familiarGitNeverChecked"));
 
             return parts.join(" · ");
@@ -162,9 +122,9 @@ export default {
          * строка: маршруты вкладок - соседи обзора, а не его дети, поэтому сам
          * router-link считает пункт активным лишь на обзоре и на файлах, журнале,
          * терминале и сравнении Git отметка пропадала
-         * @returns {boolean} Это строка текущего стека
+         * @returns Это строка текущего стека
          */
-        isCurrent() {
+        isCurrent() : boolean {
             if (this.$route.params.stackName !== this.stack.name) {
                 return false;
             }
@@ -173,35 +133,14 @@ export default {
         },
 
         /** Только что созданный стек, на который надо показать в списке */
-        isFresh() {
+        isFresh() : boolean {
             return this.$root.freshStack === this.stack.name;
         }
     },
     methods: {
         stackColor,
-        /**
-         * Состояние сервиса словами для подсказки чипа
-         * @param {object} service Сервис из сводки
-         * @returns {string} Состояние и пометка разового сервиса
-         */
-        serviceTitle(service) {
-            const state = this.$t(`serviceState_${service.state}`);
-            return service.isOneShot ? `${state} · ${this.$t("oneShotService")}` : state;
-        },
-
-        /**
-         * Toggle selection of stack
-         * @returns {void}
-         */
-        toggleSelection() {
-            if (this.isSelected(this.stack.id)) {
-                this.deselect(this.stack.id);
-            } else {
-                this.select(this.stack.id);
-            }
-        },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

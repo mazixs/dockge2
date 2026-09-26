@@ -4,25 +4,25 @@
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h2 class="modal-title">{{ $t("Setup 2FA") }}</h2>
+                        <h2 class="modal-title">{{ $t("setupTwoFactor") }}</h2>
                         <StateChip
                             v-if="twoFAStatus !== null"
                             class="two-fa-state"
                             :state="twoFAStatus ? 'running' : 'stopped'"
-                            :label="$t(twoFAStatus ? 'Active' : 'Inactive')"
+                            :label="$t(twoFAStatus ? 'active' : 'inactive')"
                         />
-                        <button :disabled="processing" type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" />
+                        <button :disabled="processing" type="button" class="btn-close" data-bs-dismiss="modal" :aria-label="$t('close')" />
                     </div>
 
                     <div class="modal-body form-stack">
                         <div v-if="uri && twoFAStatus === false && !confirmed" class="qr">
                             <vue-qrcode :key="uri" :value="uri" type="image/png" :quality="1" :color="{ light: '#ffffffff' }" />
-                            <button v-show="!showURI" type="button" class="btn btn-sm btn-normal" @click="showURI = true">{{ $t("Show URI") }}</button>
+                            <button v-show="!showURI" type="button" class="btn btn-sm btn-normal" @click="showURI = true">{{ $t("showUri") }}</button>
                             <p v-if="showURI" class="uri">{{ uri }}</p>
                         </div>
 
                         <div v-if="!(uri && twoFAStatus === false) && !confirmed" class="field">
-                            <label for="current-password" class="form-label">{{ $t("Current Password") }}</label>
+                            <label for="current-password" class="form-label">{{ $t("currentPassword") }}</label>
                             <input
                                 id="current-password"
                                 v-model="currentPassword"
@@ -35,11 +35,11 @@
                         </div>
 
                         <div v-if="uri === null && twoFAStatus === false" class="actions">
-                            <button class="btn btn-primary" type="button" @click="prepare2FA()">{{ $t("Enable 2FA") }}</button>
+                            <button class="btn btn-primary" type="button" @click="prepare2FA()">{{ $t("enableTwoFactor") }}</button>
                         </div>
 
                         <div v-if="twoFAStatus === true" class="actions">
-                            <button class="btn btn-normal btn-danger-text" type="button" :disabled="processing" @click="confirmDisableTwoFA()">{{ $t("Disable 2FA") }}</button>
+                            <button class="btn btn-normal btn-danger-text" type="button" :disabled="processing" @click="confirmDisableTwoFA()">{{ $t("disableTwoFactor") }}</button>
                         </div>
 
                         <div v-if="uri && twoFAStatus === false && !confirmed" class="field">
@@ -65,7 +65,7 @@
                     <div v-else-if="uri && twoFAStatus === false" class="modal-footer">
                         <button type="submit" class="btn btn-primary" :disabled="processing || !token">
                             <div v-if="processing" class="spinner-border spinner-border-sm"></div>
-                            {{ $t("Save") }}
+                            {{ $t("save") }}
                         </button>
                     </div>
                 </div>
@@ -73,11 +73,11 @@
         </div>
     </form>
 
-    <Confirm ref="confirmEnableTwoFA" btn-style="btn-primary" :yes-text="$t('Yes')" :no-text="$t('No')" @yes="save2FA">
+    <Confirm ref="confirmEnableTwoFA" btn-style="btn-primary" :yes-text="$t('yes')" :no-text="$t('no')" @yes="save2FA">
         {{ $t("confirmEnableTwoFAMsg") }}
     </Confirm>
 
-    <Confirm ref="confirmDisableTwoFA" btn-style="btn-danger" :yes-text="$t('Yes')" :no-text="$t('No')" @yes="disable2FA">
+    <Confirm ref="confirmDisableTwoFA" btn-style="btn-danger" :yes-text="$t('yes')" :no-text="$t('no')" @yes="disable2FA">
         {{ $t("confirmDisableTwoFAMsg") }}
     </Confirm>
 </template>
@@ -230,7 +230,7 @@ export default defineComponent({
                 // hands again with the fresh cookie before it confirms anything else
                 await this.$root.reconnectSocket();
 
-                this.$root.toastSuccess("Saved");
+                this.$root.toastSuccess("saved");
                 await this.getStatus();
                 this.currentPassword = "";
                 this.token = null;
@@ -266,7 +266,7 @@ export default defineComponent({
                 // Turning it off replaces the session, exactly like turning it on
                 await this.$root.reconnectSocket();
 
-                this.$root.toastSuccess("Saved");
+                this.$root.toastSuccess("saved");
                 await this.getStatus();
                 this.reset();
                 this.modal?.hide();

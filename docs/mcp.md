@@ -202,7 +202,11 @@ are not offered at all.
 A key never grows. Raising a user's role does not raise an existing key; a demotion, a suspension,
 a revocation, an expiry or a narrower scope takes effect before the next execution and before a
 result is returned. **Reduce access** narrows a key in place and invalidates operations prepared
-under the wider access; to widen access, create a new key and revoke the old one.
+under the wider access; to widen access, create a new key and revoke the old one. **Reissue** gives
+a key a new secret with the same access and the lifetime it was issued with. The old secret keeps
+working for 24 hours, or until its own expiry if that is sooner, so the client can be switched over
+without an outage. A reissue goes through the same checks as a new key: if the owner has lost the
+role or a stack is gone, it is refused and the old key stays as it was.
 
 A stack is tied to its directory instance. A directory deleted and recreated under the same name
 gets a new identifier, and an old key does not inherit access to it.
@@ -348,7 +352,7 @@ Configure the `Authorization` header as shown above; the OAuth discovery paths a
 - every tool call, with its outcome (**Allowed**, **Denied**, **Invalid**), the reason of a failure,
   the key, the client, the stack and the address;
 - refused requests, with the reason and the address;
-- owner actions: enabling or disabling MCP, issuing, reducing and revoking keys, reserving names
+- owner actions: enabling or disabling MCP, issuing, reducing, reissuing and revoking keys, reserving names
   and approving operations.
 
 Arguments, keys, file contents, logs and results are never recorded. Client names and versions are
@@ -445,7 +449,5 @@ The desktop client configurations above are not part of these suites.
 - **Server Cards.** SEP-2127 is not part of 2026-07-28, and its path is not settled.
 - **Random boundaries around untrusted output.** Cheap, and not a defence. The server instructions
   name logs, files and diffs as untrusted, and [the attack is documented](#security) instead.
-- **Rotating a key with an overlap period.** Create a new key, move the client to it, then revoke the
-  old one.
 - **A stdio adapter.** Clients connect over HTTP with a header, see
   [client configuration](#client-configuration).

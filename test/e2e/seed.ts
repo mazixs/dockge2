@@ -6,7 +6,7 @@ import { ATTENTION, RUNNING } from "../../common/util-common";
 import { Settings } from "../../backend/settings";
 
 import { countUsers, initAuth } from "../../backend/auth";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, E2E_ATTENTION_STACK, E2E_FILES_STACK, E2E_STACK_NAME } from "./constants";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, E2E_ATTENTION_STACK, E2E_FILES_STACK, E2E_PROGRESS_STACK, E2E_STACK_NAME } from "./constants";
 
 const dataDir = process.env.DOCKGE_E2E_DATA_DIR ?? "/tmp/dockge-e2e/data";
 const stacksDir = process.env.DOCKGE_E2E_STACKS_DIR ?? "/tmp/dockge-e2e/stacks";
@@ -26,6 +26,7 @@ async function seed() : Promise<void> {
     await mkdir(path.join(stacksDir, E2E_STACK_NAME), { recursive: true });
     await mkdir(path.join(stacksDir, E2E_ATTENTION_STACK), { recursive: true });
     await mkdir(path.join(stacksDir, E2E_FILES_STACK), { recursive: true });
+    await mkdir(path.join(stacksDir, E2E_PROGRESS_STACK), { recursive: true });
 
     // A long running container with both sh and bash available
     await writeFile(path.join(stacksDir, E2E_STACK_NAME, "compose.yaml"), `services:
@@ -62,6 +63,13 @@ services:
     await writeFile(path.join(stacksDir, E2E_FILES_STACK, ".env"), "STAGE=base\n");
     await writeFile(path.join(stacksDir, E2E_FILES_STACK, ".env.dev"), "STAGE=dev\n");
     await writeFile(path.join(stacksDir, E2E_FILES_STACK, ".secret.db"), "seeded-secret-value\n");
+
+    // Not started by the seed: the progress spec starts and stops it without depending on another spec
+    await writeFile(path.join(stacksDir, E2E_PROGRESS_STACK, "compose.yaml"), `services:
+  app:
+    image: bash:5.2
+    command: ["bash", "-c", "sleep 900"]
+`);
 
     await Database.init({
         config: {

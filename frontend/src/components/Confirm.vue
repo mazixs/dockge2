@@ -4,19 +4,19 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h2 id="exampleModalLabel" class="modal-title">
-                        {{ title || $t("Confirm") }}
+                        {{ title || $t("confirm") }}
                     </h2>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" />
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" :aria-label="$t('close')" />
                 </div>
                 <div class="modal-body">
                     <slot />
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn" :class="btnStyle" data-bs-dismiss="modal" @click="yes">
-                        {{ yesText }}
+                        {{ yesText || $t("yes") }}
                     </button>
                     <button type="button" class="btn btn-normal" data-bs-dismiss="modal" @click="no">
-                        {{ noText }}
+                        {{ noText || $t("no") }}
                     </button>
                 </div>
             </div>
@@ -24,29 +24,29 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
 import Modal from "bootstrap/js/dist/modal";
-import { shallowRef } from "vue";
+import { defineComponent, shallowRef } from "vue";
 import { ownModal } from "../modal-lifecycle";
 
-export default {
+export default defineComponent({
     props: {
         /** Style of button */
         btnStyle: {
             type: String,
             default: "btn-primary",
         },
-        /** Text to use as yes */
+        /** Text of the confirming button, "Yes" when empty */
         yesText: {
             type: String,
-            default: "Yes",     // TODO: No idea what to translate this
+            default: "",
         },
-        /** Text to use as no */
+        /** Text of the declining button, "No" when empty */
         noText: {
             type: String,
-            default: "No",
+            default: "",
         },
-        /** Title to show on modal. Defaults to translated version of "Config" */
+        /** Title of the dialog, "Confirm" when empty */
         title: {
             type: String,
             default: null,
@@ -54,12 +54,13 @@ export default {
     },
     emits: [ "yes", "no" ],
     data: () => ({
-        modal: shallowRef(null),
-        releaseModal: null,
+        modal: shallowRef<Modal | null>(null),
+        releaseModal: null as (() => void) | null,
     }),
     mounted() {
-        this.modal = new Modal(this.$refs.modal);
-        this.releaseModal = ownModal(this.$refs.modal, this.modal);
+        const element = this.$refs.modal as HTMLElement;
+        this.modal = new Modal(element);
+        this.releaseModal = ownModal(element, this.modal);
     },
     beforeUnmount() {
         this.releaseModal?.();
@@ -70,7 +71,7 @@ export default {
          * @returns {void}
          */
         show() {
-            this.modal.show();
+            this.modal?.show();
         },
         /**
          * @fires string "yes" Notify the parent when Yes is pressed
@@ -87,5 +88,5 @@ export default {
             this.$emit("no");
         }
     },
-};
+});
 </script>

@@ -23,9 +23,7 @@ test("Database creates the SQLite schema, reads configuration and closes cleanly
             assert.ok(tables.some((table) => table.name === authTable), `${authTable} table is missing`);
         }
         assert.equal(Database.readDBConfig().type, "sqlite");
-        assert.ok(Database.getSize() > 0);
 
-        await Database.shrink();
         await Database.close();
         assert.throws(() => Database.getKnex(), /Database is not connected/);
 

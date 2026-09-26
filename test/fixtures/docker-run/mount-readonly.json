@@ -1,0 +1,37 @@
+{
+    "description": "A bare readonly in --mount becomes read_only: true, so the bind mount stays read-only.",
+    "command": "docker run -d --mount type=bind,source=/srv/web/conf,target=/etc/nginx/conf.d,readonly nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "volumes"
+        ],
+        "values": {
+            "image": "nginx",
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": "/srv/web/conf",
+                    "target": "/etc/nginx/conf.d",
+                    "read_only": true
+                }
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--mount"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

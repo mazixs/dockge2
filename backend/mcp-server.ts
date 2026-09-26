@@ -556,8 +556,9 @@ export function mountMcp(server : DockgeServer) {
             forwardedHost: [ request.headers["x-forwarded-host"] ].flat()[0],
             forwardedProto: [ request.headers["x-forwarded-proto"] ].flat()[0] });
         const allowed = origin ? trusted.includes(origin) : request.method === "GET";
+        // The two refusals are named apart: the page can then say which one to fix
         if (!allowed) {
-            response.sendStatus(403);
+            response.status(403).json({ error: "mcpOriginDenied" });
             return;
         }
         response.setHeader("Vary", "Origin");
@@ -578,7 +579,7 @@ export function mountMcp(server : DockgeServer) {
                 role: "admin",
                 suspended: 0 }).first();
             if (!user) {
-                response.sendStatus(403);
+                response.status(403).json({ error: "mcpOwnerRequired" });
                 return;
             }
             response.locals.ownerId = user.id;
@@ -631,6 +632,11 @@ export function mountMcp(server : DockgeServer) {
                 await synchronizeStackIdentities(Database.getKnex(), server);
                 const peers = publicDelegationPeers(await loadDelegationConfig());
                 response.json(await keys().issue(envelope.data, Object.fromEntries(peers.map(peer => [ peer.id, peer.stacks ]))));
+            } else if (request.params.action === "reissue") {
+                const { id } = z.object({ id: z.string().regex(/^[a-f0-9]{32}$/) }).strict().parse(envelope.data);
+                await synchronizeStackIdentities(Database.getKnex(), server);
+                const peers = publicDelegationPeers(await loadDelegationConfig());
+                response.json(await keys().reissue(id, Object.fromEntries(peers.map(peer => [ peer.id, peer.stacks ]))));
             } else if (request.params.action === "reduce") {
                 const { id, value } = z.object({ id: z.string().regex(/^[a-f0-9]{32}$/),
                     value: z.unknown() }).strict().parse(envelope.data);
@@ -784,7 +790,7 @@ export function mountMcp(server : DockgeServer) {
             next(error);
         }
     });
-    router.all([ "/mcp", "/mcp/*" ], (_request, response) => {
+    router.all([ "/mcp", "/mcp/*splat" ], (_request, response) => {
         response.setHeader("Allow", "POST");
         response.sendStatus(405);
     });

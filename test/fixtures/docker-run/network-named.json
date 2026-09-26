@@ -1,0 +1,45 @@
+{
+    "description": "A named network is declared external with the same name: it has to exist before the first start.",
+    "command": "docker run -d --network proxy nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services",
+            "networks"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "networks"
+        ],
+        "values": {
+            "image": "nginx",
+            "networks": [
+                "proxy"
+            ]
+        },
+        "topLevelValues": {
+            "networks": {
+                "proxy": {
+                    "external": true,
+                    "name": "proxy"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "--network",
+                "reason": "flagNetworkExternal"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -32,7 +32,7 @@
                     :readonly="revealed[secret.fileName] === undefined"
                     :type="revealed[secret.fileName] === undefined ? 'password' : 'text'"
                     :aria-label="secret.fileName"
-                    @input="revealed[secret.fileName] = $event.target.value"
+                    @input="revealed[secret.fileName] = ($event.target as HTMLInputElement).value"
                 />
 
                 <button v-if="revealed[secret.fileName] === undefined" class="btn btn-sm btn-normal" :disabled="disabled" @click="askPassword('reveal', secret.fileName)">
@@ -96,10 +96,16 @@
     </section>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
+import type { AgentResponse } from "../../../common/agent-events";
+import type { SecretFileMeta } from "../../../common/types/stack";
 
-export default {
+/** What the password dialog confirms */
+type SecretAction = "reveal" | "save" | "delete" | "create";
+
+export default defineComponent({
     components: {
         InterfaceIcon,
     },
@@ -113,12 +119,12 @@ export default {
             default: "",
         },
         secretFiles: {
-            type: Array,
+            type: Array as PropType<SecretFileMeta[]>,
             default: () => [],
         },
         /** Services of the compose file, used for binding */
         services: {
-            type: Array,
+            type: Array as PropType<string[]>,
             default: () => [],
         },
         disabled: {
@@ -126,24 +132,24 @@ export default {
             default: false,
         },
     },
-    emits: [ "updated" ],
+    emits: [ "updated", "stale" ],
     data() {
         return {
             maskedValue: "••••••••",
-            revealed: {},
-            bindName: {},
-            bindServices: {},
+            revealed: {} as Record<string, string>,
+            bindName: {} as Record<string, string>,
+            bindServices: {} as Record<string, string[]>,
             newFileName: "",
             showPasswordDialog: false,
             currentPassword: "",
-            pendingAction: null,
+            pendingAction: null as SecretAction | null,
             pendingFileName: "",
         };
     },
     watch: {
         secretFiles: {
             immediate: true,
-            handler(files) {
+            handler(files : SecretFileMeta[]) {
                 for (const secret of files) {
                     if (this.bindName[secret.fileName] === undefined) {
                         this.bindName[secret.fileName] = secret.secretName;
@@ -158,11 +164,10 @@ export default {
     methods: {
         /**
          * Ask for the current password before an action that touches secret content
-         * @param {string} action reveal, save, delete or create
-         * @param {string} fileName Secret file
-         * @returns {void}
+         * @param action reveal, save, delete or create
+         * @param fileName Secret file
          */
-        askPassword(action, fileName) {
+        askPassword(action : SecretAction, fileName : string) {
             this.pendingAction = action;
             this.pendingFileName = fileName;
             this.showPasswordDialog = true;
@@ -184,7 +189,7 @@ export default {
             }
 
             if (action === "reveal") {
-                this.$root.emitAgent(this.endpoint, "revealSecret", this.stackName, fileName, password, (res) => {
+                this.$root.emitAgentRequest(this.endpoint, "revealSecret", [ this.stackName, fileName, password ]).then((res) => {
                     if (res.ok) {
                         this.revealed[fileName] = res.content;
                     } else {
@@ -192,72 +197,64 @@ export default {
                     }
                 });
             } else if (action === "save") {
-                this.$root.emitAgent(this.endpoint, "saveSecret", this.stackName, fileName, this.revealed[fileName] ?? "", password, (res) => {
-                    this.$root.toastRes(res);
-                    if (res.ok) {
-                        this.$emit("updated", res.secretFiles);
-                    }
-                });
+                this.$root.emitAgentRequest(this.endpoint, "saveSecret", [ this.stackName, fileName, this.revealed[fileName] ?? "", password ]).then((res) => this.settle(res));
             } else if (action === "create") {
-                this.$root.emitAgent(this.endpoint, "saveSecret", this.stackName, fileName, "", password, (res) => {
-                    this.$root.toastRes(res);
-                    if (res.ok) {
-                        this.newFileName = "";
-                        this.$emit("updated", res.secretFiles);
-                    }
-                });
+                this.$root.emitAgentRequest(this.endpoint, "saveSecret", [ this.stackName, fileName, "", password ]).then((res) => this.settle(res, () => {
+                    this.newFileName = "";
+                }));
             } else if (action === "delete") {
-                this.$root.emitAgent(this.endpoint, "deleteSecret", this.stackName, fileName, password, (res) => {
-                    this.$root.toastRes(res);
-                    if (res.ok) {
-                        delete this.revealed[fileName];
-                        this.$emit("updated", res.secretFiles);
-                    }
-                });
+                this.$root.emitAgentRequest(this.endpoint, "deleteSecret", [ this.stackName, fileName, password ]).then((res) => this.settle(res, () => {
+                    delete this.revealed[fileName];
+                }));
+            }
+        },
+
+        /**
+         * Report the answer of a secret action and pass the new list up.
+         *
+         * A lost answer is not a failure: the action may have run on the server, so the
+         * list is read again instead of being left as it was.
+         * @param res Answer of the server
+         * @param done What to tidy up after a success
+         */
+        settle(res : AgentResponse<{ secretFiles : SecretFileMeta[] }>, done? : () => void) {
+            this.$root.toastRes(res);
+            if (res.ok) {
+                done?.();
+                this.$emit("updated", res.secretFiles);
+            } else if (res.unknown) {
+                this.$emit("stale");
             }
         },
 
         /**
          * Forget a revealed value so the mask comes back
-         * @param {string} fileName Secret file
-         * @returns {void}
+         * @param fileName Secret file
          */
-        hide(fileName) {
+        hide(fileName : string) {
             delete this.revealed[fileName];
         },
 
         /**
          * Reference the secret from the compose file
-         * @param {string} fileName Secret file
-         * @returns {void}
+         * @param fileName Secret file
          */
-        bind(fileName) {
-            const secretName = this.bindName[fileName];
+        bind(fileName : string) {
+            const secretName = this.bindName[fileName] ?? "";
             const services = this.bindServices[fileName] ?? [];
 
-            this.$root.emitAgent(this.endpoint, "bindSecret", this.stackName, secretName, fileName, services, (res) => {
-                this.$root.toastRes(res);
-                if (res.ok) {
-                    this.$emit("updated", res.secretFiles);
-                }
-            });
+            this.$root.emitAgentRequest(this.endpoint, "bindSecret", [ this.stackName, secretName, fileName, services ]).then((res) => this.settle(res));
         },
 
         /**
          * Remove the compose reference of a secret
-         * @param {string} secretName Compose secret name
-         * @returns {void}
+         * @param secretName Compose secret name
          */
-        unbind(secretName) {
-            this.$root.emitAgent(this.endpoint, "unbindSecret", this.stackName, secretName, (res) => {
-                this.$root.toastRes(res);
-                if (res.ok) {
-                    this.$emit("updated", res.secretFiles);
-                }
-            });
+        unbind(secretName : string) {
+            this.$root.emitAgentRequest(this.endpoint, "unbindSecret", [ this.stackName, secretName ]).then((res) => this.settle(res));
         },
     },
-};
+});
 </script>
 
 <style scoped lang="scss">

@@ -25,6 +25,7 @@ import { isDev, LooseObject } from "../common/util-common";
 import { Arguments, Config, DockgeSocket, dropRevokedSessions } from "./util-server";
 import { GitSocketHandler } from "./agent-socket-handlers/git-socket-handler";
 import { StabilitySocketHandler } from "./agent-socket-handlers/stability-socket-handler";
+import { ContainerSocketHandler } from "./agent-socket-handlers/container-socket-handler";
 import { observeContainerStability } from "./stability";
 import { DockerSocketHandler } from "./agent-socket-handlers/docker-socket-handler";
 import expressStaticGzip from "express-static-gzip";
@@ -34,6 +35,7 @@ import { Stack } from "./stack";
 import { recordScan } from "./observations";
 import { ScheduledRounds } from "./scheduled-rounds";
 import { readOwnProjectName } from "./stack-state";
+import { securityHeaders } from "./security-headers";
 import { recoverStackWrites } from "./stack-write";
 import gracefulShutdown from "http-graceful-shutdown";
 import { spawn } from "./child-process";
@@ -52,6 +54,11 @@ import { ResourceOwner, DEFAULT_STOP_TIMEOUT_MS, type ResourceStopReport } from 
 import { installFatalErrorHandlers } from "./fatal-error";
 import { Readiness } from "./readiness";
 import { SharedReading } from "./shared-reading";
+import { StandaloneInventory } from "./container-source";
+import { CONTAINER_CONTROL_SETTING } from "../common/types/container";
+import { PanelUpdate, redactPanelUpdateStatus } from "./panel-update";
+import { PanelUpdateSocketHandler } from "./socket-handlers/panel-update-socket-handler";
+import { PANEL_UPDATE_EVENTS, type PanelUpdateStatus } from "../common/panel-update";
 
 /** How long cleanup may take when the process is leaving after an unhandled error */
 const FATAL_STOP_TIMEOUT_MS = 5000;
@@ -166,6 +173,7 @@ export class DockgeServer {
         new MainSocketHandler(),
         new UsersSocketHandler(),
         new ManageAgentSocketHandler(),
+        new PanelUpdateSocketHandler(),
     ];
 
     agentProxySocketHandler = new AgentProxySocketHandler();
@@ -176,6 +184,7 @@ export class DockgeServer {
     agentSocketHandlerList : AgentSocketHandler[] = [
         new DockerSocketHandler(),
         new StabilitySocketHandler(),
+        new ContainerSocketHandler(),
         new GitSocketHandler(),
         new TerminalSocketHandler(),
     ];
@@ -194,8 +203,17 @@ export class DockgeServer {
     resources = new ResourceOwner();
     readiness = new Readiness();
 
+    /** Containers outside every compose project, kept between readings for "last seen" */
+    readonly standaloneContainers = new StandaloneInventory();
+
     /** Host statistics, read once for everyone who asks at about the same time */
     protected dockerStatsReading = new SharedReading(() => this.readDockerStats(), DOCKER_STATS_CACHE_MS);
+
+    /** Updating the panel through helper containers; idle until the server listens */
+    panelUpdate = new PanelUpdate({
+        version: packageJSON.version,
+        publish: (status) => this.sendPanelUpdateStatus(status),
+    });
 
     /**
      *
@@ -232,6 +250,8 @@ export class DockgeServer {
         }
 
         this.app = express();
+        this.app.disable("x-powered-by");
+        this.app.use(securityHeaders);
         this.httpServer = createHttpServer(this.app, this.config);
         this.mountAuthRoutes();
         mountMcp(this);
@@ -257,7 +277,7 @@ export class DockgeServer {
      */
     private mountAuthRoutes() : void {
         // The auth handler has to see the raw body, so it is mounted before any parser
-        this.app.all(`${AUTH_BASE_PATH}/*`, (request, response, next) => {
+        this.app.all(`${AUTH_BASE_PATH}/*splat`, (request, response, next) => {
             // The address the auth layer counts attempts by comes from the connection,
             // never from a header the caller could have written
             delete request.headers[CLIENT_IP_HEADER];
@@ -333,7 +353,7 @@ export class DockgeServer {
         }));
 
         // Universal Route Handler, must be at the end of all express routes.
-        this.app.get("*", async (_request, response) => {
+        this.app.get("/{*splat}", async (_request, response) => {
             // index.html keeps its name and points at hashed assets, so the browser has
             // to ask for it again: otherwise an update leaves it on the old page, whose
             // links lead nowhere
@@ -648,6 +668,11 @@ export class DockgeServer {
 
             runInBackground("version check", () => checkVersion.startInterval(() => this.sendInfoToAll()));
             this.resources.add("version check", () => checkVersion.stopInterval());
+
+            // A panel that starts in the middle of an update is usually the new version
+            // while the helper still verifies it, so a running helper is followed at once
+            runInBackground("panel update", () => this.panelUpdate.start());
+            this.resources.add("panel update", () => this.panelUpdate.stop());
         });
 
         gracefulShutdown(this.httpServer, {
@@ -885,6 +910,7 @@ export class DockgeServer {
         let socketList = this.io.sockets.sockets.values();
 
         let stackList;
+        let containerControl = false;
 
         for (let socket of socketList) {
             let dockgeSocket = socket as DockgeSocket;
@@ -896,6 +922,7 @@ export class DockgeServer {
                 if (!stackList) {
                     stackList = observed ?? await Stack.getStackList(this, useCache);
                     await Stack.fillAvailability(stackList);
+                    containerControl = await Settings.get(CONTAINER_CONTROL_SETTING) === true;
                 }
 
                 let map : Map<string, StackSummaryDTO | ViewerStackSummary> = new Map();
@@ -909,6 +936,8 @@ export class DockgeServer {
                 dockgeSocket.emitAgent("stackList", {
                     ok: true,
                     stackList: Object.fromEntries(map),
+                    standalone: this.standaloneContainers.list(),
+                    containerControl,
                 });
             }
         }
@@ -1037,6 +1066,20 @@ export class DockgeServer {
 
             if (socket.userID) {
                 await this.sendInfo(socket);
+            }
+        }
+    }
+
+    /**
+     * Tell every signed-in browser how the update of the panel stands, as its role may see it
+     * @param status Full status
+     */
+    sendPanelUpdateStatus(status : PanelUpdateStatus) : void {
+        for (const rawSocket of this.io.sockets.sockets.values()) {
+            const socket = rawSocket as DockgeSocket;
+
+            if (socket.userID) {
+                socket.emit(PANEL_UPDATE_EVENTS.status, redactPanelUpdateStatus(status, socket.userRole === "admin"));
             }
         }
     }

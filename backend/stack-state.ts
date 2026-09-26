@@ -1,18 +1,23 @@
-import os from "os";
 import { log } from "./log";
+import { readPanelIdentity } from "./own-container";
 import { spawn } from "./child-process";
 import {
-    COMPOSE_PROJECT_LABEL,
     type ComposePsEntry,
     type ContainerInstanceStatus,
     type DockerPsRaw,
     fromDockerPs,
+    parseDockerLabels,
     readComposeServices,
     readOneShotServices,
     resolveComposePsStatus,
     type StackStatusResult,
 } from "../common/compose-status";
 import { CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../common/util-common";
+import { classifyContainerSource } from "./container-source";
+import type { StandaloneContainer } from "../common/types/container";
+
+/** State of a container Docker listed without saying what it is doing */
+const UNKNOWN_STATE = "unknown";
 
 /** One project as `docker compose ls` describes it */
 export interface ComposeLsEntry {
@@ -33,102 +38,67 @@ export interface ProjectStack {
     readonly composeYAML : string;
 }
 
-/** Asked of Docker once, then remembered: the project name cannot change while the panel runs */
-let ownProjectName : string | null = null;
-
-/**
- * Tell a hostname Docker generated from one someone chose.
- *
- * A container whose `hostname:` was not set is named after its own short id, which is
- * exactly twelve hexadecimal characters. Anything else - a name from the compose file,
- * or the host's own name outside a container - must not be inspected: the daemon would
- * happily answer about whatever else goes by that name.
- * @param hostname Hostname of this process
- * @returns True when the name is a short container id
- */
-export function looksLikeContainerId(hostname : string) : boolean {
-    return /^[0-9a-f]{12}$/.test(hostname);
-}
-
 /**
  * Find the compose project of the panel's own container.
  *
- * Docker names a container's host after its short id, so the panel can ask the
- * daemon about itself and read the label Compose put there. This is asked rather
- * than assumed, because the project name is the user's to change - through
- * `name:` in the compose file, `COMPOSE_PROJECT_NAME` or `-p`.
+ * The panel asks the daemon about the container it runs in, found by id, and reads the
+ * label Compose put there. This is asked rather than assumed, because the project name
+ * is the user's to change - through `name:` in the compose file, `COMPOSE_PROJECT_NAME`
+ * or `-p`.
  * @returns The project name, or "" when the panel does not run in a compose project
  */
 export async function readOwnProjectName() : Promise<string> {
-    if (ownProjectName !== null) {
-        return ownProjectName;
-    }
+    return (await readPanelIdentity())?.project ?? "";
+}
 
-    ownProjectName = "";
-
-    try {
-        const hostname = os.hostname();
-
-        if (!looksLikeContainerId(hostname)) {
-            return ownProjectName;
-        }
-
-        const res = await spawn("docker", [
-            "inspect",
-            "--format",
-            `{{index .Config.Labels "${COMPOSE_PROJECT_LABEL}"}}`,
-            hostname,
-        ], {
-            encoding: "utf-8",
-            maxBuffer: 64 * 1024,
-            timeoutMs: 15_000,
-        });
-
-        ownProjectName = (res.stdout?.toString() ?? "").trim();
-    } catch (e) {
-        // Not fatal: without an answer the panel simply lists its own project, which
-        // is what it did before this was asked at all
-        if (e instanceof Error) {
-            log.debug("readOwnProjectName", `Cannot tell which project this panel runs as: ${e.message}`);
-        }
-    }
-
-    return ownProjectName;
+/** What one reading of every container of the host gives */
+export interface HostContainers {
+    /** Compose containers by project and by working directory */
+    instances : Map<string, ComposePsEntry[]>;
+    /** Containers outside every compose project */
+    standalone : StandaloneContainer[];
 }
 
 /**
- * Read every compose managed container of the host in a single Docker call.
- * One call keeps the 10 second status cron cheap even with many stacks.
- * @returns Entries grouped by compose project, or null when Docker output cannot be trusted
+ * Read every container of the host in a single Docker call.
+ * One call keeps the 10 second status cron cheap even with many stacks; the containers
+ * outside every compose project come from the same reading instead of a second one.
+ * @param now Moment of the reading, what "last seen" of a standalone container records
+ * @returns Compose entries and standalone containers, or null when Docker output cannot be trusted
  */
-export async function readInstanceMap() : Promise<Map<string, ComposePsEntry[]> | null> {
+export async function readHostContainers(now = Date.now()) : Promise<HostContainers | null> {
     try {
         const res = await spawn("docker", [
             "ps",
             "--all",
-            "--filter",
-            `label=${COMPOSE_PROJECT_LABEL}`,
+            "--no-trunc",
             "--format",
             "json",
         ], {
             encoding: "utf-8",
-            maxBuffer: 4 * 1024 * 1024,
+            maxBuffer: 16 * 1024 * 1024,
             timeoutMs: 15_000,
         });
 
-        if (!res.stdout) {
-            return new Map();
-        }
-
-        const map = new Map<string, ComposePsEntry[]>();
+        const instances = new Map<string, ComposePsEntry[]>();
+        const standalone : StandaloneContainer[] = [];
 
         // Docker returns JSON Lines, one container per line
-        for (const line of res.stdout.toString().split("\n")) {
+        for (const line of (res.stdout?.toString() ?? "").split("\n")) {
             if (line.trim() === "") {
                 continue;
             }
 
-            const entry = fromDockerPs(JSON.parse(line) as DockerPsRaw);
+            const raw = JSON.parse(line) as DockerPsRaw;
+            const entry = fromDockerPs(raw);
+
+            if (!entry.project) {
+                const row = toStandaloneRow(raw, now);
+                if (row) {
+                    standalone.push(row);
+                }
+                continue;
+            }
 
             // Indexed by project and by working directory: a stack whose `.env` renames
             // the compose project is still found through its directory
@@ -137,19 +107,47 @@ export async function readInstanceMap() : Promise<Map<string, ComposePsEntry[]> 
                     continue;
                 }
 
-                const list = map.get(key) ?? [];
+                const list = instances.get(key) ?? [];
                 list.push(entry);
-                map.set(key, list);
+                instances.set(key, list);
             }
         }
 
-        return map;
+        return { instances,
+            standalone };
     } catch (e) {
         if (e instanceof Error) {
-            log.warn("readInstanceMap", `Failed to read containers: ${e.message}`);
+            log.warn("readHostContainers", `Failed to read containers: ${e.message}`);
         }
         return null;
     }
+}
+
+/**
+ * Describe a container outside every compose project for the list
+ * @param raw One line of `docker ps`
+ * @param now Moment of the reading
+ * @returns The row, or null for a line without a full id, which nothing could be asked about
+ */
+function toStandaloneRow(raw : DockerPsRaw, now : number) : StandaloneContainer | null {
+    if (typeof raw.ID !== "string" || !/^[a-f0-9]{64}$/.test(raw.ID)) {
+        return null;
+    }
+
+    const source = classifyContainerSource(parseDockerLabels(raw.Labels), "");
+    const exited = /exited\s+\((-?\d+)\)/i.exec(raw.Status ?? "")?.[1];
+    const health = (raw.HealthStatus ?? "").toLowerCase();
+    return {
+        id: raw.ID,
+        name: raw.Names ?? raw.Name ?? "",
+        image: raw.Image ?? "",
+        state: (raw.State ?? "").toLowerCase() || UNKNOWN_STATE,
+        status: raw.Status ?? "",
+        health: health === "none" ? "" : health,
+        exitCode: exited === undefined ? null : Number.parseInt(exited, 10),
+        source: source === "standalone" ? "standalone" : "unknown",
+        lastSeen: now,
+    };
 }
 
 /**
@@ -217,7 +215,7 @@ export async function readStatusList() : Promise<Map<string, number>> {
         return statusList;
     }
 
-    const instanceMap = await readInstanceMap();
+    const instanceMap = (await readHostContainers())?.instances ?? null;
 
     for (const composeStack of composeList) {
         statusList.set(composeStack.Name, resolveProjectStatus(composeStack, instanceMap).status);

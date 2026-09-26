@@ -114,31 +114,35 @@
     </div>
 </template>
 
-<script>
-// @ts-check
+<script lang="ts">
+import { defineComponent } from "vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
 import { isSafeGitRepository, stackNameFromRepository } from "../git-ui";
 import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
+import type { GitSaveResult } from "../../../common/types/stack-git";
+
+/** Where the new stack comes from */
+type SourceTab = "git" | "compose";
 
 // Клонирование с развертыванием идет столько, сколько идет git и docker compose:
 // подтверждение ждут долго, но не бесконечно
 const CLONE_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
-export default {
+export default defineComponent({
     components: { InterfaceIcon,
         CreateStackSheet },
     /**
      * Hold the person on the page while a checkout is being created
-     * @this {{ busy : boolean, composeBusy : boolean }}
-     * @returns {boolean} Whether leaving is allowed
+     * @param this The page, which the router types without its own fields
+     * @returns Whether leaving is allowed
      */
-    beforeRouteLeave() {
+    beforeRouteLeave(this : { busy : boolean, composeBusy : boolean }) {
         return !this.busy && !this.composeBusy;
     },
     data() {
         return {
-            sourceTab: "git",
+            sourceTab: "git" as SourceTab,
             step: 1,
             repository: "",
             branch: "main",
@@ -151,13 +155,11 @@ export default {
             busy: false,
             uncertain: false,
             composeBusy: false,
-            /** @type {string[]} */
-            branches: [],
+            branches: [] as string[],
             branchesBusy: false,
             branchesFailure: "",
             failure: "",
-            /** @type {import("../../../common/types/stack-git").GitSaveResult | null} */
-            result: null,
+            result: null as GitSaveResult | null,
         };
     },
     computed: {
@@ -196,7 +198,7 @@ export default {
     watch: {
         // Ветки принадлежат конкретному адресу: сменился адрес или сервер -
         // прежний список больше ничего не описывает
-        repository(value) {
+        repository(value : string) {
             this.branches = [];
             this.branchesFailure = "";
             this.forgetOutcome();
@@ -209,10 +211,9 @@ export default {
         // through the instance that owns it, which the checker cannot resolve
         name: {
             /**
-             * @param {string} value Name that is in the field now
-             * @returns {void}
+             * @param value Name that is in the field now
              */
-            handler(value) {
+            handler(value : string) {
                 this.nameChosen = Boolean(value) && value !== stackNameFromRepository(this.repository);
             },
         },
@@ -229,7 +230,7 @@ export default {
         step() {
             this.forgetOutcome();
         },
-        "$root.socketIO.connected"(connected) {
+        "$root.socketIO.connected"(connected : boolean) {
             if (!connected && this.busy) {
                 this.busy = false;
                 this.uncertain = true;
@@ -259,10 +260,9 @@ export default {
         },
         /**
          * Open the requested accessible tab and place keyboard focus on its label.
-         * @param {string} tab Name of the tab
-         * @returns {void}
+         * @param tab Name of the tab
          */
-        selectTab(tab) {
+        selectTab(tab : SourceTab) {
             this.sourceTab = tab;
             this.$nextTick(() => document.getElementById(`new-${tab}-tab`)?.focus());
         },
@@ -273,7 +273,8 @@ export default {
             }
             this.branchesBusy = true;
             this.branchesFailure = "";
-            this.$root.emitAgent(this.endpoint, "gitListBranches", this.repository.trim(), (res) => {
+            // The server gives `git ls-remote` a minute of its own
+            this.$root.emitAgentRequest(this.endpoint, "gitListBranches", [ this.repository.trim() ], { timeoutMs: 75_000 }).then((res) => {
                 this.branchesBusy = false;
                 if (!res?.ok) {
                     this.branchesFailure = this.$root.serverText(res?.msg, "gitUiRequestFailed");
@@ -298,22 +299,21 @@ export default {
             }
             this.sourceTab = "compose";
             this.$root.createStackSeed = "";
-            this.$nextTick(() => /** @type {{ open : (prefill : string) => void } | undefined} */ (this.$refs.composeForm)?.open(seed));
+            this.$nextTick(() => (this.$refs.composeForm as InstanceType<typeof CreateStackSheet> | undefined)?.open(seed));
         },
         /**
          * Resolve an agent-aware route without interpolating unescaped endpoint data.
-         * @param {string} name Name of the stack
-         * @returns {string} Path of its page
+         * @param name Name of the stack
+         * @returns Path of its page
          */
-        stackPath(name) {
+        stackPath(name : string) {
             return `/stack/${encodeURIComponent(name)}${this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : ""}`;
         },
         /**
          * Create a real Git checkout; navigation stays locked until the transaction returns.
-         * @param {boolean} deploy Whether the stack is started once the files are there
-         * @returns {void}
+         * @param deploy Whether the stack is started once the files are there
          */
-        create(deploy) {
+        create(deploy : boolean) {
             if (!this.canCreate) {
                 return;
             }
@@ -342,7 +342,7 @@ export default {
             });
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

@@ -1,14 +1,49 @@
 # Updating
 
-The panel is updated on the host, by the updater that the installer placed in
-`<installation>/.dockge2/update`. The browser only tells you that a release exists: Settings ->
-About checks when the owner asks, or on a schedule once automatic checks are enabled, and shows the
-command for the exact version.
+The panel is updated by the updater that the installer placed in `<installation>/.dockge2/update`.
+An owner can start it from Settings -> About, or run it on the host. Both run the same updater with
+the same checks, the same data snapshot and the same recovery. Settings -> About checks for releases
+when the owner asks, or on a schedule once automatic checks are enabled.
 
 Updating the panel never touches your stacks: their images are updated from the stack page, and
 their containers are not restarted when the panel is.
 
-## Update
+## Update from the web interface
+
+1. Settings -> About -> **Prepare update to <version>**. The panel runs the updater's preview: the release is
+   verified, nothing is downloaded or changed. You see the current and target versions, the
+   configuration fields that change, and whether the database schema changes.
+2. **Update to <version>** and confirm with your password within ten minutes of the preview.
+3. The page stays open and follows the steps: download, stop, save data, start, verify. While the
+   panel restarts the page loses its connection for a minute or two; your stacks keep running. Do
+   not reload the tab while the panel is offline - the browser would show its own error page. If you
+   did, reload again once the panel answers; the progress comes back.
+4. The page ends on one result:
+   - **Updated to Dockge2 X** - the new version answers and the updater confirmed it; the page
+     reloads into it.
+   - **Not updated: Dockge2 X keeps running** - the update was refused, cancelled, or failed before
+     the panel stopped.
+   - **Not installed: Dockge2 X runs again** - the new version did not become ready, so the updater
+     brought the previous one back. When the schema had changed, the data snapshot taken before the
+     update was restored and the data the failed version wrote is kept next to the data directory as
+     `*.dockge-failed-<operation>`.
+   - **The update needs attention on the host** - recovery did not finish; the page shows the
+     commands to run, see [interrupted updates](#interrupted-updates).
+   - **The result of the update is unknown** - the updater was killed without a result, for example
+     by a Docker restart; the page shows the step it stopped at and the commands to continue or roll
+     back.
+
+Downloading can be cancelled; once the image is downloaded the update runs to its end. Other users
+see a banner while the update runs. The update runs in a separate short-lived container
+(`dockge2-update-<project>-apply`) so that it survives the panel stopping; it is removed when the
+owner closes the result.
+
+The button needs an installation managed by the updater, a panel running as that installation's
+container, and a data directory bind-mounted from the host. Otherwise, and for installations whose
+updater predates this feature, About shows the host commands instead. One update from the host
+installs an updater that the web interface can drive.
+
+## Update on the host
 
 ```bash
 sudo /opt/dockge2/.dockge2/update --dry-run
@@ -95,14 +130,23 @@ directory as `*.dockge-failed-<operation>`. Stack files and stack volumes are no
 ## Interrupted updates
 
 If an update fails before the new panel started, or the schema did not change, the updater restarts
-and verifies the previous panel on its own. Otherwise the operation stays `recovery-required`, with
-the failed target stopped, and a new update refuses to start over it:
+and verifies the previous panel on its own. When the schema changed and the new panel never became
+ready, an update started from the web interface also restores the data snapshot and starts the
+previous panel; on the host, add `--restore-on-failed-start` to `--yes` for the same behaviour.
+Otherwise the operation stays `recovery-required`, with the failed target stopped, and a new update
+refuses to start over it:
 
 ```bash
 sudo /opt/dockge2/.dockge2/update --status          # what happened
 sudo /opt/dockge2/.dockge2/update --resume --yes    # retry the same target after fixing the cause
 sudo /opt/dockge2/.dockge2/update --rollback --yes  # or go back
 ```
+
+Once the data snapshot was restored, or its restore began, `--resume` refuses: the new version
+would migrate the restored data again. Finish with `--rollback --restore-data --yes`, then start a
+new update. If `--status` stays on `rolling-back` after the updater has exited, a restore container
+(`dockge2-restore-<project>-<operation>`) may still be running: wait until it has exited, then roll
+back.
 
 The recovery tool is installed on the host, so it works even when the panel cannot start. A failed
 first installation has no previous deployment: keep its data and journal for diagnosis rather than

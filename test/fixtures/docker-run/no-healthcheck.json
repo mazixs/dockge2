@@ -1,0 +1,32 @@
+{
+    "description": "Disabling the health check of the image survives.",
+    "command": "docker run -d --no-healthcheck nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "healthcheck"
+        ],
+        "values": {
+            "image": "nginx",
+            "healthcheck": {
+                "disable": true
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--no-healthcheck"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

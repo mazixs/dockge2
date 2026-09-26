@@ -1,0 +1,39 @@
+{
+    "description": "Added and dropped capabilities survive as lists, and nothing turns them into privileged.",
+    "command": "docker run -d --cap-add NET_ADMIN --cap-add=SYS_TIME --cap-drop ALL nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "cap_add",
+            "cap_drop"
+        ],
+        "values": {
+            "image": "nginx",
+            "cap_add": [
+                "NET_ADMIN",
+                "SYS_TIME"
+            ],
+            "cap_drop": [
+                "ALL"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--cap-add",
+            "--cap-add",
+            "--cap-drop"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

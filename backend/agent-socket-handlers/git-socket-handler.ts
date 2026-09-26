@@ -13,6 +13,7 @@ import type { AgentRequestContract } from "../../common/agent-events";
 import type { GitApplyInput, GitCloneInput, GitMessage, GitSaveResult } from "../../common/types/stack-git";
 import type { StackFileConfig } from "../../common/types/stack";
 import { runInBackground } from "../background";
+import { log } from "../log";
 
 const workflows = new WeakMap<DockgeServer, StackGitWorkflow>();
 
@@ -61,6 +62,19 @@ export function missingVariables(error: unknown): string[] {
     return [ ...names ];
 }
 
+/**
+ * Make the reason of a failed Docker command fit for the server log.
+ *
+ * The browser only ever gets a message key, and the owner reading the log needs the
+ * reason itself. What an address carries before `@` is masked, and the text is cut
+ * short so one failure cannot flood the log.
+ */
+export function logSafeReason(error: unknown): string {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    const text = typeof stderr === "string" && stderr.trim() ? stderr : error instanceof Error ? error.message : String(error);
+    return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1***@").trim().slice(0, 2000);
+}
+
 /** Validate in isolation; Docker output can contain credentials, so never return it. */
 async function validate(directory: string, config: StackFileConfig, stacksDir: string): Promise<void> {
     try {
@@ -88,10 +102,14 @@ async function validate(directory: string, config: StackFileConfig, stacksDir: s
             maxBuffer: 256 * 1024,
             timeoutMs: 60_000 });
     } catch (error) {
+        if (error instanceof StackGitError) {
+            throw error;
+        }
         const missing = missingVariables(error);
         if (missing.length) {
             throw new ComposeEnvironmentError(missing);
         }
+        log.warn("git", `The compose check refused the files: ${logSafeReason(error)}`);
         throw new StackGitError("gitComposeInvalid");
     }
 }
@@ -118,7 +136,8 @@ async function result(server: DockgeServer, socket: DockgeSocket, name: string, 
             const stack = await Stack.getStack(server, name);
             await stack.deploy(socket);
             deployed = true;
-        } catch {
+        } catch (error) {
+            log.warn("git", `Deploying ${name} after saving failed: ${logSafeReason(error)}`);
             deploymentError = { key: "gitDeployFailedAfterSave" };
         }
     }

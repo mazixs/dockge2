@@ -44,7 +44,7 @@
                             <div class="field">
                                 <label for="name" class="form-label">{{ $t("stackName") }}</label>
                                 <input id="name" v-model="stack.name" type="text" class="form-control" required @blur="stackNameToLowercase">
-                                <div class="form-text">{{ $t("Lowercase only") }}</div>
+                                <div class="form-text">{{ $t("lowercaseOnly") }}</div>
                             </div>
 
                             <!-- Endpoint -->
@@ -52,7 +52,7 @@
                                 <label for="endpoint" class="form-label">{{ $t("dockgeAgent") }}</label>
                                 <select id="endpoint" v-model="stack.endpoint" class="form-select">
                                     <option v-for="(agent, agentEndpoint) in $root.agentList" :key="agentEndpoint" :value="agentEndpoint" :disabled="$root.agentStatusList[agentEndpoint] != 'online'">
-                                        ({{ $root.agentStatusList[agentEndpoint] }}) {{ (agent.name !== '') ? agent.name : agent.url || $t("Current") }}
+                                        ({{ $root.agentStatusList[agentEndpoint] }}) {{ (agent.name !== '') ? agent.name : agent.url || $t("current") }}
                                     </option>
                                 </select>
                             </div>
@@ -72,7 +72,8 @@
 
                             <!-- Здесь только правка файла: остановить, обновить и удалить можно из инспектора -->
                             <template v-if="isEditMode">
-                                <button class="btn btn-sm btn-primary" :disabled="processing" @click="deployStack">
+                                <!-- Стек самой панели сохраняют, а применяют обновлением панели из "О программе" -->
+                                <button v-if="!stack.panelService" class="btn btn-sm btn-primary" :disabled="processing" @click="deployStack">
                                     <font-awesome-icon icon="rocket" />{{ $t("deployStack") }}
                                 </button>
 
@@ -208,7 +209,7 @@
                         <div v-if="structuredEditsEnabled" class="panel-body add-service">
                             <input
                                 v-model="newContainerName"
-                                :placeholder="$t(`New Container Name...`)"
+                                :placeholder="$t(`newContainerNamePlaceholder`)"
                                 :aria-label="$t('addContainer')"
                                 class="form-control"
                                 @keyup.enter="addContainer"
@@ -262,6 +263,7 @@
                         :services="serviceNames"
                         :disabled="processing"
                         @updated="onSecretsUpdated"
+                        @stale="requestStackFiles"
                     />
                 </div>
             </div>
@@ -286,14 +288,14 @@
     </transition>
 </template>
 
-<script>
-// @ts-check
+<script lang="ts">
 import CodeMirror from "vue-codemirror6";
 import { yaml } from "@codemirror/lang-yaml";
 import { python } from "@codemirror/lang-python";
 import { oneDark as editorTheme } from "@codemirror/theme-one-dark";
 import { lineNumbers, EditorView } from "@codemirror/view";
-import { parseDocument } from "yaml";
+import type { EditorState, Extension } from "@codemirror/state";
+import { parseDocument, type Document } from "yaml";
 
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import {
@@ -302,15 +304,35 @@ import {
     getComposeTerminalName,
     PROGRESS_TERMINAL_ROWS
 } from "../../../common/util-common";
-import { analyseComposeSource, applyStructuredEdit, canEditStructurally } from "../../../common/compose-editor";
+import {
+    analyseComposeSource,
+    applyStructuredEdit,
+    canEditStructurally,
+    type ComposeAnalysis,
+    type ComposeModel
+} from "../../../common/compose-editor";
+import type { LooseObject } from "../../../common/util-common";
+import type { ServiceStatusList } from "../../../common/agent-events";
+import type {
+    SecretFileMeta,
+    StackDTO,
+    StackFileBaseline,
+    StackFileConfig,
+    StackFileInventory,
+    StackFileReadIssue,
+    StackSummaryDTO,
+    ViewerStackSummary,
+} from "../../../common/types/stack";
 import NetworkInput from "../components/NetworkInput.vue";
 import StackFilesEditor from "../components/StackFilesEditor.vue";
 import SecretEditor from "../components/SecretEditor.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import ShieldCheck from "../components/ShieldCheck.vue";
 import Confirm from "../components/Confirm.vue";
+import type { DockerStatRow } from "../components/DockerStat.vue";
+import type TerminalComponent from "../components/Terminal.vue";
 import dotenv from "dotenv";
-import { markRaw, ref } from "vue";
+import { defineComponent, markRaw, ref, type PropType } from "vue";
 import { RequestTracker } from "../request-tracker";
 import { errorText } from "../util-frontend";
 
@@ -320,19 +342,19 @@ import { errorText } from "../util-frontend";
  * The texts and the names are always there, empty until something fills them: an editor
  * exists before the server answers, and a field that appears only with the answer turns
  * every use of it into a guess.
- * @typedef {Partial<import("../../../common/types/stack").StackDTO> & {
- *     name : string,
- *     composeYAML : string,
- *     composeENV : string,
- *     endpoint : string,
- * }} EditorStack
  */
+type EditorStack = Partial<StackDTO> & {
+    name : string,
+    composeYAML : string,
+    composeENV : string,
+    endpoint : string,
+};
 
 /**
  * A stack nobody has loaded yet
- * @returns {EditorStack} Empty stack
+ * @returns Empty stack
  */
-function emptyStack() {
+function emptyStack() : EditorStack {
     return { name: "",
         composeYAML: "",
         composeENV: "",
@@ -349,19 +371,16 @@ services:
 `;
 const envDefault = "# VARIABLE=value #comment";
 
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let yamlErrorTimeout;
+let yamlErrorTimeout : ReturnType<typeof setTimeout> | undefined;
 
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let serviceStatusTimeout;
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let dockerStatsTimeout;
+let serviceStatusTimeout : ReturnType<typeof setTimeout> | undefined;
+let dockerStatsTimeout : ReturnType<typeof setTimeout> | undefined;
 
 // Развертывание идет столько, сколько идет docker compose: подтверждение ждут долго,
 // но не бесконечно - иначе потерянный ответ оставил бы кнопки заблокированными
 const SAVE_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
-export default {
+export default defineComponent({
     components: {
         NetworkInput,
         FontAwesomeIcon,
@@ -372,11 +391,11 @@ export default {
         ShieldCheck,
         Confirm,
     },
-    beforeRouteUpdate(to, from, next) {
-        this.exitConfirm(next);
+    beforeRouteUpdate() : boolean {
+        return this.exitConfirm();
     },
-    beforeRouteLeave(to, from, next) {
-        this.exitConfirm(next);
+    beforeRouteLeave() : boolean {
+        return this.exitConfirm();
     },
     props: {
         /** Редактор показан вкладкой страницы стека, а не отдельным экраном */
@@ -403,13 +422,13 @@ export default {
          * одного стека удваивали и запросы к серверу, и вызовы docker stats
          */
         statusList: {
-            type: Object,
+            type: Object as PropType<ServiceStatusList | null>,
             default: null,
         },
 
         /** Расход контейнеров, оттуда же */
         statsList: {
-            type: Object,
+            type: Object as PropType<Record<string, DockerStatRow> | null>,
             default: null,
         },
     },
@@ -420,11 +439,11 @@ export default {
 
         /**
          * Remember whether the text editor has the keyboard
-         * @param {import("@codemirror/state").EditorState} state Editor state the change belongs to
-         * @param {boolean} focusing Whether the editor took the focus
-         * @returns {null} No effect is added to the transaction
+         * @param state Editor state the change belongs to
+         * @param focusing Whether the editor took the focus
+         * @returns No effect is added to the transaction
          */
-        const focusEffectHandler = (state, focusing) => {
+        const focusEffectHandler = (state : EditorState, focusing : boolean) : null => {
             editorFocus.value = focusing;
             return null;
         };
@@ -434,22 +453,16 @@ export default {
     },
     data() {
         return {
-            /** @type {import("../../../common/compose-editor").ComposeModel} */
-            jsonConfig: {},
-            /** @type {import("../../../common/compose-editor").ComposeModel} */
-            envsubstJSONConfig: {},
+            jsonConfig: {} as ComposeModel,
+            envsubstJSONConfig: {} as ComposeModel,
             yamlError: "",
             processing: true,
             showProgressTerminal: false,
             progressTerminalRows: PROGRESS_TERMINAL_ROWS,
-            /** @type {EditorStack} */
             stack: emptyStack(),
-            /** @type {import("../../../common/agent-events").ServiceStatusList} */
-            serviceStatusList: {},
-            /** @type {import("../../../common/types/stack").StackFileInventory | null} */
-            fileInventory: null,
-            /** @type {import("../../../common/compose-editor").ComposeAnalysis | null} */
-            composeAnalysis: null,
+            serviceStatusList: {} as ServiceStatusList,
+            fileInventory: null as StackFileInventory | null,
+            composeAnalysis: null as ComposeAnalysis | null,
             /** Text the current model and analysis were built from */
             analysedSource: "",
             /** Whether the compose file had a top level networks key when it was loaded */
@@ -458,14 +471,10 @@ export default {
             applyingExternal: false,
             /** Set when the user removed the last network by hand */
             explicitNetworkRemoval: false,
-            /** @type {import("../../../common/util-common").LooseObject} */
-            dockerStats: {},
+            dockerStats: {} as Record<string, DockerStatRow>,
             isEditMode: false,
-            /**
-             * What the editor held when editing began: leaving is asked about only past it
-             * @type {{ name : string, yaml : string, env : string } | null}
-             */
-            editBaseline: null,
+            /** What the editor held when editing began: leaving is asked about only past it */
+            editBaseline: null as { name : string, yaml : string, env : string } | null,
             // Значения .env показываются только по просьбе: см. панель env в шаблоне
             envRevealed: false,
             submitted: false,
@@ -477,43 +486,33 @@ export default {
              * во вкладке, и один запрос каждого вида идет за раз
              */
             requests: markRaw(new RequestTracker()),
-            /**
-             * Hashes of the files this editor loaded, sent back so a stale save is refused
-             * @type {import("../../../common/types/stack").StackFileBaseline | null}
-             */
-            fileBaseline: null,
-            /**
-             * Files the server could not read, so this editor must not save over them
-             * @type {import("../../../common/types/stack").StackFileReadIssue[]}
-             */
-            readIssues: [],
+            /** Hashes of the files this editor loaded, sent back so a stale save is refused */
+            fileBaseline: null as StackFileBaseline | null,
+            /** Files the server could not read, so this editor must not save over them */
+            readIssues: [] as StackFileReadIssue[],
             /** File a refused save named, shown while the conflict dialog is open */
             conflictFile: "",
-            /**
-             * What the conflict dialog repeats once the user chooses to overwrite
-             * @type {"saveStack" | "deployStack" | null}
-             */
-            pendingSave: null,
+            /** What the conflict dialog repeats once the user chooses to overwrite */
+            pendingSave: null as "saveStack" | "deployStack" | null,
         };
     },
     computed: {
-        endpointDisplay() {
+        endpointDisplay() : string | undefined {
             return this.$root.endpointDisplayFunction(this.endpoint);
         },
 
         /**
          * Links of the stack, as the x-dockge extension of the compose file lists them
-         * @returns {{ display : string, url : string }[]} Links to show
+         * @returns Links to show
          */
-        urls() {
+        urls() : { display : string, url : string }[] {
             const configured = this.envsubstJSONConfig["x-dockge"]?.urls;
 
             if (!Array.isArray(configured)) {
                 return [];
             }
 
-            /** @type {{ display : string, url : string }[]} */
-            const urls = [];
+            const urls : { display : string, url : string }[] = [];
             for (const url of configured) {
                 let display;
                 try {
@@ -535,24 +534,23 @@ export default {
             return urls;
         },
 
-        isAdd() {
+        isAdd() : boolean {
             return !this.embedded && this.$route.path === "/compose" && !this.submitted;
         },
 
         /**
          * Get the stack from the global stack list, because it may contain more real-time data like status
-         * @return {*}
          */
-        globalStack() {
+        globalStack() : StackSummaryDTO | ViewerStackSummary | undefined {
             return this.$root.completeStackList[this.stack.name + "_" + this.endpoint];
         },
 
         /**
          * Whether the structured editor may write the compose file back.
          * Files with include, custom tags, anchors or merge keys stay in text mode.
-         * @returns {boolean} True when a structured edit keeps the meaning of the file
+         * @returns True when a structured edit keeps the meaning of the file
          */
-        structuredEditsEnabled() {
+        structuredEditsEnabled() : boolean {
             if (!this.composeAnalysis || !canEditStructurally(this.composeAnalysis)) {
                 return false;
             }
@@ -565,17 +563,17 @@ export default {
 
         /**
          * Constructs that keep the file in text mode
-         * @returns {Array<string>} Reasons
+         * @returns Reasons
          */
-        unsupportedConstructs() {
+        unsupportedConstructs() : string[] {
             return this.composeAnalysis?.unsupported ?? [];
         },
 
         /**
          * Env file that the editor shows, taken from the stored selection
-         * @returns {string} File name
+         * @returns File name
          */
-        activeEnvFileName() {
+        activeEnvFileName() : string {
             return this.fileInventory?.config?.activeEnvFileName || ".env";
         },
 
@@ -586,17 +584,17 @@ export default {
          * stack is read the panel says the name it would create, the same way the env
          * editor falls back to `.env`: an unnamed box is worse than a name one keystroke
          * ahead of the answer.
-         * @returns {string} Accessible name
+         * @returns Accessible name
          */
-        composeEditorLabel() {
+        composeEditorLabel() : string {
             return this.$t("fileEditorLabel", { file: this.stack.composeFileName || acceptedComposeFileNames[0] });
         },
 
         /**
          * Name of the env editor, spoken instead of "text box"
-         * @returns {string} Accessible name
+         * @returns Accessible name
          */
-        envEditorLabel() {
+        envEditorLabel() : string {
             return this.$t("fileEditorLabel", { file: this.activeEnvFileName });
         },
 
@@ -607,9 +605,9 @@ export default {
          * owns the editable element and rebuilds it, so a name written from outside
          * arrives late and disappears on the next render. Changing this list reconfigures
          * the editor, which is what carries a new file name into the accessibility tree.
-         * @returns {import("@codemirror/state").Extension[]} Editor extensions
+         * @returns Editor extensions
          */
-        extensions() {
+        extensions() : Extension[] {
             return [
                 editorTheme,
                 yaml(),
@@ -621,9 +619,9 @@ export default {
 
         /**
          * Configuration of the env editor, named after the file it shows
-         * @returns {import("@codemirror/state").Extension[]} Editor extensions
+         * @returns Editor extensions
          */
-        extensionsEnv() {
+        extensionsEnv() : Extension[] {
             return [
                 editorTheme,
                 python(),
@@ -635,9 +633,9 @@ export default {
 
         /**
          * Whether the shown env file has no content yet
-         * @returns {boolean} True when the file is empty or only whitespace
+         * @returns True when the file is empty or only whitespace
          */
-        envIsEmpty() {
+        envIsEmpty() : boolean {
             return (this.stack.composeENV ?? "").trim() === "";
         },
 
@@ -645,18 +643,18 @@ export default {
          * Whether the env panel belongs on the page.
          * While editing it is always there: an empty `.env` is a draft the save can
          * create. While viewing, a file that is not on disk would be an empty promise.
-         * @returns {boolean} True when the panel is shown
+         * @returns True when the panel is shown
          */
         /**
          * Whether the env values are on screen.
          * A new stack has nothing to hide yet, so its field is open from the start.
-         * @returns {boolean} True when the file contents are shown
+         * @returns True when the file contents are shown
          */
-        envShown() {
+        envShown() : boolean {
             return this.envRevealed || this.isAdd;
         },
 
-        envPanelVisible() {
+        envPanelVisible() : boolean {
             if (this.isAdd || this.isEditMode) {
                 return true;
             }
@@ -666,49 +664,49 @@ export default {
 
         /**
          * Services declared in the compose file, used for secret bindings
-         * @returns {Array<string>} Service names
+         * @returns Service names
          */
-        serviceNames() {
+        serviceNames() : string[] {
             return Object.keys(this.jsonConfig?.services ?? {});
         },
 
-        terminalName() {
+        terminalName() : string {
             if (!this.stack.name) {
                 return "";
             }
             return getComposeTerminalName(this.endpoint, this.stack.name);
         },
 
-        networks() {
+        networks() : ComposeModel["networks"] {
             return this.jsonConfig.networks;
         },
 
         /**
          * Agent the stack lives on, empty for this panel
-         * @returns {string} Name of the agent
+         * @returns Name of the agent
          */
-        endpoint() {
+        endpoint() : string {
             return this.stack.endpoint || this.endpointName || String(this.$route.params.endpoint ?? "");
         },
 
         /**
          * Whether every file of this stack could be read
-         * @returns {boolean} True when nothing failed to read
+         * @returns True when nothing failed to read
          */
-        filesAreReadable() {
+        filesAreReadable() : boolean {
             return (this.readIssues ?? []).length === 0;
         },
 
         /**
          * Files the server could not read, as one readable list
-         * @returns {string} File names separated by commas
+         * @returns File names separated by commas
          */
-        unreadableFiles() {
+        unreadableFiles() : string {
             return (this.readIssues ?? []).map((issue) => `${issue.fileName} (${issue.code})`).join(", ");
         },
 
         /** Куда возвращаться после сохранения: инспектор стека, а не редактор */
-        url() {
+        url() : string {
             if (this.stack.endpoint) {
                 return `/stack/${this.stack.name}/${this.stack.endpoint}`;
             } else {
@@ -775,7 +773,7 @@ export default {
 
         statusList: {
             immediate: true,
-            handler(value) {
+            handler(value : ServiceStatusList | null) {
                 if (this.embedded && value) {
                     this.serviceStatusList = value;
                 }
@@ -784,7 +782,7 @@ export default {
 
         statsList: {
             immediate: true,
-            handler(value) {
+            handler(value : Record<string, DockerStatRow> | null) {
                 if (this.embedded && value) {
                     this.dockerStats = value;
                 }
@@ -870,7 +868,6 @@ export default {
 
         /**
          * Load which compose, env and secret files this stack uses
-         * @returns {void}
          */
         requestStackFiles() {
             if (this.isAdd) {
@@ -886,10 +883,9 @@ export default {
 
         /**
          * Store a new file selection and reload the stack, because the shown texts may change
-         * @param {import("../../../common/types/stack").StackFileConfig} config Selection from the editor
-         * @returns {void}
+         * @param config Selection from the editor
          */
-        saveFileSelection(config) {
+        saveFileSelection(config : StackFileConfig) {
             this.processing = true;
 
             this.$root.emitAgentRequest(this.endpoint, "setStackFiles", [ this.stack.name, config ]).then((res) => {
@@ -905,7 +901,7 @@ export default {
                 // Reloading replaces the texts with what is on disk, which would silently
                 // discard edits the user has not saved yet
                 if (this.isEditMode) {
-                    this.$root.toastError(this.$t("reloadNeededAfterFileChange"));
+                    this.$root.toastError("reloadNeededAfterFileChange");
                     return;
                 }
 
@@ -918,10 +914,9 @@ export default {
          * Only the file appears. Which files compose interpolates and which one the
          * editor shows stay a separate, explicit choice: folding them into one action
          * would swap the text under an open editor and write it back into the new file.
-         * @param {string} fileName Name typed in the file selection panel
-         * @returns {void}
+         * @param fileName Name typed in the file selection panel
          */
-        createEnvFile(fileName) {
+        createEnvFile(fileName : string) {
             this.processing = true;
 
             this.$root.emitAgentRequest(this.endpoint, "saveEnvFile", [ this.stack.name, fileName, "" ]).then((res) => {
@@ -936,10 +931,9 @@ export default {
 
         /**
          * Refresh the secret list after an authorised secret action
-         * @param {import("../../../common/types/stack").SecretFileMeta[]} secretFiles New metadata
-         * @returns {void}
+         * @param secretFiles New metadata
          */
-        onSecretsUpdated(secretFiles) {
+        onSecretsUpdated(secretFiles : SecretFileMeta[]) {
             if (this.fileInventory) {
                 this.fileInventory.secretFiles = secretFiles;
             }
@@ -982,7 +976,8 @@ export default {
                 }
 
                 if (res.ok) {
-                    this.dockerStats = res.dockerStats;
+                    // The agent contract carries the rows untyped; they are docker stats rows
+                    this.dockerStats = res.dockerStats as Record<string, DockerStatRow>;
                 }
                 if (!this.stopDockerStatsTimeout) {
                     this.startDockerStatsTimeout();
@@ -992,26 +987,18 @@ export default {
 
         /**
          * Ask before leaving with unsaved edits
-         * @param {import("vue-router").NavigationGuardNext} next How the router is answered
-         * @returns {void}
+         * @returns Whether the router may leave
          */
-        exitConfirm(next) {
-            if (this.hasUnsavedEdits()) {
-                if (confirm(this.$t("confirmLeaveStack"))) {
-                    this.exitAction();
-                    next();
-                } else {
-                    next(false);
-                }
-            } else {
-                this.exitAction();
-                next();
+        exitConfirm() : boolean {
+            if (this.hasUnsavedEdits() && !confirm(this.$t("confirmLeaveStack"))) {
+                return false;
             }
+            this.exitAction();
+            return true;
         },
 
         /**
          * Remember what the editor holds, so leaving without a change asks nothing
-         * @returns {void}
          */
         rememberEditBaseline() {
             this.editBaseline = { name: this.stack.name ?? "",
@@ -1021,9 +1008,9 @@ export default {
 
         /**
          * Whether leaving would lose something the user typed
-         * @returns {boolean} True when the editor differs from what editing began with
+         * @returns True when the editor differs from what editing began with
          */
-        hasUnsavedEdits() {
+        hasUnsavedEdits() : boolean {
             if (!this.isEditMode) {
                 return false;
             }
@@ -1044,12 +1031,11 @@ export default {
 
         /**
          * Скопировать текст env-файла как он есть на экране
-         * @returns {Promise<void>}
          */
         async copyEnv() {
             try {
                 await navigator.clipboard.writeText(this.stack.composeENV);
-                this.$root.toastSuccess(this.$t("copiedToClipboard"));
+                this.$root.toastSuccess("copiedToClipboard");
             } catch (e) {
                 this.$root.toastError(errorText(e));
             }
@@ -1058,12 +1044,11 @@ export default {
         /**
          * Скопировать текст compose как он есть на экране: без пересборки YAML,
          * иначе в буфер ушел бы не тот текст, что лежит на сервере
-         * @returns {Promise<void>}
          */
         async copyCompose() {
             try {
                 await navigator.clipboard.writeText(this.stack.composeYAML);
-                this.$root.toastSuccess(this.$t("copiedToClipboard"));
+                this.$root.toastSuccess("copiedToClipboard");
             } catch (e) {
                 this.$root.toastError(errorText(e));
             }
@@ -1071,10 +1056,9 @@ export default {
 
         /**
          * Point the progress terminal at the output of this stack
-         * @returns {void}
          */
         bindTerminal() {
-            const terminal = /** @type {InstanceType<typeof import("../components/Terminal.vue").default> | undefined} */ (this.$refs.progressTerminal);
+            const terminal = this.$refs.progressTerminal as InstanceType<typeof TerminalComponent> | undefined;
             terminal?.bind(this.endpoint, this.terminalName);
         },
 
@@ -1107,14 +1091,14 @@ export default {
             this.processing = true;
 
             if (!this.jsonConfig.services) {
-                this.$root.toastError("No services found in compose.yaml");
+                this.$root.toastError("noServicesInFile");
                 this.processing = false;
                 return;
             }
 
             // Check if services is object
             if (typeof this.jsonConfig.services !== "object") {
-                this.$root.toastError("Services must be an object");
+                this.$root.toastError("composeServicesNotMap");
                 this.processing = false;
                 return;
             }
@@ -1133,7 +1117,6 @@ export default {
 
         /**
          * Write the files without starting anything
-         * @returns {void}
          */
         saveStack() {
             this.sendStack("saveStack", this.saveBaseline());
@@ -1143,9 +1126,9 @@ export default {
          * What this editor read, as the server expects it.
          * A new stack states that neither file exists yet, so a directory that appeared
          * in the meantime is a conflict rather than something to write into.
-         * @returns {import("../../../common/types/stack").StackFileBaseline | undefined} Hashes of the loaded files
+         * @returns Hashes of the loaded files
          */
-        saveBaseline() {
+        saveBaseline() : StackFileBaseline | undefined {
             if (this.isAdd) {
                 return { compose: null,
                     env: null };
@@ -1156,11 +1139,10 @@ export default {
 
         /**
          * Send the files to the server and deal with what comes back.
-         * @param {"saveStack" | "deployStack"} event What the files are sent for
-         * @param {import("../../../common/types/stack").StackFileBaseline | undefined} baseline Version the editor started from, undefined to overwrite
-         * @returns {void}
+         * @param event What the files are sent for
+         * @param baseline Version the editor started from, undefined to overwrite
          */
-        sendStack(event, baseline) {
+        sendStack(event : "saveStack" | "deployStack", baseline : StackFileBaseline | undefined) {
             this.processing = true;
 
             if (event === "deployStack") {
@@ -1207,7 +1189,7 @@ export default {
                     // neither version is applied until they pick one.
                     this.conflictFile = String(res.msg.values?.file ?? "");
                     this.pendingSave = event;
-                    const dialog = /** @type {InstanceType<typeof Confirm>} */ (this.$refs.conflictConfirm);
+                    const dialog = this.$refs.conflictConfirm as InstanceType<typeof Confirm>;
                     dialog.show();
                     return;
                 }
@@ -1226,7 +1208,6 @@ export default {
 
         /**
          * Take the version on the server and lose the edits of this editor
-         * @returns {void}
          */
         reloadAfterConflict() {
             this.pendingSave = null;
@@ -1236,7 +1217,6 @@ export default {
 
         /**
          * Write this editor's text over the version on the server, as the user asked
-         * @returns {void}
          */
         overwriteAfterConflict() {
             const event = this.pendingSave ?? "saveStack";
@@ -1252,17 +1232,17 @@ export default {
 
         /**
          * Read a compose text as an object, keeping the document it came from
-         * @param {string} yaml Text of the file
-         * @returns {{ config : import("../../../common/compose-editor").ComposeModel, doc : import("yaml").Document.Parsed }} The object and the parsed document
+         * @param yaml Text of the file
+         * @returns The object and the parsed document
          * @throws {Error} If the text is not a compose file this editor can read
          */
-        yamlToJSON(yaml) {
+        yamlToJSON(yaml : string) : { config : ComposeModel, doc : Document.Parsed } {
             let doc = parseDocument(yaml);
             if (doc.errors.length > 0) {
                 throw doc.errors[0];
             }
 
-            const config = doc.toJS() ?? {};
+            const config : ComposeModel = doc.toJS() ?? {};
 
             // Check data types
             // "services" must be an object
@@ -1271,7 +1251,7 @@ export default {
             }
 
             if (Array.isArray(config.services) || typeof config.services !== "object") {
-                throw new Error("Services must be an object");
+                throw new Error(this.$t("composeServicesNotMap"));
             }
 
             return {
@@ -1317,7 +1297,6 @@ export default {
         /**
          * Write an explicit structured edit into the compose source.
          * Untouched values keep their formatting, comments and octal notation.
-         * @returns {void}
          */
         writeStructuredEdit() {
             const source = this.stack.composeYAML;
@@ -1354,13 +1333,11 @@ export default {
         /**
          * Apply a network edit coming from the network editor.
          * An empty result never introduces `networks: {}` on its own.
-         * @param {Record<string, import("../../../common/util-common").LooseObject>} networks Networks the user configured
-         * @param {{ explicitRemoval? : boolean }} options Extra flags, `explicitRemoval` when the user deleted the last network
-         * @returns {void}
+         * @param networks Networks the user configured
+         * @param options Extra flags, `explicitRemoval` when the user deleted the last network
          */
-        applyNetworksEdit(networks, options = {}) {
-            /** @type {Record<string, import("../../../common/util-common").LooseObject>} */
-            const cleaned = {};
+        applyNetworksEdit(networks : Record<string, LooseObject>, options : { explicitRemoval? : boolean } = {}) {
+            const cleaned : Record<string, LooseObject> = {};
 
             for (const [ name, value ] of Object.entries(networks)) {
                 if (name.trim() === "") {
@@ -1393,12 +1370,12 @@ export default {
             const services = this.jsonConfig.services ?? {};
 
             if (services[this.newContainerName]) {
-                this.$root.toastError("Container name already exists");
+                this.$root.toastError("serviceNameTaken");
                 return;
             }
 
             if (!this.newContainerName) {
-                this.$root.toastError("Container name cannot be empty");
+                this.$root.toastError("serviceNameEmpty");
                 return;
             }
 
@@ -1407,7 +1384,7 @@ export default {
             };
             this.jsonConfig.services = services;
             this.newContainerName = "";
-            const list = /** @type {HTMLElement | undefined} */ (this.$refs.containerList);
+            const list = this.$refs.containerList as HTMLElement | undefined;
             list?.lastElementChild?.scrollIntoView({
                 block: "start",
                 behavior: "smooth"
@@ -1416,7 +1393,6 @@ export default {
 
         /**
          * Stack directories are lower case, so the name is too
-         * @returns {void}
          */
         stackNameToLowercase() {
             this.stack.name = this.stack.name.toLowerCase();
@@ -1424,10 +1400,9 @@ export default {
 
         /**
          * Start one service of the stack
-         * @param {string} serviceName Service the button belongs to
-         * @returns {void}
+         * @param serviceName Service the button belongs to
          */
-        startService(serviceName) {
+        startService(serviceName : string) {
             this.processing = true;
             this.$emit("run-start", "startService");
 
@@ -1444,10 +1419,9 @@ export default {
 
         /**
          * Stop one service of the stack
-         * @param {string} serviceName Service the button belongs to
-         * @returns {void}
+         * @param serviceName Service the button belongs to
          */
-        stopService(serviceName) {
+        stopService(serviceName : string) {
             this.processing = true;
             this.$emit("run-start", "stopService");
 
@@ -1464,10 +1438,9 @@ export default {
 
         /**
          * Restart one service of the stack
-         * @param {string} serviceName Service the button belongs to
-         * @returns {void}
+         * @param serviceName Service the button belongs to
          */
-        restartService(serviceName) {
+        restartService(serviceName : string) {
             this.processing = true;
             this.$emit("run-start", "restartService");
 
@@ -1482,7 +1455,7 @@ export default {
             });
         },
     }
-};
+});
 </script>
 
 <style scoped lang="scss">

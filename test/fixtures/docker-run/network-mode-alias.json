@@ -1,0 +1,35 @@
+{
+    "description": "docker refuses an alias together with a network mode, so the alias is reported as not accepted rather than written.",
+    "command": "docker run -d --network host --network-alias web nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "network_mode"
+        ],
+        "values": {
+            "image": "nginx",
+            "network_mode": "host"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--network"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--network-alias",
+                "reason": "flagNotAccepted"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -12,8 +12,9 @@
     </div>
 </template>
 
-<script>
-import { Terminal } from "@xterm/xterm";
+<script lang="ts">
+import { defineComponent, shallowRef } from "vue";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERMINAL_COLS, TERMINAL_ROWS } from "../../../common/util-common";
@@ -32,11 +33,7 @@ const CONSOLE_FONT_FACE = "'IBM Plex Mono'";
  */
 const CONSOLE_FONT_WAIT_MS = 3000;
 
-export default {
-    /**
-     * @type {Terminal}
-     */
-    terminal: null,
+export default defineComponent({
     components: {
         TerminalContextMenu,
     },
@@ -91,6 +88,9 @@ export default {
     emits: [ "has-data" ],
     data() {
         return {
+            /** The xterm instance, kept as it is: xterm works on the object, not on a copy */
+            terminal: shallowRef<Terminal | null>(null),
+            terminalFitAddOn: shallowRef<FitAddon | null>(null),
             first: true,
             terminalInputBuffer: "",
             cursorPosition: 0,
@@ -98,6 +98,7 @@ export default {
             contextMenuPosition: { x: 0,
                 y: 0 },
             contextMenuMessage: "",
+            inputUnanswered: false,
         };
     },
     created() {
@@ -117,7 +118,7 @@ export default {
         });
 
         // Ожидание ограничено: лучше терминал запасным шрифтом, чем пустое место
-        const waited = new Promise(resolve => setTimeout(resolve, CONSOLE_FONT_WAIT_MS));
+        const waited = new Promise<void>(resolve => setTimeout(resolve, CONSOLE_FONT_WAIT_MS));
 
         Promise.race([ font, waited ]).then(() => {
             // Пока грузился шрифт, вкладку могли закрыть
@@ -129,7 +130,7 @@ export default {
 
     beforeUnmount() {
         // The template ref is already gone in unmounted(), so the listener is removed here
-        this.$refs.terminal?.removeEventListener("contextmenu", this.handleContextMenu);
+        (this.$refs.terminal as HTMLElement | undefined)?.removeEventListener("contextmenu", this.handleContextMenu);
     },
 
     unmounted() {
@@ -146,15 +147,15 @@ export default {
         // Терминала может и не быть: вкладку закрыли, пока грузился консольный шрифт
         this.terminal?.textarea?.removeEventListener("paste", this.handleNativePaste);
         this.terminal?.dispose();
-        this.$refs.terminal?.removeEventListener("contextmenu", this.handleContextMenu);
+        (this.$refs.terminal as HTMLElement | undefined)?.removeEventListener("contextmenu", this.handleContextMenu);
     },
 
     methods: {
         /**
          * Дождаться консольного шрифта, чтобы замер знакоместа шел по нему
-         * @returns {Promise<void>} Разрешается, когда шрифт загружен или отказал
+         * @returns Разрешается, когда шрифт загружен или отказал
          */
-        async consoleFontReady() {
+        async consoleFontReady() : Promise<void> {
             try {
                 // Шрифт грузится по требованию, поэтому мало дождаться document.fonts.ready:
                 // без явного запроса на экране без моноширинного текста он и не начнет грузиться
@@ -167,16 +168,21 @@ export default {
 
         /**
          * Собрать терминал и подключить его к сессии
-         * @returns {void}
          */
-        openTerminal() {
+        openTerminal() : void {
+            const element = this.$refs.terminal as HTMLElement | undefined;
+
+            if (!element) {
+                return;
+            }
+
             let cursorBlink = true;
 
             if (this.mode === "displayOnly") {
                 cursorBlink = false;
             }
 
-            this.terminal = new Terminal({
+            const terminal = new Terminal({
                 fontSize: CONSOLE_FONT_SIZE,
                 fontFamily: CONSOLE_FONT_FAMILY,
                 cursorBlink,
@@ -188,6 +194,7 @@ export default {
                 rows: this.rows,
                 theme: this.consoleTheme(),
             });
+            this.terminal = terminal;
 
             if (this.mode === "mainTerminal") {
                 this.mainTerminalConfig();
@@ -198,21 +205,21 @@ export default {
             //this.terminal.loadAddon(new WebLinksAddon());
 
             // Bind to a div
-            this.terminal.open(this.$refs.terminal);
+            terminal.open(element);
 
             // Фокус забирает только тот терминал, в который печатают. Журнал уносил
             // курсор внутрь вывода сразу при открытии вкладки, а окно запуска - вместо
             // своей кнопки закрытия
             if (this.mode !== "displayOnly") {
-                this.terminal.focus();
+                terminal.focus();
             }
 
             // Right click opens an explicit menu instead of pasting immediately
-            this.$refs.terminal.addEventListener("contextmenu", this.handleContextMenu);
+            element.addEventListener("contextmenu", this.handleContextMenu);
 
             // Ctrl+V, Ctrl+Shift+V and Cmd+V are left to the browser, which pastes into the
             // hidden xterm textarea. That keeps the exact text and never sends a stray "v".
-            this.terminal.attachCustomKeyEventHandler((event) => {
+            terminal.attachCustomKeyEventHandler((event) => {
                 const isPasteShortcut = event.key.toLowerCase() === "v" && (event.ctrlKey || event.metaKey);
 
                 if (isPasteShortcut && event.type === "keydown") {
@@ -230,17 +237,17 @@ export default {
             });
 
             // The hidden textarea receives the real paste event, used by the limited console
-            if (this.mode === "mainTerminal" && this.terminal.textarea) {
-                this.terminal.textarea.addEventListener("paste", this.handleNativePaste);
+            if (this.mode === "mainTerminal" && terminal.textarea) {
+                terminal.textarea.addEventListener("paste", this.handleNativePaste);
             }
 
             // Add selection handler for copy to clipboard
-            this.terminal.onSelectionChange(() => {
+            terminal.onSelectionChange(() => {
                 this.handleSelection();
             });
 
             // Notify parent component when data is received
-            this.terminal.onCursorMove(() => {
+            terminal.onCursorMove(() => {
                 console.debug("onData triggered");
                 if (this.first) {
                     this.$emit("has-data");
@@ -252,14 +259,14 @@ export default {
 
             // Create a new Terminal
             if (this.mode === "mainTerminal") {
-                this.$root.emitAgent(this.endpoint, "mainTerminal", this.name, (res) => {
+                this.$root.emitAgentRequest(this.endpoint, "mainTerminal", [ this.name ]).then((res) => {
                     if (!res.ok) {
                         this.$root.toastRes(res);
                     }
                 });
             } else if (this.mode === "interactive") {
                 console.debug("Create Interactive terminal:", this.name);
-                this.$root.emitAgent(this.endpoint, "interactiveTerminal", this.stackName, this.serviceName, this.shell, (res) => {
+                this.$root.emitAgentRequest(this.endpoint, "interactiveTerminal", [ this.stackName, this.serviceName, this.shell ]).then((res) => {
                     if (!res.ok) {
                         this.$root.toastRes(res);
                     }
@@ -271,12 +278,12 @@ export default {
 
         /**
          * Colours of the console surface, taken from the design tokens
-         * @returns {object} xterm theme: xterm draws pure black by default, and a
+         * @returns xterm theme: xterm draws pure black by default, and a
          * black rectangle inside the near-black panel showed a visible seam
          */
-        consoleTheme() {
+        consoleTheme() : ITheme {
             const root = getComputedStyle(document.documentElement);
-            const token = (name, fallback) => root.getPropertyValue(name).trim() || fallback;
+            const token = (name : string, fallback : string) => root.getPropertyValue(name).trim() || fallback;
             const surface = token("--surface-console", "#0b0e12");
             const text = token("--text-on-console", "#dfe5ee");
 
@@ -289,41 +296,56 @@ export default {
             };
         },
 
-        bind(endpoint, name) {
+        bind(endpoint? : string, name? : string) : void {
+            const terminal = this.terminal;
+
+            // Терминал еще не открыт: его привяжет само открытие, а привязка пустоты
+            // упала бы на первом же выводе
+            if (!terminal) {
+                console.debug("Terminal not opened yet");
+                return;
+            }
+
             // Workaround: normally this.name should be set, but it is not sometimes, so we use the parameter, but eventually this.name and name must be the same name
             if (name) {
                 this.$root.unbindTerminal(name);
-                this.$root.bindTerminal(endpoint, name, this.terminal);
+                this.$root.bindTerminal(endpoint ?? this.endpoint, name, terminal);
                 console.debug("Terminal bound via parameter: " + name);
             } else if (this.name) {
                 this.$root.unbindTerminal(this.name);
-                this.$root.bindTerminal(this.endpoint, this.name, this.terminal);
+                this.$root.bindTerminal(this.endpoint, this.name, terminal);
                 console.debug("Terminal bound: " + this.name);
             } else {
                 console.debug("Terminal name not set");
             }
         },
 
-        removeInput() {
+        removeInput() : void {
             const textAfterCursorLength = this.terminalInputBuffer.length - this.cursorPosition;
             const spaces = " ".repeat(textAfterCursorLength);
             const backspaceCount = this.terminalInputBuffer.length;
             const backspaces = "\b \b".repeat(backspaceCount);
             this.cursorPosition = 0;
-            this.terminal.write(spaces + backspaces);
+            this.terminal?.write(spaces + backspaces);
             this.terminalInputBuffer = "";
         },
 
-        clearCurrentLine() {
+        clearCurrentLine() : void {
             // Move cursor to the beginning of the input and clear it
             const backspaces = "\b".repeat(this.cursorPosition);
             const spaces = " ".repeat(this.terminalInputBuffer.length);
             const moreBackspaces = "\b".repeat(this.terminalInputBuffer.length);
-            this.terminal.write(backspaces + spaces + moreBackspaces);
+            this.terminal?.write(backspaces + spaces + moreBackspaces);
         },
 
-        mainTerminalConfig() {
-            this.terminal.onKey(e => {
+        mainTerminalConfig() : void {
+            const terminal = this.terminal;
+
+            if (!terminal) {
+                return;
+            }
+
+            terminal.onKey(e => {
                 // Optional: keep for debugging
                 // console.debug("Encode: " + JSON.stringify(e.key));
 
@@ -338,9 +360,7 @@ export default {
                     // Remove the input from the terminal
                     this.removeInput();
 
-                    this.$root.emitAgent(this.endpoint, "terminalInput", this.name, buffer + e.key, (err) => {
-                        this.$root.toastError(err.msg);
-                    });
+                    this.sendInput(buffer + e.key);
                 } else if (e.key === "\u007F") {      // Backspace
                     if (this.cursorPosition > 0) {
                         // Remove character to the left of cursor
@@ -350,9 +370,9 @@ export default {
                         this.cursorPosition--;
 
                         // Redraw the line
-                        this.terminal.write("\b" + afterCursor + " \b".repeat(afterCursor.length + 1));
+                        terminal.write("\b" + afterCursor + " \b".repeat(afterCursor.length + 1));
                     }
-                } else if (e.key === "\u001B\u005B\u0033\u007E") { // Delete key
+                } else if (e.key === "\u001B[3~") { // Delete key
                     if (this.cursorPosition < this.terminalInputBuffer.length) {
                         // Remove character to the right of cursor
                         const beforeCursor = this.terminalInputBuffer.slice(0, this.cursorPosition);
@@ -360,23 +380,23 @@ export default {
                         this.terminalInputBuffer = beforeCursor + afterCursor;
 
                         // Redraw the line from cursor position
-                        this.terminal.write(afterCursor + " \b".repeat(afterCursor.length + 1));
+                        terminal.write(afterCursor + " \b".repeat(afterCursor.length + 1));
                     }
-                } else if (e.key === "\u001B\u005B\u0041" || e.key === "\u001B\u005B\u0042") {      // UP OR DOWN
+                } else if (e.key === "\u001B[A" || e.key === "\u001B[B") {      // UP OR DOWN
                     // Do nothing
-                } else if (e.key === "\u001B\u005B\u0043") {      // RIGHT
+                } else if (e.key === "\u001B[C") {      // RIGHT
                     if (this.cursorPosition < this.terminalInputBuffer.length) {
-                        this.terminal.write(this.terminalInputBuffer[this.cursorPosition]);
+                        terminal.write(this.terminalInputBuffer.charAt(this.cursorPosition));
                         this.cursorPosition++;
                     }
-                } else if (e.key === "\u001B\u005B\u0044") {      // LEFT
+                } else if (e.key === "\u001B[D") {      // LEFT
                     if (this.cursorPosition > 0) {
-                        this.terminal.write("\b");
+                        terminal.write("\b");
                         this.cursorPosition--;
                     }
                 } else if (e.key === "\u0003") {      // Ctrl + C
                     console.debug("Ctrl + C");
-                    this.$root.emitAgent(this.endpoint, "terminalInput", this.name, e.key);
+                    this.sendInput(e.key);
                     this.removeInput();
                 } else if (e.key === "\u0009" || e.key.startsWith("\u001B")) {      // TAB or other special keys
                     // Do nothing
@@ -384,20 +404,35 @@ export default {
                     const textBeforeCursor = this.terminalInputBuffer.slice(0, this.cursorPosition);
                     const textAfterCursor = this.terminalInputBuffer.slice(this.cursorPosition);
                     this.terminalInputBuffer = textBeforeCursor + e.key + textAfterCursor;
-                    this.terminal.write(e.key + textAfterCursor + "\b".repeat(textAfterCursor.length));
+                    terminal.write(e.key + textAfterCursor + "\b".repeat(textAfterCursor.length));
                     this.cursorPosition++;
                 }
             });
         },
 
-        interactiveTerminalConfig() {
+        interactiveTerminalConfig() : void {
             // onData delivers typed keys and pasted text, so a paste reaches the PTY unchanged
-            this.terminal.onData(data => {
-                this.$root.emitAgent(this.endpoint, "terminalInput", this.name, data, (res) => {
-                    if (!res.ok) {
-                        this.$root.toastRes(res);
-                    }
-                });
+            this.terminal?.onData(data => this.sendInput(data));
+        },
+
+        /**
+         * Send input to the terminal and report a refusal.
+         *
+         * Input is never sent twice: a lost answer is reported once per silence, and the
+         * next key that gets an answer ends it, so a slow link does not bury the screen
+         * under one notice per key.
+         * @param data Typed or pasted text
+         */
+        sendInput(data : string) : void {
+            this.$root.emitAgentRequest(this.endpoint, "terminalInput", [ this.name, data ]).then((res) => {
+                if (res.ok) {
+                    this.inputUnanswered = false;
+                } else if (!res.unknown) {
+                    this.$root.toastRes(res);
+                } else if (!this.inputUnanswered) {
+                    this.inputUnanswered = true;
+                    this.$root.toastRes(res);
+                }
             });
         },
 
@@ -407,43 +442,53 @@ export default {
          * If the terminalFitAddOn is not created, creates it, loads it and then fits the terminal to the appropriate size.
          * It then addes an event listener to the window object to listen for resize events and calls the fit method of the terminalFitAddOn.
          */
-        updateTerminalSize() {
+        updateTerminalSize() : void {
+            const terminal = this.terminal;
+
             // Подгонять пока нечего: панель просит размер сразу, как появилась вкладка,
             // а терминал ждет консольный шрифт. Открытие само закончится подгонкой,
             // а заготовленный здесь аддон остался бы привязанным в пустоту
-            if (!this.terminal) {
+            if (!terminal) {
                 return;
             }
 
-            if (!Object.hasOwn(this, "terminalFitAddOn")) {
-                this.terminalFitAddOn = new FitAddon();
-                this.terminal.loadAddon(this.terminalFitAddOn);
+            let fitAddOn = this.terminalFitAddOn;
+
+            if (!fitAddOn) {
+                fitAddOn = new FitAddon();
+                this.terminalFitAddOn = fitAddOn;
+                terminal.loadAddon(fitAddOn);
                 window.addEventListener("resize", this.onResizeEvent);
             }
 
-            this.terminalFitAddOn.fit();
+            fitAddOn.fit();
 
             // The PTY was started with default dimensions, so the first fit has to be reported
             if (this.mode !== "displayOnly" && this.name) {
-                this.$root.emitAgent(this.endpoint, "terminalResize", this.name, this.terminal.rows, this.terminal.cols);
+                this.$root.emitAgent(this.endpoint, "terminalResize", this.name, terminal.rows, terminal.cols);
             }
         },
         /**
          * Handles the resize event of the terminal component.
          */
-        onResizeEvent() {
-            this.terminalFitAddOn.fit();
-            let rows = this.terminal.rows;
-            let cols = this.terminal.cols;
+        onResizeEvent() : void {
+            const terminal = this.terminal;
+
+            if (!terminal) {
+                return;
+            }
+
+            this.terminalFitAddOn?.fit();
+            let rows = terminal.rows;
+            let cols = terminal.cols;
             this.$root.emitAgent(this.endpoint, "terminalResize", this.name, rows, cols);
         },
 
         /**
          * Paste from the real clipboard, used by the explicit menu action.
          * A denied permission leaves a message in the menu instead of sending empty input.
-         * @returns {void}
          */
-        async pasteFromClipboard() {
+        async pasteFromClipboard() : Promise<void> {
             try {
                 const text = await navigator.clipboard.readText();
 
@@ -452,7 +497,7 @@ export default {
                     this.closeContextMenu();
 
                     // The menu button took the focus, give it back or the next key is lost
-                    this.terminal.focus();
+                    this.terminal?.focus();
                 } else {
                     this.contextMenuMessage = this.$t("clipboardEmpty");
                 }
@@ -464,10 +509,9 @@ export default {
 
         /**
          * Handle a real paste event of the hidden xterm textarea
-         * @param {ClipboardEvent} event Paste event
-         * @returns {void}
+         * @param event Paste event
          */
-        handleNativePaste(event) {
+        handleNativePaste(event : ClipboardEvent) : void {
             const text = event.clipboardData?.getData("text") ?? "";
 
             if (!text) {
@@ -478,7 +522,7 @@ export default {
             this.pasteText(text);
         },
 
-        closeContextMenu() {
+        closeContextMenu() : void {
             this.contextMenuVisible = false;
             this.contextMenuMessage = "";
         },
@@ -486,7 +530,7 @@ export default {
         /**
          * Paste text into the terminal based on current mode
          */
-        pasteText(text) {
+        pasteText(text : string) : void {
             if (this.mode === "mainTerminal") {
                 // The limited console edits a single line, so only the first line is taken.
                 // Otherwise the echo and the buffer drift apart and one Enter would run
@@ -495,7 +539,7 @@ export default {
                 const firstLine = normalised.split("\n")[0] ?? "";
 
                 if (firstLine !== normalised) {
-                    this.$root.toastError(this.$t("multilinePasteTruncated"));
+                    this.$root.toastError("multilinePasteTruncated");
                 }
 
                 text = firstLine;
@@ -511,23 +555,23 @@ export default {
 
                 // Clear the current line and rewrite it
                 this.clearCurrentLine();
-                this.terminal.write(this.terminalInputBuffer);
+                this.terminal?.write(this.terminalInputBuffer);
 
                 // Move cursor to the correct position (after the pasted text)
                 this.cursorPosition += text.length;
                 const backspaces = "\b".repeat(afterCursor.length);
-                this.terminal.write(backspaces);
+                this.terminal?.write(backspaces);
 
             } else if (this.mode === "interactive") {
                 // terminal.paste() keeps the text exactly as it is, including newlines
-                this.terminal.paste(text);
+                this.terminal?.paste(text);
             }
         },
 
         /**
          * Handle right-click context menu for paste operation
          */
-        handleContextMenu(event) {
+        handleContextMenu(event : MouseEvent) : void {
             // Only modes that accept input get a menu, otherwise the browser menu stays
             if (this.mode !== "mainTerminal" && this.mode !== "interactive") {
                 return;
@@ -544,8 +588,8 @@ export default {
         /**
          * Handle text selection in terminal - copy to clipboard
          */
-        handleSelection() {
-            const selectedText = this.terminal.getSelection();
+        handleSelection() : void {
+            const selectedText = this.terminal?.getSelection();
             if (selectedText && selectedText.length > 0) {
                 this.copyToClipboard(selectedText);
             }
@@ -554,7 +598,7 @@ export default {
         /**
          * Copy text to clipboard
          */
-        async copyToClipboard(text) {
+        async copyToClipboard(text : string) : Promise<void> {
             try {
                 await navigator.clipboard.writeText(text);
                 // The selection itself is never logged
@@ -563,7 +607,7 @@ export default {
             }
         },
     }
-};
+});
 </script>
 
 <style scoped lang="scss">

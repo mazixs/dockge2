@@ -1,11 +1,10 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
 import test, { type TestContext } from "node:test";
-import { runInNewContext } from "node:vm";
 import { parse } from "yaml";
-import { analyseConversion } from "../../common/docker-run-flags";
+import type { ConversionReport } from "../../common/docker-run-flags";
 import { MAX_STACK_NAME_LENGTH } from "../../common/util-common";
 import { AgentRequests } from "../../frontend/src/agent-requests";
+import { componentOptions } from "../helpers/sfc";
 
 /**
  * The options of the create-stack sheet, evaluated as the component defines them.
@@ -14,14 +13,8 @@ import { AgentRequests } from "../../frontend/src/agent-requests";
  * arrives, so the real component methods run against the real request transport, with
  * only the browser and the server replaced.
  */
-const source = readFileSync(new URL("../../frontend/src/components/CreateStackSheet.vue", import.meta.url), "utf8");
-const script = source.split("<script>")[1]!.split("</script>")[0]!
-    .replace(/^import .*;$/gm, "")
-    .replace("export default", "result =");
-
-const context : Record<string, unknown> = { result: {},
+const context : Record<string, unknown> = {
     parse,
-    analyseConversion,
     MAX_STACK_NAME_LENGTH,
     // Forwarded rather than captured, so a test that replaces the timers is obeyed
     setTimeout: (...args : Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
@@ -29,15 +22,13 @@ const context : Record<string, unknown> = { result: {},
     setInterval: (...args : Parameters<typeof setInterval>) => globalThis.setInterval(...args),
     clearInterval: (...args : Parameters<typeof clearInterval>) => globalThis.clearInterval(...args) };
 
-runInNewContext(script, context);
-
-const options = context.result as {
+const options = componentOptions<{
     data : () => Record<string, unknown>,
     computed : Record<string, () => unknown>,
     methods : Record<string, (...args : never[]) => unknown>,
     watch : Record<string, (...args : never[]) => unknown>,
     unmounted : () => void,
-};
+        }>(new URL("../../frontend/src/components/CreateStackSheet.vue", import.meta.url), context);
 
 /** A request the sheet sent, as the transport received it */
 interface Sent {
@@ -322,5 +313,104 @@ test("creation sends the edited environment unchanged for save and deploy", asyn
         await settle();
         assert.equal(sheet.ctx.composeENV, "PORT=8123\nPASSWORD='a $literal value'\n");
         sheet.requests.failAll();
+    }
+});
+
+/**
+ * Give the sheet a server that answers a conversion at once
+ * @param ctx The sheet
+ * @param answer What the server answers
+ * @returns The commands the sheet sent
+ */
+function answerConversion(ctx : SheetContext, answer : unknown) : unknown[] {
+    const commands : unknown[] = [];
+
+    (ctx.$root as Record<string, unknown>).getSocket = () => ({
+        timeout: () => ({
+            emit: (event : string, command : unknown, ack : (error : Error | null, response : unknown) => void) => {
+                assert.equal(event, "convertDockerRun");
+                commands.push(command);
+                ack(null, answer);
+            },
+        }),
+    });
+    return commands;
+}
+
+test("a refused conversion shows the reason the server gave, as text", () => {
+    const { ctx } = makeSheet();
+
+    // The reason comes as a catalogue key with values, which is not text yet
+    answerConversion(ctx, { ok: false,
+        msg: { key: "dockerRunCommandTooLong",
+            values: { max: "8192" } },
+        msgi18n: true });
+    ctx.source = "docker run nginx";
+    (ctx.convert as () => void)();
+
+    assert.equal(ctx.failure, "dockerRunCommandTooLong");
+    assert.equal(ctx.converted, false);
+    assert.equal(ctx.source, "docker run nginx", "a refused command stays as it was typed");
+
+    answerConversion(ctx, { ok: false });
+    (ctx.convert as () => void)();
+    assert.equal(ctx.failure, "conversionFailed");
+});
+
+test("a flag that needs a look is shown instead of all flags carried", () => {
+    const { ctx } = makeSheet();
+    const compose = "services:\n  nginx:\n    image: nginx\n";
+    const carried = { flag: "-d",
+        outcome: "carried",
+        reason: "flagNotNeeded" };
+    const review = { flag: "--network",
+        value: "proxy",
+        outcome: "review",
+        reason: "flagNetworkExternal" };
+    const dropped = { flag: "-P",
+        outcome: "dropped",
+        reason: "flagPublishAllDropped" };
+    const convertWith = (report : ConversionReport) => {
+        (ctx.returnCommand as () => void)();
+        answerConversion(ctx, { ok: true,
+            composeTemplate: compose,
+            report });
+        ctx.source = "docker run -d --network proxy -P nginx";
+        (ctx.convert as () => void)();
+        assert.equal(ctx.source, compose);
+    };
+
+    convertWith({ carried: [ carried ],
+        review: [ review ],
+        dropped: [] } as ConversionReport);
+    assert.deepEqual(ctx.firstProblem, review);
+    assert.equal(ctx.restFlagCount, 1);
+
+    // A lost flag comes before one that needs a look
+    convertWith({ carried: [ carried ],
+        review: [ review ],
+        dropped: [ dropped ] } as ConversionReport);
+    assert.deepEqual(ctx.firstProblem, dropped);
+    assert.equal(ctx.restFlagCount, 2);
+    // Compared through JSON: the component builds its arrays in its own realm
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.allFlags)).map((item : { flag : string }) => item.flag), [ "-P", "--network", "-d" ]);
+
+    // Only a report without either says that everything was carried
+    convertWith({ carried: [ carried ],
+        review: [],
+        dropped: [] } as ConversionReport);
+    assert.equal(ctx.firstProblem, null);
+    assert.equal(ctx.restFlagCount, 1);
+});
+
+test("a command is recognised in every form the server converts, and compose is left alone", () => {
+    const { ctx } = makeSheet();
+    const looksLikeDockerRun = ctx.looksLikeDockerRun as (text : string) => boolean;
+
+    for (const command of [ "docker run nginx", "  sudo docker run -d nginx", "docker container run nginx", "sudo docker container run nginx" ]) {
+        assert.equal(looksLikeDockerRun(command), true, command);
+    }
+    for (const text of [ "services:\n  web:\n    image: nginx\n", "docker compose up", "docker runner" ]) {
+        assert.equal(looksLikeDockerRun(text), false, text);
     }
 });

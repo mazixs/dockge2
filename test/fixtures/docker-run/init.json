@@ -1,0 +1,30 @@
+{
+    "description": "--init survives as init: true.",
+    "command": "docker run -d --init nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "init"
+        ],
+        "values": {
+            "image": "nginx",
+            "init": true
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--init"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

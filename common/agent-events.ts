@@ -4,6 +4,8 @@ import type { StabilityOverview, StabilityWindow } from "./stability";
 import type { ContainerInstanceStatus, StackStatusIssue } from "./compose-status";
 import type { GitApplyInput, GitCloneInput, GitSaveResult, GitUpdatePreview } from "./types/stack-git";
 import type { StackSource } from "./stack-source";
+import type { ContainerAction, ContainerDetails, StandaloneContainer } from "./types/container";
+import type { StackRelations } from "./types/relations";
 import type {
     SecretFileMeta,
     StackDTO,
@@ -99,6 +101,7 @@ export interface AgentRequestContract {
     updateStack : { args : [ stackName : string ]; result : AgentDone };
     downStack : { args : [ stackName : string ]; result : AgentDone };
     abortCompose : { args : [ stackName : string ]; result : AgentDone };
+    stackRelations : { args : [ stackName : string ]; result : AgentResponse<{ relations : StackRelations }> };
     serviceStatusList : {
         args : [ stackName : string ];
         result : AgentResponse<{ serviceStatusList : ServiceStatusList; stackStatus : number; issues : StackStatusIssue[] }>;
@@ -152,6 +155,10 @@ export interface AgentRequestContract {
     restartService : { args : [ stackName : string, serviceName : string ]; result : AgentDone };
     dockerStats : { args : []; result : AgentResponse<{ dockerStats : Record<string, object> }> };
     getDockerNetworkList : { args : []; result : AgentResponse<{ dockerNetworkList : string[] }> };
+    /** Read when the page of one container opens, never for the list */
+    inspectContainer : { args : [ containerId : string ]; result : AgentResponse<{ container : ContainerDetails }> };
+    /** Only for a container outside the stacks directory, and only when the owner turned it on */
+    controlContainer : { args : [ containerId : string, action : ContainerAction ]; result : AgentDone };
 
     // Git
     gitCloneStack : { args : [ payload : GitCloneInput ]; result : AgentResponse<GitSaveResult> };
@@ -187,7 +194,14 @@ export interface AgentBroadcastContract {
     terminalExit : { args : [ terminalName : string, exitCode : number | null ]; result : void };
     /** A viewer is sent the reduced row, so a screen has to ask before reading a file field */
     stackList : {
-        args : [ response : AgentResponse<{ stackList : Record<string, StackSummaryDTO | ViewerStackSummary>; endpoint? : string }> ];
+        args : [ response : AgentResponse<{
+            stackList : Record<string, StackSummaryDTO | ViewerStackSummary>;
+            endpoint? : string;
+            /** Absent from an agent older than the list of containers outside compose projects */
+            standalone? : StandaloneContainer[];
+            /** Whether the owner of that server lets operators control containers it does not manage */
+            containerControl? : boolean;
+        }> ];
         result : void;
     };
 }
@@ -228,6 +242,7 @@ const REQUEST_NAMES : Record<AgentRequestName, true> = {
     downStack: true,
     abortCompose: true,
     serviceStatusList: true,
+    stackRelations: true,
     stackUpdatePreview: true,
     stackAvailability: true,
     stabilityOverview: true,
@@ -246,6 +261,8 @@ const REQUEST_NAMES : Record<AgentRequestName, true> = {
     updateService: true,
     dockerStats: true,
     getDockerNetworkList: true,
+    inspectContainer: true,
+    controlContainer: true,
     gitCloneStack: true,
     gitListBranches: true,
     gitPreviewUpdate: true,

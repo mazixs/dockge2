@@ -29,19 +29,19 @@
         <p class="panel-foot kept"><ShieldCheck />{{ $t("familiarSourcePreserved") }}</p>
     </aside>
 </template>
-<script>
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import ShieldCheck from "./ShieldCheck.vue";
 import { formatDuration } from "../format";
-import { STACK_GIT_STATE_KEY, stackSourceDiffers, stackSourceState } from "../../../common/stack-source";
-export default {
+import { STACK_GIT_STATE_KEY, stackSourceDiffers, stackSourceState, type StackSource, type StackSourceState } from "../../../common/stack-source";
+export default defineComponent({
     components: { InterfaceIcon,
         ShieldCheck },
     props: {
         /** Происхождение каталога стека, null когда его не удалось прочитать */
         source: {
-            /** @type {import("vue").PropType<import("../../../common/stack-source").StackSource | null>} */
-            type: Object,
+            type: Object as PropType<StackSource | null>,
             default: null },
         directory: { type: String,
             default: "" },
@@ -55,19 +55,21 @@ export default {
     },
     computed: {
         /** Состояние каталога тем же словом, которым его называет список стеков */
-        state() {
+        state() : StackSourceState {
             return stackSourceState(this.source);
         },
 
-        hasChanges() {
+        hasChanges() : boolean {
             return stackSourceDiffers(this.state);
         },
 
         /** Что с файлами: правки на сервере, коммиты в Git или ни того, ни другого */
-        stateText() {
-            const key = STACK_GIT_STATE_KEY[this.state];
+        stateText() : string {
+            if (this.state === "local") {
+                return "";
+            }
 
-            return key ? this.$t(key, this.source?.behind ?? 0) : "";
+            return this.$t(STACK_GIT_STATE_KEY[this.state], this.source?.behind ?? 0);
         },
 
         /**
@@ -76,7 +78,7 @@ export default {
          * быть неделю назад или не быть вовсе
          * @returns {string} Давность проверки, пустая строка если о ней уже сказано
          */
-        freshness() {
+        freshness() : string {
             if (this.source?.checkedAt) {
                 return this.$t("familiarGitCheckedAgo", [ formatDuration(Date.now() - this.source.checkedAt, this.$t) ]);
             }
@@ -89,14 +91,14 @@ export default {
          * два одинаковых призыва в полуметре друг от друга спорят за нажатие
          * @returns {boolean} Показывать ли кнопку
          */
-        showCompare() {
+        showCompare() : boolean {
             return Boolean(this.$root.canManageStacks && this.gitUrl && !(this.hasChanges && this.comparePromoted));
         },
-        repositoryName() {
+        repositoryName() : string {
             return (this.source?.remote || this.$t("sourceGit")).replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "").replace(/\//g, " / ");
         },
     },
-};
+});
 </script>
 <style lang="scss" scoped>
 // Источник стоит вверху своей колонки и не тянется вслед за консолью слева

@@ -1,0 +1,38 @@
+{
+    "description": "The user and group and the working directory survive, the arguments after the image become the command.",
+    "command": "docker run -d --user 1000:1000 -w /app node:22 node server.js",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "node",
+        "keys": [
+            "image",
+            "user",
+            "working_dir",
+            "command"
+        ],
+        "values": {
+            "image": "node:22",
+            "user": "1000:1000",
+            "working_dir": "/app",
+            "command": [
+                "node",
+                "server.js"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--user",
+            "-w"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

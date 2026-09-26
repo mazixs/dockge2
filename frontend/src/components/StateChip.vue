@@ -9,13 +9,15 @@
     </span>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
+
 /**
  * Чип состояния - единственный вид, которым в интерфейсе показывается состояние.
  * Стек, сервис и отдельный контейнер обязаны выглядеть одинаково, поэтому вид
  * живет здесь, а не повторяется в каждом экране.
  */
-export default {
+export default defineComponent({
     props: {
         /** Имя состояния системы: running, attention, stopped, failed, unknown */
         state: {
@@ -69,7 +71,7 @@ export default {
     },
     computed: {
         /** В точечном виде подсказка обязана называть состояние словом */
-        chipTitle() {
+        chipTitle() : string {
             if (!this.dotOnly) {
                 return this.title;
             }
@@ -77,7 +79,7 @@ export default {
             return this.title ? `${this.label} · ${this.title}` : this.label;
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

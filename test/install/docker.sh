@@ -19,6 +19,7 @@ cleanup() {
     docker ps -aq --filter "label=com.docker.compose.project=$project" | xargs -r docker rm -f >/dev/null
     docker ps -aq --filter "label=com.docker.compose.project=$project-fresh" | xargs -r docker rm -f >/dev/null
     docker rm -f "$project-unrelated" >/dev/null 2>&1 || true
+    docker ps -aq --filter "label=io.dockge2.update.installation=$deployment" | xargs -r docker rm -f >/dev/null
 }
 trap cleanup EXIT
 # Clearing client credentials proves the artifact is accessible to a fresh host.
@@ -60,6 +61,37 @@ node "$root/test/install/account.mjs" login "$work/data" "$port"
 previous=$(sha256sum "$deployment/.dockge2/previous.json")
 "${update[@]}" --yes
 test "$(sha256sum "$deployment/.dockge2/previous.json")" = "$previous"
+# The web interface runs the installed updater in a helper container from the panel's own
+# image, with the installation and the data read-only. The arguments are the panel's own
+# (backend/panel-update.ts); only the local release is added. A dry run, a same-version run,
+# a refusal and the journal, as JSON lines.
+panel_image=$(docker inspect "$(docker ps -q --filter "label=com.docker.compose.project=$project")" --format '{{.Image}}')
+helper() {
+    local kind=$1 target=$2 args id code
+    mapfile -d '' args < <(cd "$root" && node --import tsx test/install/helper-args.ts "$kind" "$deployment" "$project" "$work/data" "$panel_image" "$version" "$target")
+    test "${#args[@]}" -gt 10
+    if [[ $kind == status ]]; then
+        docker "${args[0]}" --mount "type=bind,source=$assets,target=$assets,readonly" "${args[@]:1}"
+        return
+    fi
+    # Detached and named like the panel's, read back through the json-file log as the panel does
+    id=$(docker "${args[0]}" --mount "type=bind,source=$assets,target=$assets,readonly" "${args[@]:1}" --release-dir "$assets")
+    code=$(docker wait "$id")
+    docker logs "$id"
+    docker rm "$id" > /dev/null
+    return "$code"
+}
+outcome() { jq -se --arg outcome "$2" '[ .[] | select(.dockge2 == "result") ] | length == 1 and .[0].outcome == $outcome' "$1" > /dev/null; }
+helper preview "$version" > "$work/helper-preview.jsonl"
+outcome "$work/helper-preview.jsonl" previewed
+jq -se 'any(.[]; .dockge2 == "preview")' "$work/helper-preview.jsonl" > /dev/null
+helper apply "$version" > "$work/helper-apply.jsonl"
+outcome "$work/helper-apply.jsonl" no-change
+test "$(sha256sum "$deployment/.dockge2/previous.json")" = "$previous"
+if helper preview 0.0.1 > "$work/helper-refused.jsonl"; then echo 'Helper accepted a release that is not there' >&2; exit 1; fi
+outcome "$work/helper-refused.jsonl" refused
+helper status "$version" > "$work/helper-status.jsonl"
+jq -se 'length == 1 and .[0].dockge2 == "journal" and .[0].phase == "success"' "$work/helper-status.jsonl" > /dev/null
 sha256sum --check "$work/unchanged.sha256"
 test "$(docker inspect "$project-unrelated" --format '{{.State.Running}}')" = true
 container=$(docker ps -q --filter "label=com.docker.compose.project=$project")
@@ -75,7 +107,7 @@ sha256sum --check "$work/unchanged.sha256"
 if "$verifier" verify-blob --bundle "$assets/release.json.sigstore.json" --certificate-identity 'https://github.com/other/project/.github/workflows/release.yml@refs/tags/v1.0.0' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$assets/release.json"; then
     echo 'Wrong signer accepted' >&2; exit 1
 fi
-echo "Verified $arch: legacy import, exact artifact readiness, owner login, no-op, explicit data restore and unrelated stack preservation."
+echo "Verified $arch: legacy import, exact artifact readiness, owner login, no-op, the web interface helper, explicit data restore and unrelated stack preservation."
 # The classic Docker image store cannot retain two platforms for one index digest.
 # Release only the exact fixture references after all fixture containers are gone.
 # Do not force removal: an unexpected user of either image must stop this gate.

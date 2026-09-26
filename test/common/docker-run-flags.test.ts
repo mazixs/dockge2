@@ -1,40 +1,38 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import composerize from "composerize";
-import { analyseConversion, parseDockerRunFlags, tokeniseCommand } from "../../common/docker-run-flags";
+import {
+    canonicalFlag,
+    DOCKER_RUN_FLAGS,
+    parseDockerRun,
+    parseDockerRunFlags,
+    splitOnce,
+    takesValue,
+    tokeniseCommand,
+} from "../../common/docker-run-flags";
 
-/**
- * Convert the way the server does, so the tests judge the real output
- * @param command Command to convert
- * @returns Compose file without the generated top level name
- */
-function convert(command : string) : string {
-    return composerize(command, "", "latest").split("\n").slice(1).join("\n");
-}
-
-test("команда разбирается так же, как ее читает оболочка", () => {
+test("a command is split the way a shell reads it", () => {
     assert.deepEqual(
         tokeniseCommand("docker run -d --name web -p 8080:80 nginx"),
         [ "docker", "run", "-d", "--name", "web", "-p", "8080:80", "nginx" ],
     );
 
-    // Кавычки держат пробел внутри значения
+    // Quotes keep a space inside the value
     assert.deepEqual(
         tokeniseCommand("docker run -e 'MSG=hello world' nginx"),
         [ "docker", "run", "-e", "MSG=hello world", "nginx" ],
     );
 
-    // Пустая строка в кавычках - это значение, а не отсутствие токена
+    // An empty quoted string is a value, not a missing token
     assert.deepEqual(tokeniseCommand("docker run -e VAR='' nginx").length, 5);
 
-    // Обратный слэш переносит строку: так люди и вставляют длинные команды
+    // A backslash continues the line: that is how long commands are pasted
     assert.deepEqual(
         tokeniseCommand("docker run -d \\\n  --name web \\\n  nginx"),
         [ "docker", "run", "-d", "--name", "web", "nginx" ],
     );
 });
 
-test("флаги читаются до имени образа, а команда контейнера не разбирается", () => {
+test("flags are read up to the image, and the command of the container is left alone", () => {
     const flags = parseDockerRunFlags("docker run -d -p 8080:80 nginx sh -c 'echo -p not-a-flag'");
 
     assert.deepEqual(flags, [
@@ -42,9 +40,15 @@ test("флаги читаются до имени образа, а команд�
         { flag: "-p",
             value: "8080:80" },
     ]);
+
+    assert.deepEqual(parseDockerRun("docker run -d -p 8080:80 nginx sh -c 'echo -p not-a-flag'"), {
+        flags,
+        image: "nginx",
+        args: [ "sh", "-c", "echo -p not-a-flag" ],
+    });
 });
 
-test("короткие флаги читаются слитно и группами", () => {
+test("short flags are read joined to their value, in groups and with =", () => {
     assert.deepEqual(parseDockerRunFlags("docker run -it -p80:80 nginx"), [
         { flag: "-i" },
         { flag: "-t" },
@@ -52,103 +56,115 @@ test("короткие флаги читаются слитно и группа�
             value: "80:80" },
     ]);
 
-    // Группа, где последний флаг требует значения
+    // A group whose last flag takes a value
     assert.deepEqual(parseDockerRunFlags("docker run -dp 8080:80 nginx"), [
         { flag: "-d" },
         { flag: "-p",
             value: "8080:80" },
     ]);
 
-    // Значение через знак равенства
+    // docker reads -p=80:80 as 80:80 and -P=false as a switch turned off
+    assert.deepEqual(parseDockerRunFlags("docker run -p=8080:80 -P=false nginx"), [
+        { flag: "-p",
+            value: "8080:80" },
+        { flag: "-P",
+            value: "false" },
+    ]);
+
     assert.deepEqual(parseDockerRunFlags("docker run --restart=always nginx"), [
         { flag: "--restart",
             value: "always" },
     ]);
 });
 
-test("перенесенные флаги видны в отчете по настоящему выводу конвертера", () => {
-    const command = "docker run -d --name web -p 8080:80 -v /srv/data:/data -e TZ=Europe/Moscow --restart unless-stopped nginx";
-    const report = analyseConversion(command, convert(command));
+test("everything before run is skipped", () => {
+    for (const command of [ "sudo docker run -d nginx", "docker container run -d nginx", "sudo -E docker run -d nginx" ]) {
+        assert.deepEqual(parseDockerRun(command), { flags: [{ flag: "-d" }],
+            image: "nginx",
+            args: [] }, command);
+    }
 
-    const carried = report.carried.map((item) => item.flag);
-    assert.ok(carried.includes("--name"), `--name не признан перенесенным: ${JSON.stringify(report)}`);
-    assert.ok(carried.includes("-p"));
-    assert.ok(carried.includes("-v"));
-    assert.ok(carried.includes("-e"));
-    assert.ok(carried.includes("--restart"));
-
-    // -d описывает поведение docker run, а не сервис: терять нечего
-    assert.equal(report.dropped.some((item) => item.flag === "-d"), false);
+    // Without run there is nothing to read, and no image
+    assert.deepEqual(parseDockerRun("nginx -p 80:80"), { flags: [],
+        args: [] });
 });
 
-test("флаг, который конвертер не перенес, попадает в потери", () => {
-    // Проверяем на настоящем выводе: если composerize однажды научится
-    // переносить --device, тест это заметит и его нужно будет обновить
-    const command = "docker run -d --name jellyfin --device /dev/dri:/dev/dri -p 8096:8096 jellyfin/jellyfin";
-    const compose = convert(command);
-    const report = analyseConversion(command, compose);
+test("an unknown flag with a value does not hide the flags after it", () => {
+    // Read as a switch, the value became the image and every flag after it vanished
+    const command = "docker run -d --made-up-flag value --label-file ./labels -a stdout nginx";
 
-    const carriesDevices = /devices:/.test(compose);
-    const reported = report.dropped.find((item) => item.flag === "--device");
+    assert.deepEqual(parseDockerRunFlags(command), [
+        { flag: "-d" },
+        { flag: "--made-up-flag",
+            value: "value" },
+        { flag: "--label-file",
+            value: "./labels" },
+        { flag: "-a",
+            value: "stdout" },
+    ]);
 
-    if (carriesDevices) {
-        assert.equal(reported, undefined, "конвертер перенес --device, отчет не должен звать это потерей");
-    } else {
-        assert.ok(reported, `--device потерян, но в отчете его нет: ${JSON.stringify(report)}`);
-        assert.equal(reported?.value, "/dev/dri:/dev/dri");
-        assert.equal(reported?.reason, "flagNoComposeKey");
+    // A switch docker knows never takes the image as its value
+    assert.deepEqual(parseDockerRunFlags("docker run --read-only --sig-proxy nginx sh"), [
+        { flag: "--read-only" },
+        { flag: "--sig-proxy" },
+    ]);
+
+    // An unknown flag followed by another flag is a switch, and a negative number is a value
+    assert.deepEqual(parseDockerRunFlags("docker run --made-up-switch --memory-swap -1 nginx"), [
+        { flag: "--made-up-switch" },
+        { flag: "--memory-swap",
+            value: "-1" },
+    ]);
+});
+
+test("an unknown flag that took the image is read again as a switch", () => {
+    assert.deepEqual(parseDockerRun("docker run -d --frobnicate nginx"), {
+        flags: [{ flag: "-d" }, { flag: "--frobnicate" }],
+        image: "nginx",
+        args: [],
+    });
+
+    // The latest guess is undone first, and the one before it keeps its value
+    assert.deepEqual(parseDockerRun("docker run --first on --second nginx"), {
+        flags: [{ flag: "--first",
+            value: "on" }, { flag: "--second" }],
+        image: "nginx",
+        args: [],
+    });
+
+    // With arguments after the image nothing tells the value from the image: the
+    // report shows the flag with the value it took, next to the image it left
+    assert.deepEqual(parseDockerRun("docker run --second nginx echo hi"), {
+        flags: [{ flag: "--second",
+            value: "nginx" }],
+        image: "echo",
+        args: [ "hi" ],
+    });
+
+    // A flag docker knows is never guessed at: a missing image stays missing
+    assert.equal(parseDockerRun("docker run -d --name").image, undefined);
+});
+
+test("flags are looked up by their long name", () => {
+    assert.equal(canonicalFlag("-e"), "--env");
+    assert.equal(canonicalFlag("--net"), "--network");
+    assert.equal(canonicalFlag("--net-alias"), "--network-alias");
+    assert.equal(canonicalFlag("--dns-opt"), "--dns-option");
+    assert.equal(canonicalFlag("-x"), "-x");
+    assert.equal(canonicalFlag("--made-up"), "--made-up");
+
+    assert.equal(takesValue("-p"), true);
+    assert.equal(takesValue("--net"), true);
+    assert.equal(takesValue("-d"), false);
+    assert.equal(takesValue("--made-up"), false);
+
+    for (const flag of DOCKER_RUN_FLAGS) {
+        assert.equal(canonicalFlag(flag), flag, flag);
     }
 });
 
-test("отчет следует за конвертером, а не за нашими предположениями", () => {
-    const command = "docker run -d --gpus all --label-file ./labels.txt -P nginx";
-    const compose = convert(command);
-    const report = analyseConversion(command, compose);
-    const dropped = report.dropped.map((item) => item.flag);
-    const carried = report.carried.map((item) => item.flag);
-
-    // composerize сам пишет неподдержанный флаг комментарием: это авторитетный отказ
-    assert.ok(dropped.includes("--label-file"), `--label-file: ${JSON.stringify(report)}`);
-    assert.ok(dropped.includes("-P"), `-P: ${JSON.stringify(report)}`);
-
-    // А --gpus он переносит в deploy.resources, и звать это потерей было бы ложью
-    assert.ok(/driver: nvidia/.test(compose), "конвертер перестал переносить --gpus, отчет надо обновить");
-    assert.ok(carried.includes("--gpus"), `--gpus: ${JSON.stringify(report)}`);
-});
-
-test("флаги, требующие внимания, не путаются с потерями", () => {
-    const command = "docker run -d --name web --env-file ./prod.env --network proxy --rm nginx";
-    const compose = convert(command);
-    const report = analyseConversion(command, compose);
-
-    const review = report.review.map((item) => item.flag);
-    const dropped = report.dropped.map((item) => item.flag);
-
-    // --rm не имеет аналога и должен быть назван потерей, а не тихо исчезнуть
-    assert.ok(dropped.includes("--rm"), `--rm не назван: ${JSON.stringify(report)}`);
-
-    // env-file и network требуют взгляда человека, если конвертер их перенес
-    for (const flag of [ "--env-file", "--network" ]) {
-        assert.ok(
-            review.includes(flag) || dropped.includes(flag),
-            `${flag} не попал ни в один список: ${JSON.stringify(report)}`,
-        );
-    }
-});
-
-test("незнакомый флаг не исчезает молча", () => {
-    const command = "docker run -d --totally-new-flag value nginx";
-    const compose = convert(command);
-    const report = analyseConversion(command, compose);
-
-    const unknown = [ ...report.review, ...report.dropped ].find((item) => item.flag === "--totally-new-flag");
-    assert.ok(unknown, `незнакомый флаг пропал: ${JSON.stringify(report)}`);
-    assert.equal(unknown?.reason, "flagUnknown");
-});
-
-test("сломанный YAML не превращает перенесенные флаги в перенесенные", () => {
-    // Если конвертер вернул мусор, о переносе судить нельзя: все уходит в потери
-    const report = analyseConversion("docker run -p 8080:80 nginx", "не: [yaml");
-    assert.equal(report.carried.length, 0);
-    assert.equal(report.dropped.some((item) => item.flag === "-p"), true);
+test("a string is split on the first separator only", () => {
+    assert.deepEqual(splitOnce("A=B=C", "="), [ "A", "B=C" ]);
+    assert.deepEqual(splitOnce("A", "="), [ "A", undefined ]);
+    assert.deepEqual(splitOnce("A=", "="), [ "A", "" ]);
 });

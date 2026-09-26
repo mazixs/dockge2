@@ -34,29 +34,40 @@
     </transition>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
+import type { RouteLocationNamedRaw, RouteParamsRaw } from "vue-router";
 import Terminal from "../components/Terminal.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
-import { CONTAINER_SHELLS, getContainerExecTerminalName, isContainerShell } from "../../../common/util-common";
+import { CONTAINER_SHELLS, getContainerExecTerminalName, isContainerShell, type ContainerShell } from "../../../common/util-common";
 
-export default {
+/**
+ * A route parameter as text: none of the terminal routes repeats a parameter
+ * @param value Parameter of the current route
+ * @returns The parameter, empty when the route has none
+ */
+function textParam(value : unknown) : string {
+    return typeof value === "string" ? value : "";
+}
+
+export default defineComponent({
     components: {
         Terminal,
         InterfaceIcon,
     },
     computed: {
-        stackName() {
-            return this.$route.params.stackName;
+        stackName() : string {
+            return textParam(this.$route.params.stackName);
         },
-        endpoint() {
-            return this.$route.params.endpoint || "";
+        endpoint() : string {
+            return textParam(this.$route.params.endpoint);
         },
 
         /**
          * Shell of this session, an unknown value falls back to sh instead of reaching Docker
          * @returns {string} Shell name
          */
-        shell() {
+        shell() : ContainerShell {
             const type = this.$route.params.type;
             return isContainerShell(type) ? type : CONTAINER_SHELLS[0];
         },
@@ -65,26 +76,26 @@ export default {
          * The shell the button switches to
          * @returns {string} Shell name
          */
-        otherShell() {
+        otherShell() : ContainerShell {
             return this.shell === "bash" ? "sh" : "bash";
         },
 
-        serviceName() {
-            return this.$route.params.serviceName;
+        serviceName() : string {
+            return textParam(this.$route.params.serviceName);
         },
 
         /**
          * Terminal name, which contains the shell so each shell has its own session
          * @returns {string} Terminal name
          */
-        terminalName() {
+        terminalName() : string {
             return getContainerExecTerminalName(this.endpoint, this.stackName, this.serviceName, this.shell, 0);
         },
 
-        otherShellRoute() {
+        otherShellRoute() : RouteLocationNamedRaw {
             const endpoint = this.$route.params.endpoint;
 
-            const data = {
+            const data : { name : string, params : RouteParamsRaw } = {
                 name: "containerTerminal",
                 params: {
                     stackName: this.stackName,
@@ -101,7 +112,7 @@ export default {
             return data;
         },
     },
-};
+});
 </script>
 
 <style scoped lang="scss">

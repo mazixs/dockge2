@@ -1,0 +1,30 @@
+{
+    "description": "An empty entrypoint clears the one of the image, and compose says the same with entrypoint: [].",
+    "command": "docker run -d --entrypoint '' alpine",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "alpine",
+        "keys": [
+            "image",
+            "entrypoint"
+        ],
+        "values": {
+            "image": "alpine",
+            "entrypoint": []
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--entrypoint"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

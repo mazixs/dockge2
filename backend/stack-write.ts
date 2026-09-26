@@ -199,7 +199,7 @@ async function readStackFileState(dir : string, fileName : string) : Promise<Sta
     try {
         const stat = await handle.stat();
         if (!stat.isFile()) {
-            throw new ValidationError("Invalid file name: " + fileName);
+            throw new ValidationError("stackFileNameInvalid", { file: fileName });
         }
         if (stat.size > MAX_FILE_BYTES) {
             throw new ValidationError("stackFileTooLarge", { file: fileName });
@@ -450,7 +450,7 @@ async function commitWrite(dir : string, pending : PendingWrite[], journal : str
 export async function writeStackFiles(dir : string, targets : StackFileTarget[], options : StackWriteOptions) : Promise<StackWriteResult> {
     for (const target of targets) {
         if (!isSafeStackFileName(target.name)) {
-            throw new ValidationError("Invalid file name: " + target.name);
+            throw new ValidationError("stackFileNameInvalid", { file: target.name });
         }
         if (Buffer.byteLength(target.content, "utf-8") > MAX_FILE_BYTES) {
             throw new ValidationError("stackFileTooLarge", { file: target.name });
@@ -459,7 +459,7 @@ export async function writeStackFiles(dir : string, targets : StackFileTarget[],
 
     const names = targets.map((target) => target.name);
     if (new Set(names).size !== names.length) {
-        throw new ValidationError("Duplicate file name in one save");
+        throw new ValidationError("stackFileDuplicate");
     }
 
     return withStackLock(dir, async () => {
@@ -519,7 +519,7 @@ async function undoWrite(dir : string, journal : string, manifest : JournalManif
             const current = await readStackFileState(dir, name);
 
             if (current.hash !== entry.afterHash) {
-                throw new Error("The file changed while the save was being undone");
+                throw new Error("stackSaveUndoConflict");
             }
 
             if (entry.beforeHash === null) {

@@ -43,7 +43,7 @@ export interface SecretHost {
  */
 function assertSecretFile(fileName : string) : void {
     if (classifyStackFile(fileName) !== "secret") {
-        throw new ValidationError("Not a secret file: " + fileName);
+        throw new ValidationError("stackFileNotSecret", { file: fileName });
     }
 }
 
@@ -98,7 +98,7 @@ export async function readSecretFile(host : SecretHost, fileName : string) : Pro
     try {
         return await fsAsync.readFile(filePath, "utf-8");
     } catch (e) {
-        throw new ValidationError("Secret file not found: " + fileName);
+        throw new ValidationError("secretFileMissing", { file: fileName });
     }
 }
 
@@ -161,14 +161,14 @@ export async function deleteSecretFile(host : SecretHost, fileName : string) : P
  */
 export async function bindSecret(host : SecretHost, secretName : string, fileName : string, services : readonly string[]) : Promise<void> {
     if (!isSafeNameSegment(secretName)) {
-        throw new ValidationError("Invalid secret name: " + secretName);
+        throw new ValidationError("secretNameInvalid", { name: secretName });
     }
 
     assertSecretFile(fileName);
 
     const filePath = await resolveStackFilePath(host.path, fileName);
     await fsAsync.access(filePath).catch(() => {
-        throw new ValidationError("Secret file not found: " + fileName);
+        throw new ValidationError("secretFileMissing", { file: fileName });
     });
 
     const composeYAML = host.composeText();
@@ -177,7 +177,7 @@ export async function bindSecret(host : SecretHost, secretName : string, fileNam
 
     for (const service of services) {
         if (!declaredServices.includes(service)) {
-            throw new ValidationError("Unknown service: " + service);
+            throw new ValidationError("serviceUnknown", { service });
         }
     }
 

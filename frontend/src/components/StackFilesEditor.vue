@@ -133,18 +133,38 @@
     </section>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { isEnvFileName } from "../../../common/stack-files";
+import type { StackFileConfig, StackFileInventory } from "../../../common/types/stack";
 
-export default {
+/**
+ * Copy a config so editing does not mutate the inventory
+ * @param config Config to copy
+ * @returns Copy
+ */
+function copyConfig(config : StackFileConfig) : StackFileConfig {
+    return {
+        composeFileName: config.composeFileName,
+        envFileNames: [ ...config.envFileNames ],
+        activeEnvFileName: config.activeEnvFileName,
+        secretBindings: config.secretBindings.map(binding => ({
+            name: binding.name,
+            fileName: binding.fileName,
+            services: [ ...binding.services ],
+        })),
+    };
+}
+
+export default defineComponent({
     components: {
         InterfaceIcon,
     },
     props: {
         /** Inventory returned by the getStackFiles event */
         inventory: {
-            type: Object,
+            type: Object as PropType<StackFileInventory>,
             required: true,
         },
         disabled: {
@@ -155,13 +175,13 @@ export default {
     emits: [ "save", "create-env" ],
     data() {
         return {
-            config: this.cloneConfig(this.inventory.config),
+            config: copyConfig(this.inventory.config),
             newEnvFileName: "",
         };
     },
     computed: {
         /** Selected files first, in their configured order, then the remaining ones */
-        orderedEnvFileNames() {
+        orderedEnvFileNames() : string[] {
             const selected = this.config.envFileNames.filter(name => this.inventory.envFileNames.includes(name));
             const rest = this.inventory.envFileNames.filter(name => !selected.includes(name));
             return [ ...selected, ...rest ];
@@ -169,17 +189,17 @@ export default {
 
         /**
          * Порядок важен только когда файлов в подстановке больше одного
-         * @returns {boolean} Показывать ли номер и стрелки
+         * @returns Показывать ли номер и стрелки
          */
-        orderVisible() {
+        orderVisible() : boolean {
             return this.config.envFileNames.length > 1;
         },
 
         /**
          * Первый файл каталога, оставшийся без отметки: с него начинается остаток списка
-         * @returns {string} Имя файла, пустая строка, когда линию рисовать не над чем
+         * @returns Имя файла, пустая строка, когда линию рисовать не над чем
          */
-        firstRestFileName() {
+        firstRestFileName() : string {
             if (this.config.envFileNames.length === 0) {
                 return "";
             }
@@ -189,21 +209,21 @@ export default {
 
         /**
          * Файлы каталога, отброшенные списком имен
-         * @returns {string[]} Имена; пусто, когда агент отвечает старым инвентарем
+         * @returns Имена; пусто, когда агент отвечает старым инвентарем
          */
-        unsupportedFileNames() {
+        unsupportedFileNames() : string[] {
             return this.inventory.unsupportedFileNames ?? [];
         },
 
-        changed() {
+        changed() : boolean {
             return JSON.stringify(this.config) !== JSON.stringify(this.cloneConfig(this.inventory.config));
         },
 
         /**
          * Whether the typed name can become a new env file
-         * @returns {boolean} True when the name is accepted and free
+         * @returns True when the name is accepted and free
          */
-        canCreateEnvFile() {
+        canCreateEnvFile() : boolean {
             const fileName = this.newEnvFileName.trim();
             return fileName !== "" && isEnvFileName(fileName) && !this.inventory.envFileNames.includes(fileName);
         },
@@ -211,9 +231,9 @@ export default {
         /**
          * One line under the field that always says what is going on: why the form is
          * closed, why the name is refused, or what happens after the file appears
-         * @returns {string} Message
+         * @returns Message
          */
-        addEnvFileMessage() {
+        addEnvFileMessage() : string {
             const fileName = this.newEnvFileName.trim();
 
             if (this.changed) {
@@ -242,37 +262,27 @@ export default {
     methods: {
         /**
          * Copy a config so editing does not mutate the inventory
-         * @param {object} config Config to copy
-         * @returns {object} Copy
+         * @param config Config to copy
+         * @returns Copy
          */
-        cloneConfig(config) {
-            return {
-                composeFileName: config.composeFileName,
-                envFileNames: [ ...config.envFileNames ],
-                activeEnvFileName: config.activeEnvFileName,
-                secretBindings: config.secretBindings.map(binding => ({
-                    name: binding.name,
-                    fileName: binding.fileName,
-                    services: [ ...binding.services ],
-                })),
-            };
+        cloneConfig(config : StackFileConfig) : StackFileConfig {
+            return copyConfig(config);
         },
 
         /**
          * Position of an env file in the interpolation order
-         * @param {string} fileName Env file
-         * @returns {number} Index, -1 when the file is not selected
+         * @param fileName Env file
+         * @returns Index, -1 when the file is not selected
          */
-        envIndex(fileName) {
+        envIndex(fileName : string) {
             return this.config.envFileNames.indexOf(fileName);
         },
 
         /**
          * Add or remove an env file from the interpolation set
-         * @param {string} fileName Env file
-         * @returns {void}
+         * @param fileName Env file
          */
-        toggleEnvFile(fileName) {
+        toggleEnvFile(fileName : string) {
             const index = this.envIndex(fileName);
 
             if (index === -1) {
@@ -288,11 +298,10 @@ export default {
 
         /**
          * Move an env file in the interpolation order
-         * @param {string} fileName Env file
-         * @param {number} offset -1 to move up, 1 to move down
-         * @returns {void}
+         * @param fileName Env file
+         * @param offset -1 to move up, 1 to move down
          */
-        moveEnvFile(fileName, offset) {
+        moveEnvFile(fileName : string, offset : number) {
             const index = this.envIndex(fileName);
             const target = index + offset;
 
@@ -301,13 +310,13 @@ export default {
             }
 
             const [ moved ] = this.config.envFileNames.splice(index, 1);
+            if (moved === undefined) {
+                return;
+            }
             this.config.envFileNames.splice(target, 0, moved);
         },
 
-        /**
-         * Ask the page to create the typed env file
-         * @returns {void}
-         */
+        /** Ask the page to create the typed env file */
         createEnvFile() {
             if (!this.canCreateEnvFile || this.disabled || this.changed) {
                 return;
@@ -321,7 +330,7 @@ export default {
             this.$emit("save", this.cloneConfig(this.config));
         },
     },
-};
+});
 </script>
 
 <style scoped lang="scss">

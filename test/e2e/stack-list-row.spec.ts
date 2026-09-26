@@ -35,6 +35,83 @@ test.describe("строка списка стеков", () => {
         await expect(page.locator(".item", { hasText: E2E_FILES_STACK })).toHaveCount(0);
     });
 
+    test("поиск живет в адресе и переживает переход к стеку и перезагрузку", async ({ page }) => {
+        await page.goto("/");
+
+        const search = page.locator(".search-input");
+        await search.fill("shellbox");
+        await expect(page).toHaveURL(/[?&]q=shellbox/);
+
+        await page.locator(".item", { hasText: E2E_STACK_NAME }).click();
+        await expect(page).toHaveURL(new RegExp(`/stack/${E2E_STACK_NAME}\\?.*q=shellbox`));
+        await expect(search).toHaveValue("shellbox");
+        await expect(page.locator(".item", { hasText: E2E_FILES_STACK })).toHaveCount(0);
+
+        await page.reload();
+        await expect(page.locator(".search-input")).toHaveValue("shellbox");
+        await expect(page.locator(".item", { hasText: E2E_FILES_STACK })).toHaveCount(0);
+
+        await page.getByRole("button", { name: /clear search|очистить поиск/i }).click();
+        await expect(page).not.toHaveURL(/[?&]q=/);
+        await expect(page.locator(".item", { hasText: E2E_FILES_STACK })).toBeVisible();
+    });
+
+    test("фильтр внимания и поиск вместе открываются ссылкой", async ({ page }) => {
+        await page.goto(`/?filter=attention&q=${encodeURIComponent("e2e")}`);
+
+        await expect(page.locator(".search-input")).toHaveValue("e2e");
+        await expect(page.getByRole("button", { name: /^(attention|внимание)(?:\s|$)/i })).toHaveAttribute("aria-pressed", "true");
+        await expect(page.locator(".item", { hasText: E2E_ATTENTION_STACK })).toBeVisible();
+        await expect(page.locator(".item", { hasText: E2E_STACK_NAME })).toHaveCount(0);
+    });
+
+    test("стек находится и открывается с клавиатуры", async ({ page }) => {
+        await page.goto("/");
+
+        const search = page.locator(".search-input");
+        await search.focus();
+        await page.keyboard.type(E2E_FILES_STACK);
+
+        // Поле, раскрытие фильтров и первая найденная строка
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Tab");
+        const row = page.locator(".item", { hasText: E2E_FILES_STACK });
+        await expect(row).toBeFocused();
+
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`/stack/${E2E_FILES_STACK}`));
+        await expect(row).toHaveAttribute("aria-current", "page");
+    });
+
+    test("на телефоне поиск помещается в экран, и страница не едет вбок", async ({ page }) => {
+        await page.setViewportSize({ width: 390,
+            height: 844 });
+        await page.goto("/?q=shellbox");
+
+        // На телефоне список открывается кнопкой, а не стоит колонкой
+        await page.getByRole("button", { name: /^(stacks|стеки)\b/i }).click();
+        await expect(page.locator(".search-input")).toBeVisible();
+        await expect(page.locator(".search-input")).toHaveValue("shellbox");
+        await expect(page.locator(".item", { hasText: E2E_STACK_NAME })).toBeVisible();
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
+    });
+
+    test("связи сервисов читаются из файлов стека и ведут на страницу контейнера", async ({ page }) => {
+        await page.goto(`/stack/${E2E_ATTENTION_STACK}`);
+
+        await page.locator(".links .summary").click();
+        const relations = page.locator(".relations");
+        await expect(relations).toContainText(/as Compose resolves them|как их разбирает Compose/);
+        await expect(relations.locator(".relation-card")).toHaveCount(2);
+
+        await relations.locator(".relation-card", { hasText: "app" }).getByRole("link").first().click();
+        await expect(page).toHaveURL(/\/container\/[a-f0-9]{64}/);
+        await expect(page.locator(".container-page")).toContainText(/Container of a stack of this panel|Контейнер стека этой панели/);
+        await page.getByRole("link", { name: /open its stack|открыть его стек/i }).click();
+        await expect(page).toHaveURL(new RegExp(`/stack/${E2E_ATTENTION_STACK}$`));
+    });
+
     test("инспектор называет каталог, число сервисов и реестр образов", async ({ page }) => {
         await page.goto(`/stack/${E2E_ATTENTION_STACK}`);
 

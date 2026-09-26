@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,14 +23,13 @@ func (s *stringsFlag) String() string     { return strings.Join(*s, ",") }
 func (s *stringsFlag) Set(v string) error { *s = append(*s, v); return nil }
 
 type options struct {
-	dir, version, image, project, verifier, releaseDir, dataDir, stacksDir, ref, composeFile string
-	port                                                                                     int
-	update, dryRun, yes, rollback, restoreData, development, resume, status                  bool
-	overrides                                                                                stringsFlag
+	dir, version, image, project, verifier, releaseDir, dataDir, stacksDir, ref, composeFile, progress string
+	port                                                                                               int
+	update, dryRun, yes, rollback, restoreData, development, resume, status, restoreOnFailedStart      bool
+	overrides                                                                                          stringsFlag
 }
 
-func arguments(args []string) (options, error) {
-	var o options
+func flags(o *options) *flag.FlagSet {
 	f := flag.NewFlagSet("dockge2-update", flag.ContinueOnError)
 	f.StringVar(&o.dir, "dir", ".", "Installation directory")
 	f.StringVar(&o.version, "version", "", "Exact release version; otherwise retain the selected channel")
@@ -51,6 +51,14 @@ func arguments(args []string) (options, error) {
 	f.BoolVar(&o.development, "development", false, "Explicitly build a development source ref")
 	f.StringVar(&o.ref, "ref", "", "Development source branch, tag or commit")
 	f.Var(&o.overrides, "compose-override", "Explicit local override file (repeatable)")
+	f.StringVar(&o.progress, "progress", "", "Machine-readable progress on stdout, human text on stderr: json")
+	f.BoolVar(&o.restoreOnFailedStart, "restore-on-failed-start", false, "If the target never becomes ready after a schema change, restore the verified data snapshot and the previous deployment")
+	return f
+}
+
+func arguments(args []string) (options, error) {
+	var o options
+	f := flags(&o)
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
@@ -71,6 +79,15 @@ func arguments(args []string) (options, error) {
 	}
 	if o.port < 1 || o.port > 65535 {
 		return o, errors.New("invalid port")
+	}
+	if o.progress != "" && o.progress != "json" {
+		return o, errors.New("--progress accepts only json")
+	}
+	if o.progress != "" && (o.rollback || o.resume) {
+		return o, errors.New("--progress reports updates, dry runs and --status only")
+	}
+	if o.restoreOnFailedStart && (!o.update || !o.yes || o.dryRun || o.rollback || o.resume || o.status) {
+		return o, errors.New("--restore-on-failed-start applies only to --update --yes")
 	}
 	return o, nil
 }
@@ -100,29 +117,19 @@ type operation struct {
 }
 type engine struct {
 	run       runner
-	out       *os.File
+	out       io.Writer // human text
+	progress  io.Writer // JSON lines; nil without --progress json
 	devSource string
+	binary    func() (string, error) // the updater executable; tests replace it
+	report    report
 }
 
 func main() {
-	o, err := arguments(os.Args[1:])
-	if errors.Is(err, flag.ErrHelp) {
-		return
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
-		fmt.Fprintln(os.Stderr, "Linux amd64/arm64 is required")
-		os.Exit(2)
-	}
+	// After the first signal later ones are absorbed, so recovery cannot be interrupted.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-	if err = (&engine{run: commandRunner{}, out: os.Stdout}).execute(ctx, o); err != nil {
-		fmt.Fprintln(os.Stderr, redact(err.Error()))
-		os.Exit(1)
-	}
+	code := cli(ctx, os.Args[1:], os.Stdout, os.Stderr, &engine{run: commandRunner{}})
+	cancel()
+	os.Exit(code)
 }
 func (e *engine) message(s string) { fmt.Fprintln(e.out, s) }
 func loadInstalled(path string) (*installed, error) {
@@ -206,10 +213,16 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	}
 	o.dir = abs
 	state := filepath.Join(o.dir, ".dockge2")
+	if o.status && e.progress != nil {
+		return e.statusLine(state)
+	}
 	journalBefore, _ := os.ReadFile(filepath.Join(state, "operation.json"))
 	active, err := loadInstalled(filepath.Join(state, "active.json"))
 	if err != nil {
 		return err
+	}
+	if active != nil {
+		e.report.from = active.Version
 	}
 	if active != nil && o.project == "" {
 		o.project = active.Project
@@ -345,7 +358,11 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	if err != nil && !o.development {
 		return err
 	}
+	e.report.to = version
 	client := newReleaseClient(e.run, o.verifier)
+	if err = client.persistVerifierRoot(state); err != nil {
+		return err
+	}
 	stage := filepath.Join(tmp, "release")
 	var release Release
 	if o.development {
@@ -363,6 +380,7 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	if err != nil {
 		return err
 	}
+	e.report.to = release.Version
 	candidate, err := d.config(ctx, filepath.Join(stage, "docker-compose.yml"), env, o.overrides)
 	if err != nil {
 		return err
@@ -452,6 +470,7 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		if err != nil {
 			return err
 		}
+		e.report.from = active.Version
 		if fresh == nil {
 			active.Source = current.image()
 		}
@@ -482,12 +501,14 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	if err != nil {
 		return err
 	}
+	fields := []string{}
 	if fresh != nil {
 		old, readErr := readRegular(fresh.Config, 4<<20)
 		if readErr != nil {
 			return readErr
 		}
-		fields, compareErr := changedFields(old, configBytes)
+		var compareErr error
+		fields, compareErr = changedFields(old, configBytes)
 		if compareErr != nil {
 			return compareErr
 		}
@@ -504,9 +525,14 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	}
 	if o.dryRun {
 		e.message("Preview only: no image pull, configuration write or container recreation.")
+		e.emit(previewLine{Kind: "preview", V: 1, From: e.report.from, To: release.Version, Channel: source, Fields: fields, SchemaChanges: active != nil && active.Schema != release.Schema})
 		return nil
 	}
 	if err = approved(o.yes); err != nil {
+		return err
+	}
+	// A signal before the operation is recorded refuses it; nothing has been written yet.
+	if err = ctx.Err(); err != nil {
 		return err
 	}
 	if err = os.MkdirAll(o.dir, 0700); err != nil {
@@ -558,11 +584,10 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		source = "development@" + release.Commit
 	}
 	op := operation{ID: id, Phase: "prepared", Previous: active, Target: installed{Version: release.Version, Schema: release.Schema, Digest: release.Digest, Source: source, Project: d.project, DataDir: dataDir, Config: targetConfig, ReleaseDir: releaseDir, Overrides: o.overrides, Mode: mode}}
-	journal := filepath.Join(state, "operation.json")
 	save := func(phase string) error {
 		op.Phase = phase
 		e.message("Update phase: " + phase)
-		return writeJSON(journal, op)
+		return e.writeJournal(state, op)
 	}
 	if err = save("prepared"); err != nil {
 		return err
@@ -614,6 +639,7 @@ func (e *engine) execute(ctx context.Context, o options) error {
 			if err = save("success"); err != nil {
 				return err
 			}
+			e.report.noChange = true
 			e.message("No change; previous distinct deployment retained.")
 			return nil
 		}
@@ -658,6 +684,11 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		if err = checkBackupSpace(dataDir, state); err != nil {
 			return fail(err)
 		}
+	}
+	// A signal while the panel still runs ends the operation here instead of stopping the
+	// panel only to start it again. Commands that got the signal already failed above.
+	if err = ctx.Err(); err != nil {
+		return fail(err)
 	}
 	if err = save("stopping"); err != nil {
 		return err

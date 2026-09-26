@@ -43,6 +43,30 @@ test.describe("pasting into the container terminal", () => {
         expect(occurrences).toBe(1);
     });
 
+    test("Cmd+V as macOS sends it pastes once and never types a stray v", async ({ page }) => {
+        await openTerminal(page, "bash");
+        await page.locator(".xterm-screen").click();
+        await page.keyboard.type("echo cmd");
+
+        // CI runs on Linux, where the browser maps paste to Ctrl+V: Meta+V alone must be
+        // swallowed rather than typed, and macOS then delivers the paste event itself
+        await page.keyboard.press("Meta+V");
+        await page.locator(".xterm-helper-textarea").evaluate((textarea) => {
+            const data = new DataTransfer();
+            data.setData("text/plain", "-mac-paste");
+            textarea.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data,
+                bubbles: true,
+                cancelable: true }));
+        });
+        await page.keyboard.type("-end");
+
+        await expect.poll(() => terminalText(page), { timeout: 15_000 })
+            .toContain("echo cmd-mac-paste-end");
+        const text = await terminalText(page);
+        expect(text).not.toContain("cmdv");
+        expect(text.split("-mac-paste").length - 1).toBe(1);
+    });
+
     test("the right click menu pastes through the clipboard API", async ({ page }) => {
         await openTerminal(page, "bash");
         await writeClipboard(page, "menu-paste-7");

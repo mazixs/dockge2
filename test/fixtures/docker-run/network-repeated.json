@@ -1,0 +1,54 @@
+{
+    "description": "docker attaches a container to every --network given, and so does the service: each network is declared external under its own name.",
+    "command": "docker run -d --network frontend --network backend nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services",
+            "networks"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "networks"
+        ],
+        "values": {
+            "image": "nginx",
+            "networks": [
+                "frontend",
+                "backend"
+            ]
+        },
+        "topLevelValues": {
+            "networks": {
+                "frontend": {
+                    "external": true,
+                    "name": "frontend"
+                },
+                "backend": {
+                    "external": true,
+                    "name": "backend"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "--network",
+                "reason": "flagNetworkExternal"
+            },
+            {
+                "flag": "--network",
+                "reason": "flagNetworkExternal"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

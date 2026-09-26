@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { RequestTracker } from "../../frontend/src/request-tracker";
 import { StackRun } from "../../frontend/src/stack-run";
 import type { ComposeTask } from "../../common/compose-progress";
+import { componentOptions } from "../helpers/sfc";
 
 /**
  * The options of the inspector, evaluated as the component defines them.
@@ -13,12 +12,7 @@ import type { ComposeTask } from "../../common/compose-progress";
  * stack are plain functions: they are called with a context the test controls, which is
  * what makes the answer of a stack that was left observable at all.
  */
-const source = readFileSync(new URL("../../frontend/src/pages/StackInspector.vue", import.meta.url), "utf8");
-const script = source.split("<script>")[1]!.split("</script>")[0]!
-    .replace(/^import .*;$/gm, "")
-    .replace("export default", "result =");
-
-const context : Record<string, unknown> = { result: {},
+const context : Record<string, unknown> = {
     // Only the identifiers the options object mentions while it is being built
     StateChip: {},
     InterfaceIcon: {},
@@ -26,6 +20,7 @@ const context : Record<string, unknown> = { result: {},
     StackJournal: {},
     StackTerminals: {},
     StackProgress: {},
+    StackRelations: {},
     BModal: {},
     Uptime: {},
     defineAsyncComponent: () => ({}),
@@ -39,12 +34,10 @@ const context : Record<string, unknown> = { result: {},
     RequestTracker,
     StackRun };
 
-runInNewContext(script, context);
-
-const options = context.result as {
+const options = componentOptions<{
     data : () => Record<string, unknown>,
     methods : Record<string, (...args : never[]) => unknown>,
-};
+        }>(new URL("../../frontend/src/pages/StackInspector.vue", import.meta.url), context);
 
 /** A promise the test answers when it wants to */
 interface Answer {

@@ -1,0 +1,37 @@
+{
+    "description": "A flag nobody knows takes the next word as its value, so the flags after it are still read. The report names it as left out, and no key is written for it.",
+    "command": "docker run -d --frobnicate on --device /dev/dri nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "devices"
+        ],
+        "values": {
+            "image": "nginx",
+            "devices": [
+                "/dev/dri"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--device"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--frobnicate",
+                "reason": "flagUnknown"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

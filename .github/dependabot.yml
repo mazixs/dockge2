@@ -5,3 +5,22 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # The same reasoning as min-release-age in .npmrc; security updates are not delayed
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    ignore:
+      # vue-tsc does not start with TypeScript 7
+      - dependency-name: typescript
+        update-types: [ "version-update:semver-major" ]
+      # The types follow the Node the image runs, not the newest Node
+      - dependency-name: "@types/node"
+        update-types: [ "version-update:semver-major" ]

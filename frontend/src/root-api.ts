@@ -2,7 +2,9 @@ import type { Socket } from "socket.io-client";
 import type { Terminal } from "@xterm/xterm";
 import type { SessionBootstrap, SessionBootstrapEvent } from "./session-bootstrap";
 import type { ThemePreference } from "./theme-preference";
-import type { AgentInfo, AgentInstance, SocketInfo, SocketResponse, StackList } from "./mixins/socket";
+import type { AgentInfo, AgentInstance, HostContainers, SocketInfo, SocketResponse, StackList } from "./mixins/socket";
+import type { PanelUpdateState } from "./panel-update-machine";
+import type { AgentRequestOptions } from "./agent-requests";
 import type {
     AgentRequestArgs,
     AgentRequestName,
@@ -58,6 +60,8 @@ export interface DockgeRootApi {
     stackList : StackList;
     /** Stacks of every agent, by endpoint */
     allAgentStackList : Record<string, AgentInstance>;
+    /** Containers outside every compose project, by endpoint, "" for this server */
+    hostContainers : Record<string, HostContainers>;
     /** online / offline / connecting, by endpoint */
     agentStatusList : Record<string, string>;
     agentList : Record<string, AgentInfo>;
@@ -114,7 +118,7 @@ export interface DockgeRootApi {
         endpoint : string,
         eventName : E,
         args : AgentRequestArgs<E>,
-        options? : { timeoutMs? : number },
+        options? : AgentRequestOptions<AgentRequestResult<E>>,
     ) : Promise<AgentRequestResult<E>>;
 
     /** End every request that is still waiting, because nothing will answer it */
@@ -136,6 +140,24 @@ export interface DockgeRootApi {
     clearData() : void;
     /** Point the list at a stack that was just created, for a while */
     markStackFresh(name : string, durationMs? : number) : void;
+
+    // Updating this panel
+
+    /** The statechart of the update, run by the root because screens unmount while it runs */
+    panelUpdate : PanelUpdateState;
+    readonly panelUpdateView : "overlay" | "banner" | "none";
+    /** While true the page neither reloads itself nor shows the lost connection banner */
+    readonly panelUpdateSuppressing : boolean;
+    panelUpdateInfo(latestVersion : string, updateAvailable : boolean) : void;
+    panelUpdateCheck() : void;
+    panelUpdateConfirm() : void;
+    /** The password goes into the apply request and is kept nowhere */
+    panelUpdateSubmit(password : string) : void;
+    panelUpdateCancel() : void;
+    /** Close a finished update for everyone; owners only */
+    panelUpdateDismiss() : void;
+    /** Close the dialog, the dry run or a result on this page only */
+    panelUpdateClose() : void;
 
     // Saying something to the person
 

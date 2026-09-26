@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -22,9 +24,17 @@ type deploymentFixture struct {
 	oldRepoDigests                                                  []string
 	running                                                         bool
 	pullFailure, startFailure, snapshotFailure, crashAt, crashPhase string
-	stops, starts                                                   int
-	runner                                                          *fakeRunner
+	restoreFailure, previousFailure, stopFailure                    string
+	// restoreLeft is a restore container that outlived its killed client.
+	restoreLeft             bool
+	removed                 []string
+	stops, starts, restores int
+	runner                  *fakeRunner
+	hook                    func(string, []string)
 }
+
+// fakeUpdater is the updater executable the fixture's restore container runs.
+const fakeUpdater = "/fake/dockge2-updater"
 
 func newDeployment(t *testing.T) *deploymentFixture {
 	t.Helper()
@@ -77,6 +87,9 @@ func (w *deploymentFixture) container() *containerInfo {
 }
 func encoded(v any) ([]byte, error) { return json.Marshal(v) }
 func (w *deploymentFixture) command(command string, a []string) ([]byte, error) {
+	if w.hook != nil {
+		w.hook(command, a)
+	}
 	if command == w.verifier {
 		return nil, nil
 	}
@@ -121,9 +134,22 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 		}
 		return nil, nil
 	case "run":
+		if i := slices.Index(a, internalRestoreFlag); i >= 0 {
+			return nil, w.restoreContainer(a, i)
+		}
 		if w.snapshotFailure != "" {
 			return nil, errors.New(w.snapshotFailure)
 		}
+		return nil, nil
+	case "rm":
+		w.removed = append(w.removed, a[len(a)-1])
+		if w.stopFailure != "" {
+			return nil, daemonError(w.stopFailure)
+		}
+		if !w.restoreLeft {
+			return nil, daemonError("Error response from daemon: No such container: " + a[len(a)-1])
+		}
+		w.restoreLeft = false
 		return nil, nil
 	case "image":
 		if a[1] == "tag" {
@@ -170,6 +196,9 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 				return nil, err
 			}
 			if c.image() == w.oldID {
+				if w.previousFailure != "" {
+					return nil, errors.New(w.previousFailure)
+				}
 				w.image = w.oldID
 				w.containerID = "recovered"
 				w.running = true
@@ -181,14 +210,48 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 			w.image = w.targetID
 			w.containerID = "target"
 			w.running = true
+			// A target that fails its check has usually migrated the data already.
+			if err = os.WriteFile(filepath.Join(w.data, "dockge.db"), []byte("new fixture data"), 0600); err != nil {
+				return nil, err
+			}
 			if w.startFailure != "" {
 				return nil, errors.New(w.startFailure)
 			}
-			return nil, os.WriteFile(filepath.Join(w.data, "dockge.db"), []byte("new fixture data"), 0600)
+			return nil, nil
 		}
 	}
 	w.t.Fatalf("unexpected Docker call: %v", a)
 	return nil, nil
+}
+
+// restoreContainer checks the restore container's isolation and runs its entrypoint in process.
+func (w *deploymentFixture) restoreContainer(a []string, i int) error {
+	w.restores++
+	parent := filepath.Dir(w.data)
+	joined := " " + strings.Join(a, " ") + " "
+	for _, s := range []string{" --network none ", " --read-only ", " --cap-drop ALL ", " type=bind,src=" + parent + ",dst=" + parent + " ", ",dst=/dockge2-updater,readonly ", " --entrypoint /dockge2-updater " + w.oldID + " "} {
+		if !strings.Contains(joined, s) {
+			w.t.Fatalf("restore container without %q: %s", s, joined)
+		}
+	}
+	if len(a) != i+4 || a[i+1] != w.data {
+		w.t.Fatalf("restore arguments: %v", a[i:])
+	}
+	if !strings.Contains(joined, " type=bind,src="+a[i+2]+",dst="+a[i+2]+",readonly ") || !strings.Contains(joined, "src="+fakeUpdater+",") {
+		w.t.Fatalf("snapshot or updater mounted writable: %s", joined)
+	}
+	if w.restoreFailure != "" {
+		return daemonError(w.restoreFailure)
+	}
+	return restoreData(context.Background(), a[i+1], a[i+2], a[i+3])
+}
+
+// daemonError is a failed docker command with the daemon's words on its stderr.
+func daemonError(detail string) error {
+	return &commandError{base: "docker", name: "docker", detail: detail, err: errors.New("exit status 1")}
+}
+func (w *deploymentFixture) engine(out io.Writer) *engine {
+	return &engine{run: w.runner, out: out, binary: func() (string, error) { return fakeUpdater, nil }}
 }
 func (w *deploymentFixture) execute(extra func(*options)) error {
 	out, err := os.CreateTemp(w.dir, "log")
@@ -198,7 +261,7 @@ func (w *deploymentFixture) execute(extra func(*options)) error {
 	if extra != nil {
 		extra(&o)
 	}
-	return (&engine{run: w.runner, out: out}).execute(context.Background(), o)
+	return w.engine(out).execute(context.Background(), o)
 }
 func TestPreviewAndPullFailureKeepDeployment(t *testing.T) {
 	for _, kind := range []string{"preview", "pull"} {
@@ -326,8 +389,13 @@ func TestFailedSchemaChangeStopsTargetWithoutRewindingData(t *testing.T) {
 	}
 	op, err := loadOperation(filepath.Join(w.state, "operation.json"))
 	must(t, err)
-	if op.Phase != "recovery-required" || w.running || !op.BackupVerified || w.starts != 1 {
+	if op.Phase != "recovery-required" || w.running || !op.BackupVerified || w.starts != 1 || w.restores != 0 {
 		t.Fatal("unsafe automatic recovery", op.Phase, w.running, w.starts)
+	}
+	data, err := os.ReadFile(filepath.Join(w.data, "dockge.db"))
+	must(t, err)
+	if string(data) != "new fixture data" {
+		t.Fatal("data rewound without --restore-on-failed-start")
 	}
 	if err = w.execute(nil); err == nil || !strings.Contains(err.Error(), "recovery-required") {
 		t.Fatal("unfinished operation overwritten")

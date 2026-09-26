@@ -1,0 +1,39 @@
+{
+    "description": "The shell passes a single-quoted $HOSTNAME to the container, compose replaces it with a variable of the panel environment. The report names the command.",
+    "command": "docker run -d alpine sh -c 'echo $HOSTNAME && sleep 3600'",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "alpine",
+        "keys": [
+            "image",
+            "command"
+        ],
+        "values": {
+            "image": "alpine",
+            "command": [
+                "sh",
+                "-c",
+                "echo $HOSTNAME && sleep 3600"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "command",
+                "reason": "flagDollarInterpolated"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true,
+        "stderr": "HOSTNAME\\W{1,3}variable is not set"
+    }
+}

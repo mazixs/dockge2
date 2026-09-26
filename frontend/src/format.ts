@@ -1,5 +1,5 @@
 /**
- * Форматирование чисел и длительностей для интерфейса.
+ * Форматирование чисел, моментов и длительностей для интерфейса.
  *
  * Живет отдельным файлом, потому что строка списка и инспектор обязаны говорить
  * одинаково: "94,2%" и "3 дня" не должны в двух местах округляться по-разному.
@@ -24,6 +24,23 @@ export function formatPercent(ratio : number | null | undefined, locale = "en", 
     const percent = floor ? Math.floor(ratio * 1000) / 10 : ratio * 100;
 
     return `${percent.toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
+}
+
+/**
+ * Момент времени в записи выбранного языка, а не системной: иначе русский
+ * интерфейс в английском браузере писал бы "9/20/2026, 8:00:00 AM".
+ * @param value Метка в миллисекундах или время ISO
+ * @param locale Язык интерфейса
+ * @param options Какие части показать, по умолчанию дата и время
+ * @returns Например "20.09.2026, 08:00:00", пустая строка если момента нет
+ */
+export function formatMoment(value : number | string | null | undefined, locale = "en", options? : Intl.DateTimeFormatOptions) : string {
+    const time = typeof value === "string" ? Date.parse(value) : value;
+    // Docker пишет первый год нашей эры для "никогда"
+    if (typeof time !== "number" || !Number.isFinite(time) || time <= 0) {
+        return "";
+    }
+    return new Date(time).toLocaleString(locale, options);
 }
 
 /** Перевод с поддержкой множественного числа, как его дает vue-i18n */

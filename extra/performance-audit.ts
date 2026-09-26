@@ -12,7 +12,7 @@ import { initAuth, resetAuth } from "../backend/auth";
 import { issueUser } from "../backend/auth-access";
 import { Settings } from "../backend/settings";
 import { soak, sampleScope, stopScope } from "./performance-soak";
-import { preparePage, waitForFixture, verifyPagination, clockCost, filterPaints } from "./performance-browser";
+import { preparePage, waitForFixture, verifyPagination, clockCost, filterPaints, snapshotChurn } from "./performance-browser";
 import { launchBackend, fixtureSize } from "./performance-runtime";
 import { optionalViewerScaling } from "./performance-viewers";
 import { optionalVisibilityProbe } from "./performance-visibility";
@@ -140,6 +140,7 @@ async function main() : Promise<void> {
         await page.getByRole("button", { name: /^Log in$|^Login$|^Sign in$|^Войти$/i }).click();
         await page.locator("a[href=\"/stack/perf-000\"]").first().waitFor();
         await waitForFixture(page, fixture);
+        const churn = await snapshotChurn(page);
         const clock = await clockCost(page);
         const interactions = await filterPaints(page);
         const pagination = await verifyPagination(page, fixture);
@@ -180,6 +181,7 @@ async function main() : Promise<void> {
             viewers,
             visibility,
             clock,
+            snapshotChurn: churn,
             pagination,
             filterToSecondFrameMs: interactions,
             cpuThrottling: Number(process.env.DOCKGE_PERF_CPU_RATE ?? 1),

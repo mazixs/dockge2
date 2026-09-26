@@ -31,7 +31,7 @@ export async function resolveStackFilePath(stackDir : string, fileName : string)
     try {
         const dirStat = await fsAsync.lstat(path.resolve(stackDir));
         if (dirStat.isSymbolicLink()) {
-            throw new ValidationError("The stack directory is a symbolic link");
+            throw new ValidationError("stackDirectorySymlink");
         }
     } catch (e) {
         if (e instanceof ValidationError) {
@@ -67,7 +67,7 @@ export function resolveStackFilePathSync(stackDir : string, fileName : string) :
     try {
         const dirStat = fs.lstatSync(path.resolve(stackDir));
         if (dirStat.isSymbolicLink()) {
-            throw new ValidationError("The stack directory is a symbolic link");
+            throw new ValidationError("stackDirectorySymlink");
         }
     } catch (e) {
         if (e instanceof ValidationError) {
@@ -96,7 +96,7 @@ export function resolveStackFilePathSync(stackDir : string, fileName : string) :
  */
 function resolveStackFilePathLexically(stackDir : string, fileName : string) : string {
     if (!isSafeStackFileName(fileName)) {
-        throw new ValidationError("Invalid file name: " + fileName);
+        throw new ValidationError("stackFileNameInvalid", { file: fileName });
     }
 
     const base = path.resolve(stackDir);
@@ -104,7 +104,7 @@ function resolveStackFilePathLexically(stackDir : string, fileName : string) : s
     const relative = path.relative(base, resolved);
 
     if (relative !== fileName || relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-        throw new ValidationError("File is outside the stack directory: " + fileName);
+        throw new ValidationError("stackFileOutside", { file: fileName });
     }
 
     return resolved;
@@ -119,11 +119,11 @@ function resolveStackFilePathLexically(stackDir : string, fileName : string) : s
  */
 function assertRegularFile(isSymbolicLink : boolean, isDirectory : boolean, fileName : string) : void {
     if (isSymbolicLink) {
-        throw new ValidationError("File is outside the stack directory: " + fileName);
+        throw new ValidationError("stackFileOutside", { file: fileName });
     }
 
     if (isDirectory) {
-        throw new ValidationError("Expected a file, not a directory: " + fileName);
+        throw new ValidationError("stackFileIsDirectory", { file: fileName });
     }
 }
 
@@ -250,23 +250,23 @@ export class StackConfig {
         const composePath = await resolveStackFilePath(stackDir, config.composeFileName);
 
         if (classifyStackFile(config.composeFileName) !== "compose") {
-            throw new ValidationError("Not a compose file: " + config.composeFileName);
+            throw new ValidationError("stackFileNotCompose", { file: config.composeFileName });
         }
 
         await fsAsync.access(composePath).catch(() => {
-            throw new ValidationError("Compose file not found: " + config.composeFileName);
+            throw new ValidationError("stackComposeFileMissing", { file: config.composeFileName });
         });
 
         const envFileNames : string[] = [];
 
         for (const fileName of config.envFileNames) {
             if (classifyStackFile(fileName) !== "env") {
-                throw new ValidationError("Not an env file: " + fileName);
+                throw new ValidationError("stackFileNotEnv", { file: fileName });
             }
 
             const envPath = await resolveStackFilePath(stackDir, fileName);
             await fsAsync.access(envPath).catch(() => {
-                throw new ValidationError("Env file not found: " + fileName);
+                throw new ValidationError("stackEnvFileMissing", { file: fileName });
             });
 
             if (!envFileNames.includes(fileName)) {
@@ -278,7 +278,7 @@ export class StackConfig {
 
         if (activeEnvFileName !== "") {
             if (classifyStackFile(activeEnvFileName) !== "env") {
-                throw new ValidationError("Not an env file: " + activeEnvFileName);
+                throw new ValidationError("stackFileNotEnv", { file: activeEnvFileName });
             }
             await resolveStackFilePath(stackDir, activeEnvFileName);
 
@@ -292,12 +292,12 @@ export class StackConfig {
 
         for (const binding of config.secretBindings) {
             if (classifyStackFile(binding.fileName) !== "secret") {
-                throw new ValidationError("Not a secret file: " + binding.fileName);
+                throw new ValidationError("stackFileNotSecret", { file: binding.fileName });
             }
             await resolveStackFilePath(stackDir, binding.fileName);
 
             if (!isSafeNameSegment(binding.name)) {
-                throw new ValidationError("Invalid secret name: " + binding.name);
+                throw new ValidationError("secretNameInvalid", { name: binding.name });
             }
 
             secretBindings.push({

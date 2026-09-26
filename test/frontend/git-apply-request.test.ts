@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
 import test, { type TestContext } from "node:test";
-import { runInNewContext } from "node:vm";
 import { canApplyGitChoices, diffLineRows } from "../../frontend/src/git-ui";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING } from "../../common/util-common";
 import { AgentRequests } from "../../frontend/src/agent-requests";
+import { componentOptions } from "../helpers/sfc";
 
 /**
  * The options of the Git changes page, evaluated as the component defines them.
@@ -13,12 +12,7 @@ import { AgentRequests } from "../../frontend/src/agent-requests";
  * whose answer never arrives decides whether the person can leave the page at all. The
  * real methods run here against the real request transport.
  */
-const source = readFileSync(new URL("../../frontend/src/pages/StackGitChanges.vue", import.meta.url), "utf8");
-const script = source.split("<script>")[1]!.split("</script>")[0]!
-    .replace(/^import .*;$/gm, "")
-    .replace("export default", "result =");
-
-const context : Record<string, unknown> = { result: {},
+const context : Record<string, unknown> = {
     canApplyGitChoices,
     diffLineRows,
     ATTENTION,
@@ -30,16 +24,14 @@ const context : Record<string, unknown> = { result: {},
     setTimeout: (...args : Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
     clearTimeout: (...args : Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args) };
 
-runInNewContext(script, context);
-
-const options = context.result as {
+const options = componentOptions<{
     beforeRouteLeave : () => boolean,
     data : () => Record<string, unknown>,
     computed : Record<string, () => unknown>,
     methods : Record<string, (...args : never[]) => unknown>,
     watch : Record<string, (...args : never[]) => unknown>,
     unmounted : () => void,
-};
+        }>(new URL("../../frontend/src/pages/StackGitChanges.vue", import.meta.url), context);
 
 /** A request the page sent, as the transport received it */
 interface Sent {

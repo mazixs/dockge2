@@ -11,7 +11,7 @@
                 <div v-if="!isEditMode" class="service-state">
                     <StateChip :state="serviceState" :label="statusLabel" :attention="serviceState === 'attention'" />
 
-                    <a v-for="port in (envsubstService.ports ?? [])" :key="port" class="port-link" :href="parsePort(port).url" target="_blank">
+                    <a v-for="port in (envsubstService.ports ?? [])" :key="String(port)" class="port-link" :href="parsePort(port).url" target="_blank">
                         <span class="port-chip">{{ parsePort(port).display }}</span>
                     </a>
 
@@ -29,8 +29,8 @@
                 <!-- В режиме правки у строки два действия: раскрыть настройки и удалить.
                      Удаление не кричит: слово красное, кнопка обычная -->
                 <template v-if="isEditMode">
-                    <button class="btn btn-sm btn-normal" :aria-expanded="String(showConfig)" @click="showConfig = !showConfig">
-                        <font-awesome-icon icon="edit" />{{ $t("Edit") }}
+                    <button class="btn btn-sm btn-normal" :aria-expanded="showConfig" @click="showConfig = !showConfig">
+                        <font-awesome-icon icon="edit" />{{ $t("edit") }}
                     </button>
                     <button class="btn btn-sm btn-normal btn-danger-text" @click="remove">
                         <font-awesome-icon icon="trash" />{{ $t("deleteContainer") }}
@@ -71,10 +71,10 @@
         <div v-if="!isEditMode && statsInstances.length > 0" class="service-stats">
             <div class="stats-line">
                 <template v-if="!expandedStats">
-                    <span class="stats">{{ $t('CPU') }}: {{ statsInstances[0].CPUPerc }}</span>
-                    <span class="stats">{{ $t('memoryAbbreviated') }}: {{ statsInstances[0].MemUsage }}</span>
+                    <span class="stats">{{ $t('cpu') }}: {{ statsInstances[0]?.CPUPerc }}</span>
+                    <span class="stats">{{ $t('memoryAbbreviated') }}: {{ statsInstances[0]?.MemUsage }}</span>
                 </template>
-                <button class="btn btn-sm btn-normal ms-auto" :aria-expanded="String(expandedStats)" @click="expandedStats = !expandedStats">
+                <button class="btn btn-sm btn-normal ms-auto" :aria-expanded="expandedStats" @click="expandedStats = !expandedStats">
                     <font-awesome-icon :icon="expandedStats ? 'chevron-up' : 'chevron-down'" />
                 </button>
             </div>
@@ -128,8 +128,8 @@
 
                 <div class="field">
                     <span class="form-label">{{ $t("network", 2) }}</span>
-                    <p v-if="networkList.length === 0 && service.networks && service.networks.length > 0" class="form-text attention">
-                        {{ $t("NoNetworksAvailable") }}
+                    <p v-if="networkList.length === 0 && Array.isArray(service.networks) && service.networks.length > 0" class="form-text attention">
+                        {{ $t("noNetworksAvailable") }}
                     </p>
                     <ArraySelect name="networks" :display-name="$t('network')" placeholder="Network Name" :options="networkList" />
                 </div>
@@ -143,13 +143,40 @@
     </div>
 </template>
 
-<script>
-import { defineComponent } from "vue";
+<script lang="ts">
+import { defineComponent, type ComponentPublicInstance, type PropType } from "vue";
+import type { RouteLocationRaw } from "vue-router";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { instanceStateName, parseDockerPort, serviceStateName } from "../../../common/util-common";
-import DockerStat from "./DockerStat.vue";
+import type { ComposeModel } from "../../../common/compose-editor";
+import type { ContainerInstanceStatus } from "../../../common/compose-status";
+import DockerStat, { type DockerStatRow } from "./DockerStat.vue";
 import StateChip from "./StateChip.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
+
+/** A service as the compose file declares it */
+type ComposeService = NonNullable<ComposeModel["services"]>[string];
+
+/** What the service row uses of the compose page it is rendered in */
+interface ComposePageApi {
+    endpoint : string;
+    stack : { name : string, endpoint : string, primaryHostname? : string };
+    jsonConfig : ComposeModel;
+    envsubstJSONConfig : ComposeModel;
+}
+
+/**
+ * The compose page this row is rendered in, through the transition of the page
+ * @param parent Parent of the row
+ * @returns The page
+ */
+function composePage(parent : ComponentPublicInstance | null) : ComposePageApi {
+    const page = parent?.$parent;
+    if (!page || !("jsonConfig" in page)) {
+        throw new Error("A service row is rendered outside the compose page");
+    }
+    return page as ComponentPublicInstance & ComposePageApi;
+}
 
 export default defineComponent({
     components: {
@@ -173,12 +200,11 @@ export default defineComponent({
         },
         /** Containers of this service, as docker reports them; null while nothing is known */
         serviceStatus: {
-            /** @type {import("vue").PropType<import("../../../common/compose-status").ContainerInstanceStatus[] | null>} */
-            type: Array,
+            type: Array as PropType<ContainerInstanceStatus[] | null>,
             default: null,
         },
         dockerStats: {
-            type: Object,
+            type: Object as PropType<Record<string, DockerStatRow> | null>,
             default: null
         },
         /** True while the page runs a stack operation, disables the action buttons */
@@ -203,15 +229,15 @@ export default defineComponent({
         /**
          * Устойчивый хвост для id полей: подписи настроек должны указывать на
          * поле своего сервиса, а сервисов на странице несколько
-         * @returns {string} Имя сервиса, пригодное для id
+         * @returns Имя сервиса, пригодное для id
          */
-        uid() {
+        uid() : string {
             return this.name.replace(/[^a-zA-Z0-9_-]/g, "-");
         },
 
-        networkList() {
+        networkList() : string[] {
             let list = [];
-            for (const networkName in this.jsonObject.networks) {
+            for (const networkName in this.jsonObject.networks ?? {}) {
                 list.push(networkName);
             }
             return list;
@@ -220,14 +246,14 @@ export default defineComponent({
         /**
          * Состояние сервиса именем системы: синий означает только интерактив,
          * поэтому "работает" - это running, а не primary.
-         * @returns {string} Имя состояния для чипа
+         * @returns Имя состояния для чипа
          */
-        serviceState() {
+        serviceState() : string {
             // No container means nothing is known, and the label already says "unknown"
             return serviceStateName(this.instances);
         },
 
-        terminalRouteLink() {
+        terminalRouteLink() : RouteLocationRaw {
             if (this.endpoint) {
                 return {
                     name: "containerTerminalEndpoint",
@@ -250,53 +276,55 @@ export default defineComponent({
             }
         },
 
-        endpoint() {
-            return this.$parent.$parent.endpoint;
+        endpoint() : string {
+            return composePage(this.$parent).endpoint;
         },
 
-        stack() {
-            return this.$parent.$parent.stack;
+        stack() : ComposePageApi["stack"] {
+            return composePage(this.$parent).stack;
         },
 
-        stackName() {
-            return this.$parent.$parent.stack.name;
+        stackName() : string {
+            return composePage(this.$parent).stack.name;
         },
 
-        service() {
-            if (!this.jsonObject.services[this.name]) {
+        service() : ComposeService {
+            const service = this.jsonObject.services?.[this.name];
+            if (!service) {
                 return {};
             }
-            return this.jsonObject.services[this.name];
+            return service;
         },
 
-        serviceCount() {
-            return Object.keys(this.jsonObject.services).length;
+        serviceCount() : number {
+            return Object.keys(this.jsonObject.services ?? {}).length;
         },
 
-        jsonObject() {
-            return this.$parent.$parent.jsonConfig;
+        jsonObject() : ComposeModel {
+            return composePage(this.$parent).jsonConfig;
         },
 
-        envsubstJSONConfig() {
-            return this.$parent.$parent.envsubstJSONConfig;
+        envsubstJSONConfig() : ComposeModel {
+            return composePage(this.$parent).envsubstJSONConfig;
         },
 
-        envsubstService() {
-            if (!this.envsubstJSONConfig.services[this.name]) {
+        envsubstService() : ComposeService {
+            const service = this.envsubstJSONConfig.services?.[this.name];
+            if (!service) {
                 return {};
             }
-            return this.envsubstJSONConfig.services[this.name];
+            return service;
         },
 
-        imageName() {
+        imageName() : string {
             if (this.envsubstService.image) {
-                return this.envsubstService.image.split(":")[0];
+                return this.envsubstService.image.split(":")[0] ?? "";
             } else {
                 return "";
             }
         },
 
-        imageTag() {
+        imageTag() : string {
             if (this.envsubstService.image) {
                 let tag = this.envsubstService.image.split(":")[1];
 
@@ -309,9 +337,9 @@ export default defineComponent({
                 return "";
             }
         },
-        statsInstances() {
+        statsInstances() : DockerStatRow[] {
             return this.instances
-                .map(instance => this.dockerStats[instance.name])
+                .map(instance => this.dockerStats?.[instance.name])
                 .filter(stat => !!stat)
                 .sort((a, b) => a.Name.localeCompare(b.Name));
         },
@@ -319,28 +347,29 @@ export default defineComponent({
         /**
          * Every container of this service, typed by the backend
          */
-        instances() {
+        instances() : ContainerInstanceStatus[] {
             if (!Array.isArray(this.serviceStatus)) {
                 return [];
             }
             return this.serviceStatus;
         },
 
-        hasRunningInstance() {
+        hasRunningInstance() : boolean {
             return this.instances.some(instance => instance.state === "running");
         },
 
         /**
          * Service level label: the instance state when they agree, otherwise a mixed marker
          */
-        statusLabel() {
+        statusLabel() : string {
             if (this.instances.length === 0) {
                 return this.$t("unknown");
             }
 
             const labels = new Set(this.instances.map(instance => this.instanceLabel(instance)));
-            if (labels.size === 1) {
-                return [ ...labels ][0];
+            const [ single ] = labels;
+            if (labels.size === 1 && single !== undefined) {
+                return single;
             }
             return this.$t("mixedState");
         },
@@ -353,10 +382,10 @@ export default defineComponent({
     methods: {
         /**
          * Human readable state of one instance
-         * @param {object} instance Typed instance status
-         * @returns {string} Label
+         * @param instance Typed instance status
+         * @returns Label
          */
-        instanceLabel(instance) {
+        instanceLabel(instance : ContainerInstanceStatus) : string {
             // A crash is named with its code: "exited" alone reads like a stop
             if (instanceStateName(instance) === "failed") {
                 return typeof instance.exitCode === "number" ? this.$t("instanceFailedCode", [ instance.exitCode ]) : this.$t("instanceFailed");
@@ -372,19 +401,19 @@ export default defineComponent({
 
         /**
          * Состояние одного контейнера именем системы
-         * @param {object} instance Typed instance status
-         * @returns {string} Имя состояния для чипа
+         * @param instance Typed instance status
+         * @returns Имя состояния для чипа
          */
-        instanceState(instance) {
+        instanceState(instance : ContainerInstanceStatus) : string {
             return instanceStateName(instance);
         },
 
         /**
          * Explain why an instance needs attention
-         * @param {object} instance Typed instance status
-         * @returns {string} Reason text
+         * @param instance Typed instance status
+         * @returns Reason text
          */
-        instanceIssueText(instance) {
+        instanceIssueText(instance : ContainerInstanceStatus) : string {
             if (!instance.issue) {
                 return "";
             }
@@ -394,16 +423,16 @@ export default defineComponent({
             return this.$t(instance.issue);
         },
 
-        parsePort(port) {
+        parsePort(port : unknown) : { url : string, display : string } {
             if (this.stack.endpoint) {
-                return parseDockerPort(port, this.stack.primaryHostname);
+                return parseDockerPort(String(port), this.stack.primaryHostname ?? "");
             } else {
                 let hostname = this.$root.info.primaryHostname || location.hostname;
-                return parseDockerPort(port, hostname);
+                return parseDockerPort(String(port), hostname);
             }
         },
         remove() {
-            delete this.jsonObject.services[this.name];
+            delete this.jsonObject.services?.[this.name];
         },
         startService() {
             this.$emit("start-service", this.name);

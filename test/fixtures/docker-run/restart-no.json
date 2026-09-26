@@ -1,0 +1,33 @@
+{
+    "description": "--restart no is quoted, so no reader of the file takes it for the boolean false.",
+    "command": "docker run -d --restart no nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "restart"
+        ],
+        "values": {
+            "image": "nginx",
+            "restart": "no"
+        },
+        "text": [
+            "restart: \"no\""
+        ]
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--restart"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

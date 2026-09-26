@@ -36,11 +36,12 @@ test("a subsystem below its floor fails, and the others are still reported", () 
     const report = record("backend/auth.ts", [ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 ])
         + record("backend/stack-write.ts", good)
         + record("common/compose-status.ts", good)
-        + record("backend/agent-manager.ts", good);
+        + record("backend/agent-manager.ts", good)
+        + record("frontend/src/mixins/socket.ts", good);
     const { report: lines, ok } = checkGroups(readLcov(report, root));
 
     assert.equal(ok, false);
-    assert.equal(lines.length, 4);
+    assert.equal(lines.length, 5);
     assert.match(lines[0] ?? "", /^FAIL Access and sessions: 10\.00% of lines, floor 80%/);
     assert.ok(lines.slice(1).every((line) => line.startsWith("ok  ")), lines.join("\n"));
 });
@@ -51,5 +52,5 @@ test("a group nothing measures is a failure, not a silent pass", () => {
     const { report, ok } = checkGroups(readLcov(record("backend/auth.ts", [ 1 ]), root));
 
     assert.equal(ok, false);
-    assert.equal(report.filter((line) => line.includes("no measured file")).length, 3);
+    assert.equal(report.filter((line) => line.includes("no measured file")).length, 4);
 });

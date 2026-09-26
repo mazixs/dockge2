@@ -123,6 +123,8 @@ export interface StackSummaryDTO {
     dir : string;
     /** What is known about the last day, null when nothing was recorded */
     availability : Availability | null;
+    /** Service the panel itself runs as, "" for any other stack: it can be stopped, not removed or recreated */
+    panelService : string;
 }
 
 /**

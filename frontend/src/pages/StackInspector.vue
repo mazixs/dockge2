@@ -11,29 +11,35 @@
                 <Uptime :stack="globalStack ?? null" />
             </div>
 
-            <div class="facts" role="list">
+            <div class="facts">
                 <span v-ellipsis-title class="fact">{{ agentLabel }}<span v-if="stackPath" class="path"> · {{ stackPath }}</span></span>
             </div>
 
             <div v-if="stack.isManagedByDockge && $root.canManageStacks" class="actions">
                 <!-- Без значков: подписи и так называют результат, а группа
                          обязана уместиться в одну строку узкой колонки -->
-                <button v-if="!active" class="btn btn-sm btn-primary" :disabled="processing" @click="run('startStack')">{{ $t("startStack") }}</button>
+                <button v-if="!active && !panelService" class="btn btn-sm btn-primary" :disabled="processing" @click="run('startStack')">{{ $t("startStack") }}</button>
+                <button v-else-if="panelService" class="btn btn-sm btn-normal" :disabled="processing" @click="panelStop = { event: 'stopStack', service: '' }">{{ $t("stopStack") }}</button>
                 <button v-else class="btn btn-sm btn-normal" :disabled="processing" @click="run('stopStack')">{{ $t("stopStack") }}</button>
-                <button v-if="active" class="btn btn-sm btn-normal" :disabled="processing" @click="run('restartStack')">{{ $t("restartStack") }}</button>
+                <button v-if="active && !panelService" class="btn btn-sm btn-normal" :disabled="processing" @click="run('restartStack')">{{ $t("restartStack") }}</button>
 
                 <BDropdown placement="bottom-end" :text="$t('moreActions')" variant="normal" size="sm">
                     <!-- Значок есть у каждого пункта: без него подпись первого стояла
                          левее остальных, и левый край меню шел лесенкой -->
-                    <BDropdownItem :disabled="processing" @click="openUpdatePreview">
-                        <InterfaceIcon name="refresh" />{{ updateLabel }}
+                    <BDropdownItem v-if="panelService" to="/settings/about">
+                        <InterfaceIcon name="refresh" />{{ $t("panelStackUpdate") }}
                     </BDropdownItem>
-                    <BDropdownItem :disabled="processing" @click="showDownDialog = true">
-                        <font-awesome-icon icon="stop" />{{ $t("downStack") }}
-                    </BDropdownItem>
-                    <BDropdownItem :disabled="processing" @click="showDeleteDialog = true">
-                        <font-awesome-icon icon="trash" />{{ $t("deleteStack") }}
-                    </BDropdownItem>
+                    <template v-else>
+                        <BDropdownItem :disabled="processing" @click="openUpdatePreview">
+                            <InterfaceIcon name="refresh" />{{ updateLabel }}
+                        </BDropdownItem>
+                        <BDropdownItem :disabled="processing" @click="showDownDialog = true">
+                            <font-awesome-icon icon="stop" />{{ $t("downStack") }}
+                        </BDropdownItem>
+                        <BDropdownItem :disabled="processing" @click="showDeleteDialog = true">
+                            <font-awesome-icon icon="trash" />{{ $t("deleteStack") }}
+                        </BDropdownItem>
+                    </template>
                     <!-- Вывод последней команды не исчезает вместе со строкой хода:
                          к нему возвращаются и через минуту после конца -->
                     <BDropdownItem :disabled="!runHasOutput" @click="openRunLog">
@@ -42,6 +48,10 @@
                 </BDropdown>
             </div>
         </div>
+
+        <!-- Стек самой панели: пересоздание убило бы команду вместе с контейнером,
+             в котором она идет, поэтому здесь его можно только остановить -->
+        <p v-if="panelService && $root.canManageStacks" class="panel-stack-note">{{ $t("panelStackNote") }}</p>
 
         <div v-if="gitFilesPending && $root.canManageStacks" class="git-update-notice">
             <InterfaceIcon name="git" />
@@ -128,7 +138,7 @@
                         <button v-if="firstIssueService && $root.canManageStacks" class="btn btn-sm btn-normal" type="button" @click="openLogs">
                             <InterfaceIcon name="terminal" />{{ $t("serviceLogs", [ firstIssueService ]) }}
                         </button>
-                        <button v-if="firstIssueService && $root.canManageStacks" class="btn btn-sm btn-normal" type="button" :disabled="processing" @click="runService('restartService', firstIssueService)">
+                        <button v-if="firstIssueService && firstIssueService !== panelService && $root.canManageStacks" class="btn btn-sm btn-normal" type="button" :disabled="processing" @click="runService('restartService', firstIssueService)">
                             <font-awesome-icon icon="rotate" />{{ $t("restartServiceAction", [ firstIssueService ]) }}
                         </button>
                         <button v-if="issues.length > 1 && !allIssues" class="btn btn-sm btn-normal" type="button" @click="allIssues = true">
@@ -208,24 +218,26 @@
                                                         >
                                                             <font-awesome-icon icon="list" fixed-width /> {{ $t("openLogs") }}
                                                         </button>
-                                                        <button
-                                                            v-if="!service.running" class="menu-action" type="button"
-                                                            :disabled="processing" :aria-label="`${$t('startStack')}: ${service.name}`"
-                                                            @click="runService('startService', service.name)"
-                                                        >
-                                                            <font-awesome-icon icon="play" fixed-width /> {{ $t("startStack") }}
-                                                        </button>
-                                                        <button
-                                                            v-else class="menu-action" type="button"
-                                                            :disabled="processing" :aria-label="`${$t('restartStack')}: ${service.name}`"
-                                                            @click="runService('restartService', service.name)"
-                                                        >
-                                                            <font-awesome-icon icon="rotate" fixed-width /> {{ $t("restartStack") }}
-                                                        </button>
-                                                        <button class="menu-action" type="button" :disabled="processing" :aria-label="`${$t('updateStack')}: ${service.name}`" @click="runService('updateService', service.name)">
-                                                            <InterfaceIcon name="refresh" /> {{ $t("updateStack") }}
-                                                        </button>
-                                                        <button v-if="service.running" class="menu-action" type="button" :disabled="processing" :aria-label="`${$t('stopStack')}: ${service.name}`" @click="runService('stopService', service.name)">
+                                                        <template v-if="service.name !== panelService">
+                                                            <button
+                                                                v-if="!service.running" class="menu-action" type="button"
+                                                                :disabled="processing" :aria-label="`${$t('startStack')}: ${service.name}`"
+                                                                @click="runService('startService', service.name)"
+                                                            >
+                                                                <font-awesome-icon icon="play" fixed-width /> {{ $t("startStack") }}
+                                                            </button>
+                                                            <button
+                                                                v-else class="menu-action" type="button"
+                                                                :disabled="processing" :aria-label="`${$t('restartStack')}: ${service.name}`"
+                                                                @click="runService('restartService', service.name)"
+                                                            >
+                                                                <font-awesome-icon icon="rotate" fixed-width /> {{ $t("restartStack") }}
+                                                            </button>
+                                                            <button class="menu-action" type="button" :disabled="processing" :aria-label="`${$t('updateStack')}: ${service.name}`" @click="runService('updateService', service.name)">
+                                                                <InterfaceIcon name="refresh" /> {{ $t("updateStack") }}
+                                                            </button>
+                                                        </template>
+                                                        <button v-if="service.running" class="menu-action" type="button" :disabled="processing" :aria-label="`${$t('stopStack')}: ${service.name}`" @click="stopService(service.name)">
                                                             <font-awesome-icon icon="stop" fixed-width /> {{ $t("stopStack") }}
                                                         </button>
                                                     </div>
@@ -281,6 +293,7 @@
                                 <dt>{{ $t("stackFiles") }}</dt>
                                 <dd>{{ fileNames.join(", ") }}</dd>
                             </dl>
+                            <StackRelations v-if="showLinks" :stack-name="stackName" :endpoint="endpoint" />
                         </div>
                     </div>
                     <StackSourcePanel :source="source" :directory="stackPath" :files-url="filesUrl" :git-url="gitUrl" :compare-promoted="$root.canManageStacks" />
@@ -335,6 +348,12 @@
                 </div>
             </div>
         </transition>
+        <BModal
+            :model-value="panelStop !== null" :title="$t('panelStopTitle')" :cancelTitle="$t('cancel')" :okTitle="$t('stopStack')" okVariant="danger"
+            @update:model-value="(open) => { if (!open) panelStop = null; }" @ok="confirmPanelStop"
+        >
+            {{ $t("panelStopWarning") }}
+        </BModal>
         <BModal v-model="showDownDialog" :title="$t('downStackTitle', [ stackName ])" :cancelTitle="$t('cancel')" :okTitle="$t('downStack')" @ok="run('downStack')">{{ $t("familiarDownWarning") }}</BModal>
         <BModal v-model="showDeleteDialog" :title="$t('deleteStackTitle', [ stackName ])" :cancelTitle="$t('cancel')" :okTitle="$t('deleteStack')" okVariant="danger" @ok="deleteStack">
             {{ $t("familiarDeleteWarning") }}
@@ -342,8 +361,7 @@
     </div>
 </template>
 
-<script>
-// @ts-check
+<script lang="ts">
 import StateChip from "../components/StateChip.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import { stackColor } from "../stack-color";
@@ -354,16 +372,24 @@ import StackSourcePanel from "../components/StackSourcePanel.vue";
 import StackJournal from "../components/StackJournal.vue";
 import StackTerminals from "../components/StackTerminals.vue";
 import StackProgress from "../components/StackProgress.vue";
-import { defineAsyncComponent, markRaw } from "vue";
+import StackRelations from "../components/StackRelations.vue";
+import { defineAsyncComponent, defineComponent, markRaw } from "vue";
 import { VisibleTask } from "../visible-task";
 import { RequestTracker } from "../request-tracker";
-import { StackRun } from "../stack-run";
+import { StackRun, type StackRunOutcome } from "../stack-run";
 import Uptime from "../components/Uptime.vue";
+import type { DockerStatRow } from "../components/DockerStat.vue";
 import { ATTENTION, EXITED, RUNNING, envsubstYAML, instanceStateName, isStackFailed, seriousIssuesFirst } from "../../../common/util-common";
-import { describeServices, readDeclaredUrls } from "../stack-services";
-import { summariseRegistries } from "../../../common/image-source";
+import { describeServices, readDeclaredUrls, type InspectedService, type ShellRequest } from "../stack-services";
+import { summariseRegistries, type ImageUpdate } from "../../../common/image-source";
 import { formatDuration, formatPercent } from "../format";
-import { stackSourceDiffers, stackSourceState } from "../../../common/stack-source";
+import { stackSourceDiffers, stackSourceState, type StackSource } from "../../../common/stack-source";
+import type { StackDTO } from "../../../common/types/stack";
+import type { ServiceStatusList } from "../../../common/agent-events";
+import type { StackStatusIssue } from "../../../common/compose-status";
+import type { ComposeModel } from "../../../common/compose-editor";
+import type { ComposeTask } from "../../../common/compose-progress";
+import type { Availability } from "../../../common/availability";
 import { VERB_KEYS } from "../progress-labels";
 import { placeMenu } from "../menu-placement";
 import { isUpStatus, parseDockerDuration } from "../../../common/docker-time";
@@ -387,80 +413,69 @@ const GONE_VERBS = [ "stopped", "removed" ];
 /**
  * Имя в шаблон: точки и плюсы встречаются в именах сервисов и не должны
  * превращаться в метасимволы
- * @param {string} value Имя сервиса или стека
- * @returns {string} Безопасный для RegExp кусок
+ * @param value Имя сервиса или стека
+ * @returns Безопасный для RegExp кусок
  */
-function escapeRegExp(value) {
+function escapeRegExp(value : string) : string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export default {
+export default defineComponent({
     components: { StateChip,
         InterfaceIcon,
         StackSourcePanel,
         StackJournal,
         StackTerminals,
         StackProgress,
+        StackRelations,
         // The editor is opened from the files tab, so CodeMirror is fetched when that
         // tab is opened rather than with the page
         Compose: defineAsyncComponent(() => import("./Compose.vue")),
         BModal,
         Uptime,
     },
-    beforeRouteUpdate(to, from, next) {
-        this.confirmLeavingFiles(next);
+    beforeRouteUpdate() : boolean {
+        return this.confirmLeavingFiles();
     },
-    beforeRouteLeave(to, from, next) {
-        this.confirmLeavingFiles(next);
+    beforeRouteLeave() : boolean {
+        return this.confirmLeavingFiles();
     },
-    /** @this {{ requestServiceStatus : () => void }} */
-    data() {
+    // Vue types the data function without the methods; the run clock calls one of them later
+    data(this : { requestServiceStatus() : void }) {
         return {
             /**
              * Стек, пока он не загружен - пустой. Смотрителю приходит укороченная
              * сводка без файлов, поэтому поля объявлены необязательными
-             * @type {Partial<import("../../../common/types/stack").StackDTO>}
              */
-            stack: {},
+            stack: {} as Partial<StackDTO>,
             loadError: false,
             disposed: false,
             showDownDialog: false,
-            /** @type {import("../../../common/agent-events").ServiceStatusList} */
-            serviceStatusList: {},
-            /** @type {import("../../../common/compose-status").StackStatusIssue[]} */
-            serviceIssues: [],
+            /** Остановка самой панели ждет подтверждения: после нее страница перестает отвечать */
+            panelStop: null as { event : "stopStack" | "stopService", service : string } | null,
+            serviceStatusList: {} as ServiceStatusList,
+            serviceIssues: [] as StackStatusIssue[],
             processing: true,
             showDeleteDialog: false,
             showLinks: false,
             showUsage: false,
             allIssues: false,
-            /** @type {ReturnType<typeof setTimeout> | undefined} */
-            statusTimer: undefined,
-            /** @type {import("../visible-task").VisibleTask | null} */
-            ageTask: null,
-            /**
-             * Разобранный compose с подставленными переменными окружения
-             * @type {import("../../../common/compose-editor").ComposeModel}
-             */
-            config: {},
-            /**
-             * Расход контейнеров: приходит отдельным событием, обновляется вместе с состоянием
-             * @type {Record<string, import("../../../common/util-common").LooseObject>}
-             */
-            dockerStats: {},
+            statusTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+            ageTask: null as VisibleTask | null,
+            /** Разобранный compose с подставленными переменными окружения */
+            config: {} as ComposeModel,
+            /** Расход контейнеров: приходит отдельным событием, обновляется вместе с состоянием */
+            dockerStats: {} as Record<string, DockerStatRow>,
             /** Когда состояние сервисов было получено последний раз */
             statusReadAt: 0,
             /** Секунды с последнего замера, пересчитываются раз в секунду */
             statusAgeSeconds: 0,
-            /**
-             * Предпросмотр обновления: null пока его не просили
-             * @type {{
-             *     source : import("../../../common/stack-source").StackSource | null,
-             *     images : import("../../../common/image-source").ImageUpdate[],
-             *     builds : boolean,
-             * } | null}
-             */
-            preview: null,
+            /** Предпросмотр обновления: null пока его не просили */
+            preview: null as {
+                source : StackSource | null,
+                images : ImageUpdate[],
+                builds : boolean,
+            } | null,
             previewLoading: false,
             /**
              * Идущая команда вместе со стеком, которому она принадлежит: часы,
@@ -476,41 +491,35 @@ export default {
             requests: markRaw(new RequestTracker()),
             /** Выбранное окно доступности в часах */
             windowHours: 24,
-            /**
-             * Доступность выбранного окна, приходит отдельным запросом
-             * @type {import("../../../common/availability").Availability | null}
-             */
-            availabilityData: null,
+            /** Доступность выбранного окна, приходит отдельным запросом */
+            availabilityData: null as Availability | null,
             /** Терминал тем более: размонтирование убивает открытые оболочки */
             terminalMounted: false,
-            /**
-             * Просьба открыть оболочку сервиса, читается вкладкой терминала
-             * @type {import("../stack-services").ShellRequest | null}
-             */
-            shellRequest: null,
+            /** Просьба открыть оболочку сервиса, читается вкладкой терминала */
+            shellRequest: null as ShellRequest | null,
         };
     },
     computed: {
         /**
          * Стек, открытый сейчас: страница остается той же при переходе к другому
-         * @returns {string} Имя стека
+         * @returns Имя стека
          */
-        stackName() {
+        stackName() : string {
             return String(this.$route.params.stackName ?? "");
         },
 
         /** Имя выполняющейся команды, пусто когда ничего не идет */
-        running() {
+        running() : string {
             return this.operation.event;
         },
 
         /** Сколько секунд идет команда */
-        runElapsed() {
+        runElapsed() : number {
             return this.operation.elapsed;
         },
 
         /** Чем кончилась последняя команда: пусто, "ok", "failed" или "unknown" */
-        runOutcome() {
+        runOutcome() : StackRunOutcome {
             return this.operation.outcome;
         },
 
@@ -518,26 +527,26 @@ export default {
          * Шаги идущей команды: пока compose работает, состояние сервиса
          * читается по ним, а не по замеру docker - замер приходит раз в
          * две секунды и все это время показывал бы вчерашний день
-         * @returns {import("../../../common/compose-progress").ComposeTask[]} Шаги команды
+         * @returns Шаги команды
          */
-        runTasks() {
+        runTasks() : ComposeTask[] {
             return this.operation.tasks;
         },
 
         /** Последняя команда что-то сказала: значит, ее вывод есть что открыть */
-        runHasOutput() {
+        runHasOutput() : boolean {
             return this.operation.hasOutput;
         },
 
         /**
          * Агент, на котором живет стек, пусто для своей панели
-         * @returns {string} Имя агента
+         * @returns Имя агента
          */
-        endpoint() {
+        endpoint() : string {
             return this.stack.endpoint || String(this.$route.params.endpoint ?? "");
         },
 
-        endpointDisplay() {
+        endpointDisplay() : string | undefined {
             return this.$root.endpointDisplayFunction(this.endpoint);
         },
 
@@ -546,8 +555,18 @@ export default {
             return this.$root.completeStackList[`${this.stackName}_${this.endpoint}`];
         },
 
+        /**
+         * Сервис, в котором работает сама панель; пусто у любого другого стека
+         * @returns Имя сервиса
+         */
+        panelService() : string {
+            const listed = this.globalStack;
+
+            return this.stack?.panelService || (listed && "panelService" in listed ? listed.panelService : "");
+        },
+
         /** Где стек живет: свой сервер или агент */
-        agentLabel() {
+        agentLabel() : string {
             if (!this.endpoint) {
                 return this.$t("thisServer");
             }
@@ -557,16 +576,16 @@ export default {
         /**
          * Каталог стека: он же отвечает на "куда лягут файлы".
          * Смотрителю каталог не присылают, поэтому строки пути у него просто нет
-         * @returns {string} Каталог стека
+         * @returns Каталог стека
          */
-        stackPath() {
+        stackPath() : string {
             const stack = this.globalStack;
 
             return stack && "dir" in stack ? stack.dir : "";
         },
 
         /** Реестры образов одной строкой: "ghcr.io ×2 · Docker Hub ×2" */
-        registryLabel() {
+        registryLabel() : string {
             const images = this.services.map((service) => service.image).filter((image) => !!image);
             return summariseRegistries(images)
                 .map((entry) => `${entry.registry} ×${entry.count}`)
@@ -576,9 +595,9 @@ export default {
         /**
          * Откуда взялись файлы стека, по тому же чтению, что и в списке.
          * Смотрителю происхождение не присылают: тогда его нет
-         * @returns {import("../../../common/stack-source").StackSource | null} Происхождение каталога
+         * @returns Происхождение каталога
          */
-        source() {
+        source() : StackSource | null {
             const stack = this.globalStack;
 
             return stack && "source" in stack ? stack.source : null;
@@ -586,14 +605,14 @@ export default {
 
         /**
          * Чем именно расходится каталог: неперенесенными коммитами или правками на сервере
-         * @returns {string} Ключ каталога переводов
+         * @returns Ключ каталога переводов
          */
-        gitNoticeKey() {
+        gitNoticeKey() : string {
             return (this.source?.behind ?? 0) > 0 ? "familiarGitNotice" : "pagesLocalChanges";
         },
 
         /** Расходятся ли файлы стека с Git: правки на сервере или неперенесенные коммиты */
-        gitFilesPending() {
+        gitFilesPending() : boolean {
             return stackSourceDiffers(stackSourceState(this.source));
         },
 
@@ -602,12 +621,12 @@ export default {
          * предпросмотра. Обновление образов файлы не трогает, поэтому рядом со
          * строкой нужен путь к сравнению, а не обещание, что Git подтянется сам.
          */
-        previewGitPending() {
+        previewGitPending() : boolean {
             return stackSourceDiffers(stackSourceState(this.preview?.source));
         },
 
         /** Что предпросмотр говорит про каталог стека */
-        previewSourceLine() {
+        previewSourceLine() : string {
             const source = this.preview?.source;
 
             if (!source || source.kind !== "git") {
@@ -626,15 +645,15 @@ export default {
         },
 
         /** Надпись кнопки обновления: отставание в Git называется прямо на кнопке */
-        updateLabel() {
+        updateLabel() : string {
             return this.$t("familiarImagesUpdate");
         },
 
         /**
          * Замечание, которое называет строка причины: из него же берется сервис
-         * @returns {import("../../../common/compose-status").StackStatusIssue | null} Первое замечание
+         * @returns Первое замечание
          */
-        firstIssue() {
+        firstIssue() : StackStatusIssue | null {
             // A stack someone stopped has nothing to fix: its services stopped, as asked
             const status = this.globalStack?.status;
             if (status === EXITED && !isStackFailed(status, this.issues)) {
@@ -644,12 +663,12 @@ export default {
         },
 
         /** Сервис, из-за которого стек требует внимания: к нему и ведут кнопки починки */
-        firstIssueService() {
+        firstIssueService() : string {
             return this.issues[0]?.service ?? "";
         },
 
         /** Возраст замера словами: таблица не выдает старые числа за свежие */
-        statusAge() {
+        statusAge() : string {
             if (!this.statusReadAt) {
                 return this.$t("statusAgeUnknown");
             }
@@ -659,16 +678,16 @@ export default {
         },
 
         /** Окна, которые предлагает сервер: сутки, неделя, месяц */
-        availabilityWindows() {
+        availabilityWindows() : number[] {
             return [ 24, 168, 720 ];
         },
 
-        availabilityVerdict() {
+        availabilityVerdict() : Availability["verdict"] {
             return this.availabilityData?.verdict ?? "noData";
         },
 
         /** Вывод по окну словами, по тем же правилам, что в строке списка */
-        availabilityLabel() {
+        availabilityLabel() : string {
             const data = this.availabilityData;
 
             if (!data) {
@@ -696,7 +715,7 @@ export default {
         },
 
         /** Приписка: почему доля такая - без нее процент выглядит необъяснимым */
-        availabilityNote() {
+        availabilityNote() : string {
             const data = this.availabilityData;
 
             if (!data) {
@@ -720,12 +739,12 @@ export default {
             return "";
         },
 
-        gitUrl() {
+        gitUrl() : string {
             return `/stack/${encodeURIComponent(this.stackName)}/git${this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : ""}`;
         },
 
         /** Какая вкладка открыта: адрес и есть состояние страницы */
-        tab() {
+        tab() : "files" | "logs" | "terminal" | "overview" {
             if (this.$route.name === "stackFiles") {
                 return "files";
             }
@@ -736,28 +755,28 @@ export default {
         },
 
         /** Хвост адреса с агентом: у всех вкладок он одинаковый */
-        endpointPath() {
+        endpointPath() : string {
             return this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : "";
         },
 
-        overviewUrl() {
+        overviewUrl() : string {
             return `/stack/${encodeURIComponent(this.stackName)}${this.endpointPath}`;
         },
 
-        filesUrl() {
+        filesUrl() : string {
             return `/stack/${encodeURIComponent(this.stackName)}/files${this.endpointPath}`;
         },
 
-        logsUrl() {
+        logsUrl() : string {
             return `/stack/${encodeURIComponent(this.stackName)}/logs${this.endpointPath}`;
         },
 
-        terminalUrl() {
+        terminalUrl() : string {
             return `/stack/${encodeURIComponent(this.stackName)}/terminal${this.endpointPath}`;
         },
 
         /** Работает ли стек: хотя бы один запущенный контейнер */
-        active() {
+        active() : boolean {
             if (this.globalStack?.status === RUNNING) {
                 return true;
             }
@@ -767,21 +786,21 @@ export default {
             return false;
         },
 
-        issues() {
+        issues() : StackStatusIssue[] {
             const issues = Array.isArray(this.serviceIssues) && this.serviceIssues.length > 0 ? this.serviceIssues : this.globalStack?.issues ?? [];
             return seriousIssuesFirst(issues);
         },
 
         /** Сервисы файла, дополненные тем, что о них знает Docker */
-        services() {
+        services() : InspectedService[] {
             return describeServices(this.config, this.serviceStatusList, this.globalStack?.services ?? [], this.hostname);
         },
 
         /**
          * Хост, по которому открывают порты: у агента свой, у своей панели - адрес страницы
-         * @returns {string} Имя хоста
+         * @returns Имя хоста
          */
-        hostname() {
+        hostname() : string {
             return this.stack.endpoint ? (this.stack.primaryHostname ?? "") : (this.$root.info.primaryHostname || location.hostname);
         },
 
@@ -790,13 +809,12 @@ export default {
          * контейнеры, а не сервисы, поэтому имя ищется тремя способами: как его
          * знает docker, как оно объявлено в файле и как compose собирает его сам
          */
-        runTaskByService() {
+        runTaskByService() : Record<string, ComposeTask> {
             if (this.runTasks.length === 0) {
                 return {};
             }
 
-            /** @type {Record<string, import("../../../common/compose-progress").ComposeTask>} */
-            const map = {};
+            const map : Record<string, ComposeTask> = {};
 
             for (const service of this.services) {
                 const task = this.matchRunTask(service);
@@ -810,19 +828,19 @@ export default {
         },
 
         /** Адреса из x-dockge: то, по чему сервис открывают */
-        urls() {
+        urls() : ReturnType<typeof readDeclaredUrls> {
             return readDeclaredUrls(this.config);
         },
 
-        networkNames() {
+        networkNames() : string[] {
             return Object.keys(this.config?.networks ?? {});
         },
 
-        exposedPorts() {
+        exposedPorts() : string[] {
             return this.services.flatMap(service => service.ports.map(port => port.display));
         },
 
-        fileNames() {
+        fileNames() : string[] {
             const names = [ this.stack.composeFileName || "compose.yaml" ];
             if (this.stack.composeENV) {
                 names.push(".env");
@@ -831,7 +849,7 @@ export default {
         },
 
         /** Одна строка вместо трех разделов: сколько сервисов, сетей и что наружу */
-        linksSummary() {
+        linksSummary() : string {
             const parts = [ this.$t("serviceCount", this.services.length) ];
 
             // Своих сетей может не быть вовсе: тогда честнее назвать сеть по умолчанию,
@@ -861,7 +879,7 @@ export default {
 
         tab: {
             immediate: true,
-            handler(value) {
+            handler(value : string) {
                 if (value !== "logs" && value !== "terminal") {
                     return;
                 }
@@ -873,9 +891,7 @@ export default {
                 // Скрытый xterm не знает своего размера: показанная вкладка
                 // подгоняет консоль заново, иначе вывод остается в чужих колонках
                 this.$nextTick(() => {
-                    const panel = /** @type {{ fitActive : () => void } | undefined} */ (
-                        value === "logs" ? this.$refs.journal : this.$refs.terminals
-                    );
+                    const panel = (value === "logs" ? this.$refs.journal : this.$refs.terminals) as { fitActive : () => void } | undefined;
 
                     panel?.fitActive();
                 });
@@ -924,23 +940,15 @@ export default {
         /**
          * Уход со вкладки файлов спрашивает про несохраненные правки: редактор
          * больше не отдельная страница, но его вопрос никуда не делся
-         * @param {import("vue-router").NavigationGuardNext} next Продолжение перехода
-         * @returns {void}
+         * @returns Можно ли уходить
          */
-        confirmLeavingFiles(next) {
-            const files = /** @type {{ exitConfirm : (next : import("vue-router").NavigationGuardNext) => void } | undefined} */ (this.$refs.filesPanel);
-
-            if (!files) {
-                next();
-                return;
-            }
-
-            files.exitConfirm(next);
+        confirmLeavingFiles() : boolean {
+            const files = this.$refs.filesPanel as { exitConfirm : () => boolean } | undefined;
+            return files ? files.exitConfirm() : true;
         },
 
         /**
          * Спросить доступность выбранного окна
-         * @returns {void}
          */
         requestAvailability() {
             const generation = this.requests.generation;
@@ -959,28 +967,27 @@ export default {
 
         /**
          * Кому принадлежит операция: стек и агент, на котором она идет
-         * @returns {{endpoint: string, stack: string}} Владелец операции
+         * @returns Владелец операции
          */
-        runTarget() {
+        runTarget() : { endpoint : string, stack : string } {
             return { endpoint: this.endpoint,
                 stack: this.stackName };
         },
 
         /**
          * Относится ли ответ к текущему выбору стека
-         * @param {number} generation Поколение, с которым запрос уходил
-         * @returns {boolean} Можно ли применять ответ
+         * @param generation Поколение, с которым запрос уходил
+         * @returns Можно ли применять ответ
          */
-        isCurrentRequest(generation) {
+        isCurrentRequest(generation : number) : boolean {
             return !this.disposed && this.requests.isCurrent(generation);
         },
 
         /**
          * Выбрать окно доступности
-         * @param {number} hours Окно в часах
-         * @returns {void}
+         * @param hours Окно в часах
          */
-        selectWindow(hours) {
+        selectWindow(hours : number) {
             this.windowHours = hours;
             this.requestAvailability();
         },
@@ -1038,7 +1045,6 @@ export default {
         /**
          * Разобрать compose с подставленными переменными: инспектор показывает то,
          * что получит Docker, а не текст с ${VAR}
-         * @returns {void}
          */
         parseConfig() {
             try {
@@ -1058,10 +1064,9 @@ export default {
          * таймера, и от часов идущей команды - ничего не добавляет, зато на медленном
          * ответе накапливала бы очередь одинаковых запросов. Следующий опрос ставится
          * после ответа, а не по расписанию, поэтому очередь не растет.
-         * @param {number} [generation] Поколение выбранного стека, по умолчанию текущее
-         * @returns {void}
+         * @param generation Поколение выбранного стека, по умолчанию текущее
          */
-        requestServiceStatus(generation) {
+        requestServiceStatus(generation? : number) {
             const current = generation ?? this.requests.generation;
 
             if (document.hidden || !this.isCurrentRequest(current)) {
@@ -1091,22 +1096,21 @@ export default {
 
         /**
          * Спросить расход контейнеров, тоже по одному запросу за раз
-         * @param {number} generation Поколение выбранного стека
-         * @returns {void}
+         * @param generation Поколение выбранного стека
          */
-        requestDockerStats(generation) {
+        requestDockerStats(generation : number) {
             this.requests.run("stats", generation, () => this.$root.emitAgentRequest(this.endpoint, "dockerStats", [])).then((res) => {
                 if (!res || !this.isCurrentRequest(generation)) {
                     return;
                 }
 
-                this.dockerStats = res.ok ? res.dockerStats : {};
+                // The agent contract carries the rows untyped; they are docker stats rows
+                this.dockerStats = res.ok ? res.dockerStats as Record<string, DockerStatRow> : {};
             });
         },
 
         /**
          * Открыть предпросмотр обновления: спросить сервер, что он знает до запуска
-         * @returns {void}
          */
         openUpdatePreview() {
             this.previewLoading = true;
@@ -1134,7 +1138,6 @@ export default {
 
         /**
          * Запустить обновление после предпросмотра
-         * @returns {void}
          */
         runUpdate() {
             this.preview = null;
@@ -1143,7 +1146,6 @@ export default {
 
         /**
          * Прервать выполняющуюся команду стека
-         * @returns {void}
          */
         abort() {
             this.$root.emitAgentRequest(this.endpoint, "abortCompose", [ this.stackName ]).then((res) => {
@@ -1153,10 +1155,10 @@ export default {
 
         /**
          * Что известно про один образ: новее, актуален или ответа нет
-         * @param {import("../../../common/image-source").ImageUpdate} item Ответ предпросмотра по образу
-         * @returns {string} Вывод словами
+         * @param item Ответ предпросмотра по образу
+         * @returns Вывод словами
          */
-        imageVerdict(item) {
+        imageVerdict(item : ImageUpdate) : string {
             if (item.newer === true) {
                 return this.$t("updatePreviewNewer");
             }
@@ -1165,8 +1167,7 @@ export default {
                 return this.$t("updatePreviewCurrent");
             }
 
-            /** @type {Record<string, string>} */
-            const reasons = {
+            const reasons : Record<string, string> = {
                 notPulled: "updatePreviewUnknownNotPulled",
                 registryDenied: "updatePreviewUnknownDenied",
                 registryMissing: "updatePreviewUnknownMissing",
@@ -1177,10 +1178,9 @@ export default {
 
         /**
          * Действие над стеком одним событием агента
-         * @param {"startStack" | "stopStack" | "restartStack" | "updateStack" | "downStack" | "deleteStack"} event Имя события
-         * @returns {void}
+         * @param event Имя события
          */
-        run(event) {
+        run(event : "startStack" | "stopStack" | "restartStack" | "updateStack" | "downStack" | "deleteStack") {
             if (this.operation.running) {
                 return;
             }
@@ -1214,10 +1214,9 @@ export default {
         /**
          * Пока команда идет, секунды считаются, а состояние опрашивается чаще:
          * прогресс имеет смысл только пока он живой
-         * @param {string} event Имя события
-         * @returns {void}
+         * @param event Имя события
          */
-        startRunClock(event) {
+        startRunClock(event : string) {
             this.operation.start(this.runTarget(), event);
         },
 
@@ -1225,42 +1224,41 @@ export default {
          * Команда кончилась: секунды замирают на последнем значении, а итог
          * читается в панели хода - она не исчезает сама, потому что последние
          * строки вывода нужны и после удачи
-         * @param {import("../stack-run").StackRunOutcome} outcome Чем кончилась команда
-         * @returns {boolean} Относился ли итог к открытому стеку
+         * @param outcome Чем кончилась команда
+         * @returns Относился ли итог к открытому стеку
          */
-        stopRunClock(outcome = "") {
+        stopRunClock(outcome : StackRunOutcome = "") : boolean {
             return this.operation.finish(this.runTarget(), outcome);
         },
 
         /**
          * Строка хода рассказала, что делает compose: те же шаги читает таблица
          * сервисов, поэтому состояние в ней меняется сразу, а не через замер
-         * @param {{
-         *     endpoint : string,
-         *     stackName : string,
-         *     tasks : import("../../../common/compose-progress").ComposeTask[],
-         *     hasOutput : boolean,
-         * }} progress Шаги и признак вывода
-         * @returns {void}
+         * @param progress Шаги и признак вывода
          */
-        onProgress(progress) {
+        onProgress(progress : {
+            endpoint : string,
+            stackName : string,
+            tasks : ComposeTask[],
+            hasOutput : boolean,
+        }) {
             this.operation.setProgress({ endpoint: progress.endpoint,
                 stack: progress.stackName }, progress);
         },
 
         /** Полный вывод последней команды: он живет в строке хода */
         openRunLog() {
-            const progress = /** @type {{ openLog : () => void } | undefined} */ (this.$refs.progress);
+            const progress = this.$refs.progress as { openLog : () => void } | undefined;
 
             progress?.openLog();
         },
 
         /**
          * Шаг команды, который достался этому сервису
-         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
-         * @returns {import("../../../common/compose-progress").ComposeTask | null} Шаг или null, если команда его не касалась
+         * @param service Сервис с его контейнерами
+         * @returns Шаг или null, если команда его не касалась
          */
-        matchRunTask(service) {
+        matchRunTask(service : InspectedService) : ComposeTask | null {
             const names = new Set(service.instances.map((instance) => instance.name).filter(Boolean));
             const declared = this.config?.services?.[service.name]?.container_name;
 
@@ -1270,10 +1268,8 @@ export default {
 
             // Так compose называет контейнер сам: имя стека, имя сервиса и номер копии
             const generated = new RegExp(`^${escapeRegExp(this.stackName)}[-_]${escapeRegExp(service.name)}([-_]\\d+)?$`, "i");
-            /** @type {import("../../../common/compose-progress").ComposeTask | null} */
-            let container = null;
-            /** @type {import("../../../common/compose-progress").ComposeTask | null} */
-            let image = null;
+            let container : ComposeTask | null = null;
+            let image : ComposeTask | null = null;
 
             for (const task of this.runTasks) {
                 if (task.kind === "container" && (names.has(task.name) || generated.test(task.name))) {
@@ -1289,11 +1285,10 @@ export default {
 
         /**
          * Действие над одним сервисом
-         * @param {"startService" | "stopService" | "restartService" | "updateService"} event Имя события
-         * @param {string} serviceName Сервис
-         * @returns {void}
+         * @param event Имя события
+         * @param serviceName Сервис
          */
-        runService(event, serviceName) {
+        runService(event : "startService" | "stopService" | "restartService" | "updateService", serviceName : string) {
             const generation = this.requests.generation;
             const target = this.runTarget();
 
@@ -1317,6 +1312,31 @@ export default {
             this.run("deleteStack");
         },
 
+        /**
+         * Остановить сервис; сервис самой панели - только после подтверждения
+         * @param serviceName Сервис
+         */
+        stopService(serviceName : string) {
+            if (serviceName === this.panelService) {
+                this.panelStop = { event: "stopService",
+                    service: serviceName };
+                return;
+            }
+            this.runService("stopService", serviceName);
+        },
+
+        /** Подтвержденная остановка панели */
+        confirmPanelStop() {
+            const stop = this.panelStop;
+
+            this.panelStop = null;
+            if (stop?.event === "stopService") {
+                this.runService("stopService", stop.service);
+            } else if (stop) {
+                this.run("stopStack");
+            }
+        },
+
         /** Вывод стека живет во вкладке журнала этой же страницы */
         openLogs() {
             this.$router.push(this.logsUrl);
@@ -1329,16 +1349,15 @@ export default {
          * же причине его нельзя доскроллить: у последней строки таблицы меню уходило за
          * нижний край окна, и часть действий была недоступна вовсе. Сторона выбирается по
          * свободному месту, а если его мало с обеих сторон - меню прокручивается внутри себя.
-         * @param {Event} event Раскрытие или закрытие details
-         * @returns {void}
+         * @param event Раскрытие или закрытие details
          */
-        placeServiceMenu(event) {
+        placeServiceMenu(event : Event) {
             const details = event.target instanceof HTMLDetailsElement ? event.target : null;
             this.positionServiceMenu(details);
         },
 
-        /** @param {HTMLDetailsElement | null} details Open service menu to position. */
-        positionServiceMenu(details) {
+        /** @param details Open service menu to position. */
+        positionServiceMenu(details : HTMLDetailsElement | null) {
             const menu = details?.querySelector("div");
             const trigger = details?.querySelector("summary");
 
@@ -1368,14 +1387,14 @@ export default {
 
         /**
          * Dismiss menus outside their bounds without accumulating per-open listeners.
-         * @param {Event} event Pointer, keyboard, scroll or resize event
-         * @returns {void}
+         * @param event Pointer, keyboard, scroll or resize event
          */
-        dismissServiceMenus(event) {
+        dismissServiceMenus(event : Event) {
             if (event instanceof KeyboardEvent && event.key !== "Escape") {
                 return;
             }
-            for (const menu of this.$el.querySelectorAll(".service-menu[open]")) {
+            const root = this.$el as HTMLElement;
+            for (const menu of root.querySelectorAll<HTMLDetailsElement>(".service-menu[open]")) {
                 if (event.type === "scroll" || event.type === "resize") {
                     this.positionServiceMenu(menu);
                     continue;
@@ -1386,8 +1405,8 @@ export default {
             }
         },
 
-        /** @param {Event} event Menu action or Escape. */
-        closeServiceMenu(event) {
+        /** @param event Menu action or Escape. */
+        closeServiceMenu(event : Event) {
             const target = event.target instanceof Element ? event.target : null;
 
             target?.closest("details")?.removeAttribute("open");
@@ -1396,10 +1415,9 @@ export default {
         /**
          * Shell контейнера открывается сессией во вкладке терминала. Просьба - новый
          * объект, иначе повторный выбор того же сервиса ничего бы не изменил
-         * @param {string} serviceName Сервис
-         * @returns {void}
+         * @param serviceName Сервис
          */
-        openShell(serviceName) {
+        openShell(serviceName : string) {
             this.shellRequest = { serviceName,
                 shell: "sh",
                 at: Date.now() };
@@ -1409,10 +1427,10 @@ export default {
         /**
          * Расход и аптайм сервиса: память из docker stats, время работы из строки
          * состояния докера. Ничего не выдумывается: нет данных - нет подписи.
-         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
-         * @returns {string} Память и аптайм через точку
+         * @param service Сервис с его контейнерами
+         * @returns Память и аптайм через точку
          */
-        usageLabel(service) {
+        usageLabel(service : InspectedService) : string {
             const memory = service.instances
                 .map((instance) => this.dockerStats[instance.name]?.MemUsage)
                 .filter((value) => !!value)
@@ -1441,10 +1459,10 @@ export default {
 
         /**
          * Состояние сервиса словами: пока команда идет, его называет compose
-         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
-         * @returns {string} Состояние словами
+         * @param service Сервис с его контейнерами
+         * @returns Состояние словами
          */
-        stateLabel(service) {
+        stateLabel(service : InspectedService) : string {
             const task = this.runTaskByService[service.name];
 
             // Пока команда идет, состояние называет compose: он знает про сервис
@@ -1476,10 +1494,10 @@ export default {
 
         /**
          * Состояние сервиса именем системы: вид чипа один на весь интерфейс
-         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
-         * @returns {string} Имя состояния
+         * @param service Сервис с его контейнерами
+         * @returns Имя состояния
          */
-        serviceState(service) {
+        serviceState(service : InspectedService) : string {
             const task = this.runTaskByService[service.name];
 
             if (task) {
@@ -1499,25 +1517,25 @@ export default {
 
         /**
          * Над сервисом прямо сейчас работают: точка чипа дышит, пока шаг не готов
-         * @param {import("../stack-services").InspectedService} service Сервис с его контейнерами
-         * @returns {boolean} Идет ли работа
+         * @param service Сервис с его контейнерами
+         * @returns Идет ли работа
          */
-        isServiceBusy(service) {
+        isServiceBusy(service : InspectedService) : boolean {
             return this.runTaskByService[service.name]?.state === "working";
         },
 
         /**
          * Замечание о сервисе одной строкой
-         * @param {import("../../../common/compose-status").StackStatusIssue} issue Замечание
-         * @returns {string} Строка для списка
+         * @param issue Замечание
+         * @returns Строка для списка
          */
-        issueText(issue) {
+        issueText(issue : StackStatusIssue) : string {
             const detail = issue.detail ? ` (${issue.detail})` : "";
             const name = issue.name ? ` / ${issue.name}` : "";
             return `${issue.service}${name}: ${this.$t(issue.reason)}${detail}`;
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>
@@ -1990,6 +2008,7 @@ export default {
 .tab-enter-active { transition: opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease); }
 .tab-enter-from { opacity: 0; transform: translateY(6px); }
 .tab-leave-active { display: none !important; }
+.panel-stack-note { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 .git-update-notice { display: flex; align-items: center; gap: var(--gap-md); border: 1px solid color-mix(in srgb, var(--state-changes) 15%, var(--line-hair)); background: color-mix(in srgb, var(--state-changes) 5%, var(--surface-base)); border-radius: var(--radius-panel); padding: var(--gap-md) var(--gap-lg); }
 .git-update-notice > svg { color: var(--state-changes); }
 .git-update-notice strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }

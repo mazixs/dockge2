@@ -11,12 +11,14 @@
         </select>
     </label>
 </template>
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
-export default {
+import type { AgentInfo } from "../mixins/socket";
+export default defineComponent({
     components: { InterfaceIcon },
     computed: {
-        remoteServers() {
+        remoteServers() : AgentInfo[] {
             return Object.values(this.$root.agentList).filter(server => server.endpoint);
         },
 
@@ -24,7 +26,7 @@ export default {
          * Имя выбранного сервера целиком - оно же уходит в подсказку
          * @returns {string} Имя сервера
          */
-        selectedServerLabel() {
+        selectedServerLabel() : string {
             const endpoint = this.$root.selectedEndpoint;
 
             if (endpoint === null || endpoint === undefined) {
@@ -40,12 +42,13 @@ export default {
         },
     },
     methods: {
-        selectServer(event) {
-            this.$root.selectedEndpoint = event.target.value === "*" ? null : event.target.value;
+        selectServer(event : Event) {
+            const { value } = event.target as HTMLSelectElement;
+            this.$root.selectedEndpoint = value === "*" ? null : value;
             this.$router.push("/");
         },
     },
-};
+});
 </script>
 <style scoped lang="scss">
 .server-switcher { display: inline-flex; align-items: center; gap: var(--gap-sm); margin: 0; color: var(--text-muted); min-width: 0; }

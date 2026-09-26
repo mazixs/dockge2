@@ -13,6 +13,7 @@ export interface ComposePsEntry {
     ExitCode? : number | string;
     Status? : string;
     Labels? : string;
+    Image? : string;
 }
 
 export interface ContainerInstanceStatus {
@@ -24,6 +25,8 @@ export interface ContainerInstanceStatus {
     health : string;
     exitCode : number | null;
     statusText : string;
+    /** Image reference the container runs, empty when Docker did not say */
+    image? : string;
     isOneShot : boolean;
     /** Reason why this instance needs attention, null when it is fine */
     issue : string | null;
@@ -52,6 +55,9 @@ export interface DockerPsRaw {
     Labels? : string;
     Name? : string;
     Names? : string;
+    /** Full id with `--no-trunc` */
+    ID? : string;
+    Image? : string;
 }
 
 /**
@@ -169,6 +175,9 @@ export function fromDockerPs(raw : DockerPsRaw) : ComposePsEntry & { project : s
     const health = normaliseHealth(raw.HealthStatus);
     if (health !== "") {
         entry.Health = health;
+    }
+    if (raw.Image) {
+        entry.Image = raw.Image;
     }
 
     return entry;
@@ -314,6 +323,9 @@ export function normaliseInstance(entry : ComposePsEntry, oneShotServices : Read
         isOneShot,
         issue: null,
     };
+    if (entry.Image) {
+        instance.image = entry.Image;
+    }
 
     instance.issue = resolveInstanceIssue(instance);
 
@@ -510,6 +522,8 @@ export interface ServiceSummary {
     /** running | attention | stopped | unknown */
     state : string;
     isOneShot : boolean;
+    /** Image of its first container, absent when none reported one: the list searches by it */
+    image? : string;
 }
 
 /**
@@ -537,40 +551,45 @@ export function summariseServices(
 
     return names.map((name) => {
         const own = instances.filter((instance) => instance.service === name);
-        const isOneShot = oneShotServices.has(name) || own.some((instance) => instance.isOneShot);
-
-        // Nothing to judge: a stack without containers was never started, and a service
-        // without containers inside a running stack is stopped, not healthy
-        if (own.length === 0) {
-            return { name,
-                state: instances.length === 0 ? "unknown" : "stopped",
-                isOneShot };
+        const summary : ServiceSummary = { name,
+            state: serviceState(own, instances.length),
+            isOneShot: oneShotServices.has(name) || own.some((instance) => instance.isOneShot) };
+        const image = own.find((instance) => instance.image)?.image;
+        if (image) {
+            summary.image = image;
         }
-
-        // Output that cannot be read is unknown, not broken: the stack chip says the
-        // same, and calling it attention would invent a problem nobody can act on
-        if (own.every((instance) => instance.issue === "unknownState")) {
-            return { name,
-                state: "unknown",
-                isOneShot };
-        }
-
-        if (own.some((instance) => instance.issue)) {
-            return { name,
-                state: "attention",
-                isOneShot };
-        }
-
-        if (own.some((instance) => instance.state === "running" && instance.health !== "unhealthy")) {
-            return { name,
-                state: "running",
-                isOneShot };
-        }
-
-        return { name,
-            state: "stopped",
-            isOneShot };
+        return summary;
     });
+}
+
+/**
+ * Judge one service by its containers, failing closed
+ * @param own Containers of this service
+ * @param stackContainers How many containers the whole stack has
+ * @returns running, attention, stopped or unknown
+ */
+function serviceState(own : readonly ContainerInstanceStatus[], stackContainers : number) : string {
+    // Nothing to judge: a stack without containers was never started, and a service
+    // without containers inside a running stack is stopped, not healthy
+    if (own.length === 0) {
+        return stackContainers === 0 ? "unknown" : "stopped";
+    }
+
+    // Output that cannot be read is unknown, not broken: the stack chip says the
+    // same, and calling it attention would invent a problem nobody can act on
+    if (own.every((instance) => instance.issue === "unknownState")) {
+        return "unknown";
+    }
+
+    if (own.some((instance) => instance.issue)) {
+        return "attention";
+    }
+
+    if (own.some((instance) => instance.state === "running" && instance.health !== "unhealthy")) {
+        return "running";
+    }
+
+    return "stopped";
 }
 
 /**

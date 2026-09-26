@@ -186,7 +186,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 ### Преобразование Docker Run → Compose
 
-- Текущая зависимость `composerize@1.7.6` используется в `backend/socket-handlers/main-socket-handler.ts`; сначала провести corpus-аудит, а не менять её формально.
+- Текущая зависимость `composerize@1.7.6` используется в `backend/socket-handlers/main-socket-handler.ts`; сначала провести corpus-аудит, а не менять её формально. Заменена собственным конвертером 2026-09-26 по итогам корпуса, см. журнал.
 - Проверить преобразование ports, mounts, env/env-file, restart, network, healthcheck, user, capabilities, devices, labels, `--init`, entrypoint и command; неподдержанные параметры должны давать предупреждение, а не тихо исчезать.
 - Исправить текущую уязвимую к потере данных операцию `split("\\n").slice(1)`: удалять только известный служебный top-level `name`, если он действительно добавлен генератором.
 - После преобразования парсить YAML и запускать `docker compose config --quiet` в изолированном каталоге без запуска контейнеров. Сгенерированный текст показывать в preview с предупреждениями и сохранять только после явного действия.
@@ -267,12 +267,12 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 Перенесено из удаленного плана product-dashboard (Tasks 3, 5, 6, 7, 9); состояние сверено с кодом 2026-09-26.
 
-1. **Масштабируемый список и связи сервисов.** Есть: поиск по стеку и сервису, пять фильтров с `?filter=` в URL, группировка по серверу, свертка неуправляемых проектов (`StackList.vue`). Открыто: постраничный вывод списка до 50 строк на сервер, как в `StabilityDashboard`, или замер, доказывающий, что он не нужен (порог - 200 ms на первую отрисовку 500 строк; виртуализация, кандидат `@tanstack/vue-virtual`, только при превышении и после отдельного аудита). Поиск еще по образу и серверу, строка поиска в URL вместе с фильтром. Экран связей только для чтения: `depends_on`, сети, опубликованные порты, тома, Compose secrets - по фактическому compose и Docker, а не по совпадению имен; открытие не пишет YAML и не расширяет права. Ключ строки: endpoint + stack + service + containerId. Массовые start/stop/restart - только по согласованию, для выбранных управляемых стеков, с предпросмотром и результатом по каждому. Приемка: e2e на поиск, фильтр "внимание", сохранение query, клавиатуру и телефон; у неуправляемого стека нет действий.
-2. **Контейнеры вне `stacksDir`.** Есть: внешние Compose-проекты видны свернутыми и только для чтения, сервер отказывает в действиях (`container-operations.ts`, `docker-socket-handler.ts`, `terminal-socket-handler.ts`); standalone-контейнеры есть только в обзоре стабильности. Открыто: внешние проекты видны всегда, без настройки, - решить, нужен ли переключатель `all-readonly` или показ по умолчанию принят, и записать решение. Источник классифицировать по меткам `com.docker.compose.project`, `.service`, `.project.working_dir`, `.project.config_files`: managed / external-compose / standalone / unknown, никогда по имени. Standalone-контейнеры - в списке с источником и last seen, `docker inspect` только при открытии подробностей. `all-control` - отдельная настройка владельца, по умолчанию выключена; start/stop/restart требуют capability, проверки роли и endpoint и подтверждения; delete/kill/exec - только после отдельной модели доступа. Env и secret внешних проектов не читаются. Приемка: Docker-тест с проектом во временной папке вне `stacksDir`.
-3. **Собственный контейнер панели.** Есть: консоль включает владелец с паролем; проект панели скрыт из списка и истории (`readOwnProjectName` в `stack-state.ts`); обновление из веба - работа 0.0.14. Открыто: если compose панели лежит внутри `stacksDir`, это обычный стек с рабочими stop/down/delete. Опознавать себя по ID контейнера или метке, не по имени; down/delete для себя запретить, stop - только с предупреждением о потере интерфейса. Карточка панели только для чтения (например, в "О программе"): образ и digest, здоровье, uptime, число перезапусков, монтирования, docker.sock с пояснением риска; нечитаемое - "неизвестно". Приемка: тест для размещения и вне, и внутри `stacksDir`.
-4. **Corpus-аудит `docker run` -> Compose.** Есть: конвертер `composerize@1.7.6`, отчет по флагам (`common/docker-run-flags.ts`), возврат команды, предпросмотр, сохранение без запуска. Открыто: корпус `test/fixtures/docker-run/` - ports, volumes, env/env-file, restart, user, network, healthcheck, read-only, cap-add/drop, devices/GPU, labels, `--init`, `--entrypoint`, command/args, неизвестный флаг. Для каждой фикстуры записать, что обязано сохраниться, что дает предупреждение и что нельзя добавлять (default network, `version`, privileged); каждый вывод прогонять через `docker compose config --quiet` во временном каталоге. Ограничить размер входа события `composerize`. По итогам решить: оставить `composerize` или заменить.
-5. **Итоговая UX/accessibility/performance-проверка.** Есть: визуальные эталоны, e2e, обход Tab по маршрутам, контраст в тестах токенов, `npm run test:performance`; замер 2026-09-22 на 500 контейнерах (CPU x4): p95 фильтра 510.8 ms при полном рендере и 108.9 ms при страницах по 50 строк. Открыто: 2000 контейнеров и список из сотен стеков - обновление снимка не перерисовывает весь список, слушатели не копятся. Матрица состояний: загрузка, пусто, устарело, Docker недоступен, отказ в правах, ATTENTION, UNKNOWN, нет истории. Масштаб 200%, длинные имена. При 1440x1000 видны первые пять стеков без прокрутки; на 390x844 заголовок и первое поле формы создания видны на первом экране.
-6. **Переименование агента.** Серверный `updateAgent` есть (`manage-agent-socket-handler.ts`), интерфейса нет.
+1. **Масштабируемый список и связи сервисов.** Сделано в 0.0.14, см. журнал 2026-09-26 "list, containers outside the stacks, the panel's own stack". Открыто одно: массовые start/stop/restart - только по согласованию, для выбранных управляемых стеков, с предпросмотром и результатом по каждому; без согласования не делать.
+2. **Контейнеры вне `stacksDir`.** Сделано в 0.0.14, там же. Открыто: delete/kill/exec для внешних и standalone-контейнеров - только после отдельной модели доступа.
+3. **Собственный контейнер панели.** Сделано в 0.0.14, там же.
+4. **Corpus-аудит `docker run` -> Compose.** Сделано в 0.0.14: корпус из 51 фикстуры, `composerize` заменен собственным конвертером, см. журнал 2026-09-26 "docker run converter of our own".
+5. **Итоговая UX/accessibility/performance-проверка.** Сделано в 0.0.14, см. журнал 2026-09-26 "the final UX, accessibility and performance check", вместе с найденными по ходу английскими отказами сервера.
+6. **Переименование агента.** Сделано в 0.0.14: кнопка в строке агента на Settings -> Agents.
 
 ### Эксплуатационная приемка (бэклог, 2026-09-26)
 
@@ -282,21 +282,9 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - **Обновление на настоящем хосте.** Обрыв питания или SIGKILL и заполнение диска во время cutover; перезагрузка хоста после успешного и неудачного обновления - сохраняются ли идентичность установки и статус восстановления. Инъекции в `extra/updater/engine_test.go` проверяют решения журнала, но не долговечность файловой системы, Docker и SQLite. Гейт релиза гоняет arm64 только под QEMU.
 - **Production deployment.** Bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy, откат образа - на выделенном хосте, а не на стенде.
 
-### Техдолг из ревью и аудитов (бэклог, 2026-09-26)
+### Техдолг из ревью и аудитов (закрыт 2026-09-26)
 
-Перенесено из удаленных ревью 2026-09-20 и аудита 2026-09-19; код сверен 2026-09-26.
-
-- **Дедлайн ack.** Около 19 вызовов `emitAgent` с callback ждут без срока (`SecretEditor.vue`, `gitListBranches`, `abortCompose`, `checkMainTerminal`, `requestStackList`, `getDockerNetworkList`, терминал). Перевести на `emitAgentRequest`; после потери ack deploy/update перечитывать состояние, а не повторять.
-- **Причина отказа MCP в настройках.** `/api/mcp` отвечает одинаковым 403 на чужой Origin и на отсутствие активного владельца; вернуть код причины, `Mcp.vue` должен назвать действие вместо общего `mcpLoadDenied`.
-- **Причина отказа в Git-потоке.** `validate()`/`result()` в `git-socket-handler.ts` глотают причину отказа `compose config` и deploy. Писать ее в серверный лог; клиенту - прежние ключи, вывод Docker не отдавать (в нем бывают учетные данные из URL).
-- **Синхронное чтение.** `composeYAML`/`composeENV` в `backend/stack.ts` читают файлы синхронно - заменить асинхронным снимком. Глобальное состояние (`Settings.cacheList`, `Terminal.terminalMap`, `Database`) постепенно привязать к экземпляру сервера; крупные модули дробить только вместе со сменой сценария.
-- **Покрытие фронтенда.** SFC и `frontend/src/mixins` вне `.c8rc.json`; выбрать инструмент тестов компонентов. Ленивые chunk бюджетом не ограничены; `extra/check-bundle.ts` делит на 1024, а пишет `kB`.
-- **Заголовки безопасности.** CSP, `X-Frame-Options`, `nosniff` не выставляются; строгий CSP - спайк с `EditorView.cspNonce`. Страница о модели угроз Docker socket: сокет равен root, `:ro` его не ограничивает.
-- **Поставка.** npm `min-release-age`, npm в dependabot, shellcheck для `install.sh`, визуальный набор в CI после стабилизации эталонов в образе Playwright.
-- **Мажорные обновления по одному.** TypeScript 6 как мост (7 не запускает `vue-tsc`), vue-router 5, Express 5 до конца поддержки 4.x в октябре 2026 (маршруты `${AUTH_BASE_PATH}/*` и `app.get("*")`), `@types/node`. Рантайм образа `node --import tsx` сравнить с нативным снятием типов Node 24. Без новой причины не рассматривать `node:sqlite` вместо `better-sqlite3`, Vue Vapor и замену Express.
-- **Тестовый стенд.** Rootless-демон Docker для интеграционных тестов и замеров на 500/2000 контейнерах. `test/e2e/teardown.ts` останавливает `e2e-files` через `-f compose.yaml`, а spec файлов меняет выбор compose/env - контейнер и сеть приходилось удалять руками; spec прогресса зависит от окружения из spec файлов и в одиночку падает.
-- **`docker events` вместо опроса** - необязательно. Замеры 2026-09-19: тик 85-155 ms (около 0.85 ms на контейнер), событие приходит за 1.88 ms против 5 s опроса. Нужен автомат с переподпиской и сверкой.
-- **Мелочи.** `"mysql"` в `DBConfig.type`; `Database.getSize()` и `Database.shrink()` вызываются только из тестов; 87 ключей `en.json` не в `camelCase`; `Cmd+V` в терминале проверен только логикой обработчика (`metaKey`), CI идет на Linux; перевыпуска MCP-ключа с перекрытием нет - создать новый и отозвать старый.
+Все пункты ревью 2026-09-20 и аудита 2026-09-19 закрыты в 0.0.14: сделанное и решения "не делать" с причинами - в журнале 2026-09-26 "technical debt from the reviews and audits, closed for 0.0.14". Список пунктов до закрытия - в истории этого файла.
 
 ## Текущее состояние
 
@@ -326,18 +314,19 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [x] Консоль, статусы, Compose-файлы и Git-деплой: вставка в терминал, отдельная shell-сессия `sh`/`bash`, статус `ATTENTION` с worker/init-правилами, основной Compose-файл, env-файлы, `.secret` и Compose secrets, сохранение исходного YAML с явным `-f` и `config --quiet`, браузерные и Docker-тесты в CI.
 - [x] UX baseline, блокирующая ошибка Vue I18n, выбор направления "Знакомый Dockge".
 - [x] Контракт общего обзора, dashboard без выбранного агента, история доступности и стабильности с retention 30 дней.
-- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.13`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
-- [ ] Масштабируемый список и связи сервисов. Есть поиск, фильтры и свертка неуправляемых проектов; нет постраничного вывода списка и экрана связей. Пункт 1.
-- [ ] Контейнеры вне `stacksDir`. Внешние Compose-проекты уже видны только для чтения, но без настройки видимости, классификации по меткам и standalone-контейнеров в списке. Пункт 2.
-- [ ] Собственный контейнер панели. При стандартной установке проект панели скрыт, но compose панели внутри `stacksDir` остается обычным стеком с рабочими stop/down/delete. Пункт 3.
-- [ ] Corpus-аудит `docker run` -> Compose. Конвертер и отчет о флагах работают, корпуса фикстур нет. Пункт 4.
-- [ ] Итоговая UX/accessibility/performance-проверка. 500 контейнеров замерены 2026-09-22; 2000 контейнеров, сотни стеков и матрица состояний не проверены. Пункт 5.
+- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14-rc.1`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
+- [x] Масштабируемый список и связи сервисов: поиск по образу и серверу, `?q=` в адресе, постраничный вывод, связи только для чтения. Массовые действия не согласованы и остаются в пункте 1.
+- [x] Контейнеры вне `stacksDir`: классификация по меткам, standalone-контейнеры в списке, страница контейнера, управление по настройке владельца. Пункт 2.
+- [x] Собственный контейнер панели: опознание по ID, запрет down/delete/recreate, карточка в "О программе". Пункт 3.
+- [x] Переименование агента в интерфейсе. Пункт 6.
+- [x] Corpus-аудит `docker run` -> Compose: корпус из 51 фикстуры с проверкой через `docker compose config`, `composerize` заменен собственным конвертером. Пункт 4.
+- [x] Итоговая UX/accessibility/performance-проверка: 2000 контейнеров и 300 стеков под CPU x4, матрица состояний в `test/visual/state-matrix.spec.ts`, Lighthouse accessibility 100 на шести экранах, отказы сервера переведены на ключи каталога.
 - [x] Better Auth: отдельный аудит и миграция после стабилизации Stack/Compose/YAML.
-- [ ] Строгий TypeScript во Vue SFC: из 52 компонентов 2 на `lang="ts"` и 6 с `@ts-check`; `check-vue` уже входит в `npm run check`. Покрытие SFC и mixins - в разделе "Техдолг из ревью и аудитов".
+- [x] Строгий TypeScript во Vue SFC: все компоненты со скриптом на `lang="ts"`, `vue-tsc` со `strictTemplates` в `npm run check`, возврат к JavaScript ловит `test/frontend/sfc-type-check.test.ts`.
 - [x] Миграция vue-i18n с Legacy API mode на Composition API mode.
 - [x] Готовность к прод-тесту: зеленый e2e, бренд и адреса без upstream, фиксация тега, чистый образ, кэш статики, раздел README о развертывании; CI зеленый, свежий клон проходит `npm run check`.
 - [ ] Бэклог: эксплуатационная приемка - малый хост, обновление при сбоях на настоящем хосте, production deployment. Постановка в разделе "Эксплуатационная приемка".
-- [ ] Бэклог: техдолг из ревью и аудитов 2026-09-19 и 2026-09-20 - дедлайн ack, причины отказов, заголовки безопасности, поставка, мажорные обновления. Постановка в разделе "Техдолг из ревью и аудитов".
+- [x] Техдолг из ревью и аудитов 2026-09-19 и 2026-09-20 закрыт в 0.0.14, см. журнал 2026-09-26.
 - [ ] Бэклог: языки интерфейса - доперевод девяти каталогов с 14-17%, заведение хинди и бенгальского, отдельно RTL для арабского и урду. Постановка в разделе "Языки интерфейса"; не начинать до ответа на вопрос о том, кто переводит.
 - [ ] Бэклог: остаток документации на английский - `docs/design-system.md` и комментарии в коде. Низкий приоритет, частичный русский признан приемлемым.
 - [ ] Бэклог: сохранность стеков - копирование рецепта, томов и дайджестов образов с уровнями на стек. Постановка и открытые вопросы в разделе "Сохранность стеков"; к реализации не приступать до ответа на вопрос о консистентности тома.
@@ -1556,6 +1545,76 @@ Measured against the MCP best practices checklist (the latest specification, SDK
 - No migration: an installation that ran with `DOCKGE_ENABLE_CONSOLE=true` comes up with the console off until an owner turns it on. The `--enableConsole` flag and the "forced" state of `checkMainTerminal` are gone; the gate is `MainTerminal.enabled()`.
 - The frozen `docker-compose.yml` still passes the variable and the updater still writes `DOCKGE_ENABLE_CONSOLE=false` into a new `.env`; both are harmless now.
 
+## 2026-09-25: updating the panel from the web interface
+
+- Reverses "do not add a Socket.IO event that starts an update from the browser"
+  (Task 6, step 2 of the upstream fixes plan, deleted 2026-09-26) at the user's request. That rule was written for
+  `git pull` plus `docker compose`. The verified updater takes a version and installs only a release
+  signed by the release workflow, and an owner already reaches the host through compose.
+- Decomposition: `docs/panel-update-statechart.md` (invariants, updater contract, observer,
+  page statechart, scenarios; moved out of `docs/plans/` once implemented), reviewed independently
+  before implementation. Shared contract:
+  `common/panel-update.ts`.
+- The panel never runs `docker compose up` on itself. It starts a one-shot helper container from its
+  own image (docker CLI and compose plugin inside) that runs the installed `<dir>/.dockge2/update`.
+  The helper is outside the Compose project, `--restart no`, not removed on exit, with fixed names per
+  kind (`dockge2-update-<project>-preview|apply|status`) so a second one is refused atomically, and
+  the `json-file` log driver so its output survives. The updater keeps doing the whole cutover.
+- The installation directory comes from the `com.docker.compose.project.working_dir` label of the
+  panel's own container. The helper mounts it and the data directory read-only, `.dockge2`, host
+  `/tmp` (lock and staging) and the Docker socket writable, at identical paths. `otherWriters` skips
+  read-only binds, so the updater needs no self-exclusion and the helper cannot damage the data. The
+  frozen `docker-compose.yml` does not change.
+- Updater changes: `--progress json` (a line per phase, recovery phases included, a preview line on a
+  dry run, a journal line with `--status`, exactly one result line on every exit path, `no-change` as
+  its own outcome); `--restore-on-failed-start`, which restores the verified stopped-data snapshot when
+  the target never became ready and the schema changed, in a nested container so the helper stays
+  read-only on the data - the schema hash covers `package-lock.json`, so without it a rollback would
+  almost never be automatic; a persistent Cosign trust root under `.dockge2`.
+- The server keeps no update state in memory: it is the thing being replaced. The truth is the helper
+  container (labels: request id, kind, from, to, start) and its JSON lines, derived fail closed. A
+  helper that left no result line is resolved by a `status` helper reading the journal. Cancel is
+  SIGTERM and only before `downloaded`; a running helper is never stopped or removed.
+- The page runs the statechart from the root of the application (the About screen unmounts on
+  `needAuth`), with a Progress region (`Submitting`, `Preparing`, `Cancelling`, `Cutover`,
+  `Verifying`) and a Link region (`Online`, `NeedAuth`, `Offline.Waiting`, `Offline.Overdue`). While
+  running it suppresses the connection-lost banner, the reloads on `info.version` and `refresh`, and
+  preload-error reloads, and keeps the operation in `sessionStorage`. "Updated" needs the updater's
+  `success` for this request and the answering panel on the target version - both, never either.
+- Events: `panelUpdateStatus` for every signed-in user (owners also get the path and errors);
+  `panelUpdatePreview`, `panelUpdateApply` (password, and a fresh preview of the same version),
+  `panelUpdateCancel`, `panelUpdateDismiss` for owners. None is an agent event, in the operator or
+  agent allowlists, or an MCP tool, and a test keeps it so.
+- Tests: the reducer by table and by a model check (every sequence of five events, sampled sequences
+  of seven: the full search to seven does not fit in memory); the contract parser and derivation;
+  the observer with an injected Docker runner; the updater in Go; Docker integration with a fake
+  launcher; in the release gate a dry run and a same-version run through the helper. The first real
+  cutover from the page is 0.0.14 -> 0.0.15 on the review VPS; reaching 0.0.14 still takes one update
+  from the host.
+- The hint on Settings -> About is fixed with it: the command was relative, had no sudo or
+  `--dry-run`, and sent legacy installations to the README although the guide is `docs/updating.md`.
+
+## 2026-09-26: review of the panel self-update
+
+An independent review (`docs/plans/2026-09-26-hfsm-update-review.md`, deleted once closed)
+reproduced four defects; all four are fixed before 0.0.14 with a regression test each, and each
+test fails without its fix.
+
+- R1 (blocked the release): `--resume` after an automatic restore ran the target again over the
+  restored data, and a later rollback skipped the copy because the restore markers belong to the
+  operation id. `--resume` now refuses once `RestoreData` is recorded or the failed-data directory of
+  the operation exists; `--rollback --restore-data` finishes it.
+- R2: a timed-out `docker run --rm` only killed the client; the restore container went on writing.
+  The updater removes it by name on a deadline of its own; when it cannot confirm that, the journal
+  stays `rolling-back` instead of `recovery-required`. A Go test against the real daemon, opt-in with
+  `DOCKGE_DOCKER_INTEGRATION=1`, repeats the reviewer's probe.
+- R3: the journal line did not carry `restoredData`, and the page read the missing value as "data not
+  touched". The line carries it for `recovered`; without it the page says nothing about the data.
+- R4: `Preview.Checking` had no deadline. It now asks for the status after a minute online without
+  news and shows that the check takes longer; the model check asserts I2 for it.
+- Not done here, as the review suggests: a real version change through the helper with a failed
+  target after its migration, on a separate environment - still the first cutover of 0.0.15.
+
 ## 2026-09-26: documentation cleanup
 
 - Deleted from the tree: 22 finished plans, audits and reviews in `docs/plans/` and all of
@@ -1577,3 +1636,194 @@ Measured against the MCP best practices checklist (the latest specification, SDK
 - Privacy pass over `docs/`: no names, contacts, hosts, local paths or keys; the screenshots show
   invented data only. The 2026-09-22 privacy review found one gitleaks match in history, the RFC 6238
   test vector of a removed TOTP test, which is not a secret.
+
+## 2026-09-26: list, containers outside the stacks, the panel's own stack
+
+Items 1, 2, 3 and 6 of "Интерфейс и Docker-обзор: открытые задачи", shipped in 0.0.14.
+
+- The list searches the image of each service and the server name as well. The search text lives in
+  `?q=` next to `?filter=`, and every link inside the list keeps both, so a narrowed list survives
+  opening a stack and a reload. The rules are in `frontend/src/stack-list-model.ts`, tested without
+  a browser.
+- Each server group shows 50 rows and a "Show N more" button after them; the open row is shown even
+  past the limit. Not prev/next pages: a list is scanned from the top, and a page number means
+  nothing in it. No virtualisation: with 50-row pages the 2026-09-22 measurement at 500 containers
+  gave a p95 of 108.9 ms against 510.8 ms for the full render, under the 200 ms threshold, and the
+  model filters and sorts 500 rows in under 16 ms.
+- Relations are read only, in the stack inspector. A stack of this panel is read from
+  `docker compose config --format json` of its own files, so stopped services and override files
+  count; a project the panel does not manage, from `docker inspect` of its containers: the
+  `depends_on` label, networks, ports, mounts, secrets as mounts under `/run/secrets`. The
+  environment never leaves the server, and a Compose error is logged as a fact only, because it can
+  quote interpolated values. `stackRelations` is an operator event, since viewers have no access to
+  files. Each running container links to its page.
+- Mass start/stop/restart is not done: it needs the user's agreement, with a preview and a result per
+  stack. It stays in item 1.
+- A container's source comes from its labels only (`backend/container-source.ts`): managed when the
+  recorded working directory lies directly in the stacks directory, external-compose, standalone
+  without any Compose label, unknown with partial labels. Standalone rows come from the `docker ps`
+  the status tick already runs. `StandaloneInventory` keeps them between readings, so a Docker that
+  stops answering turns them unknown with their last-seen time instead of hiding them. `docker
+  inspect` runs only when a container page opens.
+- External projects are always shown, without an `all-readonly` switch: seeing them adds no
+  capability (no actions, no files, no environment), and hiding them made the host look emptier than
+  it is. The switch is not planned.
+- `all-control` is the owner setting `containerControl`, per server, off by default, turned on with
+  the password. It lets operators start, stop and restart external-compose and standalone
+  containers. The server inspects the container again right before the command and refuses managed
+  containers (they go through their stack), unknown ones and the panel's own. Delete, kill and exec
+  wait for their own access model. An older agent sends no standalone rows, so neither the group nor
+  the buttons appear for it.
+- The panel identifies its own container by the id in `/proc/self/mountinfo` and the working
+  directory label, never by name. When its compose file lies in the stacks directory it is a stack of
+  the list, but the server refuses down, delete, start, restart, deploy and update on it with
+  `stackIsPanel`, because all of them recreate or remove the container that runs the command. Stop
+  stays, with a warning that the page goes away with it. Settings -> About has a read-only card:
+  image and digest, health, uptime, restarts, mounts, the Docker socket with its risk; anything Docker
+  does not report is unknown. Tests cover both placements.
+- Agent rename is a button in the agent row over the existing `updateAgent`.
+- Tests: unit tests for the list model, relations, container source and the panel's own container;
+  Docker integration with a project in a temporary directory outside the stacks directory; e2e for
+  search in the address, the attention filter by link, the keyboard, the phone, relations leading to
+  a container page, and a standalone container stopped and started once the owner allows it.
+
+## 2026-09-26: docker run converter of our own
+
+Item 4 of "Интерфейс и Docker-обзор: открытые задачи", shipped in 0.0.14.
+
+- The corpus came first, as planned: `test/fixtures/docker-run/`, each fixture stating what must
+  survive, what is reported and what must not be added. On the 39 initial fixtures `composerize`
+  kept 19, warned on 6 and lost 14, and Compose rejected 5 of its files. That decided the question:
+  `composerize` is replaced by `common/docker-run-compose.ts`.
+- The converter knows every flag of `docker run --help`, about a hundred. Each one is either written
+  to the file or named in the report with its reason (carried, review, dropped); the report no
+  longer guesses from the output of somebody else's converter. It adds no `version`, no default
+  network, no `privileged` without `--privileged` and no `container_name` without `--name`. It writes
+  YAML 1.1 without line wrapping, so `no`, `yes`, `22:22` and `0755` stay quoted strings.
+- Result on the same 39 fixtures: kept 26, warned 10, lost 3, invalid 0, and no fixture got worse. 12
+  more were added: 51 in total, kept 32, warned 11, lost 8, every output accepted by
+  `docker compose config` in a temporary directory without starting anything.
+- Still not carried, on purpose: `-P` (nothing in Compose matches it), unknown flags, flags without a
+  Compose key (`--cidfile`, `--umask`, `--kernel-memory`), and rare ones whose Compose form differs in
+  meaning (`--link`, `--blkio-*`, `--device-*-bps/iops` and a few others). All of them are named in
+  the report. `docker run --unknown nginx echo hi` stays ambiguous: without knowing the flag it
+  cannot tell its value from the image.
+- Named volumes and networks are still written as `external: true`, as before, and the report says
+  they must exist. Writing `name:` would let Compose create them the way `docker run` does, but it
+  changes what an existing workflow gets; not done without a reason from a user.
+- The dependency is gone: 11 packages and about 10.4 MB, 7.7 MB of it `core-js@2`, and
+  `composeverter` had been pinned as `latest`, that is not at all. With 7 packages that became
+  development only, the production install is about 13.4 MB lighter.
+- The event is renamed from `composerize` to `convertDockerRun`, the sheet waits for it 15 seconds,
+  and it recognises `docker container run` as the server does. The input limit of the event stays.
+
+## 2026-09-26: technical debt from the reviews and audits, closed for 0.0.14
+
+Every item of "Техдолг из ревью и аудитов". Where an item was decided rather than built, the reason
+is here, so it is not reopened without a new one.
+
+- **Ack deadlines.** Every request the interface waits on goes through `emitAgentRequest` with a
+  deadline; only `terminalLeave` and `terminalResize` stay fire-and-forget. A deploy or update whose
+  answer is lost rereads the stack state instead of repeating the command.
+- **Refusal reasons.** `/api/mcp` answers `mcpOriginDenied` or `mcpOwnerRequired`, and the MCP
+  settings name the action. The Git flow writes why `compose config` or a deploy refused into the
+  server log, shortened and with credentials cut out; the client keeps the former keys.
+- **Reading files.** `composeYAML` and `composeENV` are read by an asynchronous `loadTexts()`
+  snapshot. Global state (`Settings.cacheList`, `Terminal.terminalMap`, `Database`) moves to the
+  server instance only together with a change of the scenario that uses it; not a task of its own.
+- **Frontend coverage.** `frontend/src/mixins` is inside `.c8rc.json`, and the "Interface state"
+  group of `extra/check-coverage.ts` holds 90%. Components are tested through
+  `test/helpers/sfc.ts`, which runs the options of a component against a context the test controls;
+  rendering is left to Playwright. No component test library: logic that needs testing moves into a
+  `.ts` module c8 counts. `extra/check-bundle.ts` writes KiB and holds each lazy chunk to 480 KiB,
+  160 KiB gzipped.
+- **Security headers.** `backend/security-headers.ts`: CSP with scripts from the panel only,
+  `nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `Referrer-Policy`, COOP. Styles keep
+  `'unsafe-inline'`, because xterm writes `<style>` elements without a nonce, so the
+  `EditorView.cspNonce` spike is not needed. `docs/threat-model.md` explains why the socket is root
+  and `:ro` does not limit it, and lists every path to it, containers outside the stacks and the
+  panel's own container included.
+- **Supply.** `.npmrc` sets `min-release-age=7` (npm 11.10 and later obey it), npm is in Dependabot
+  with cooldowns, CI runs shellcheck on `install.sh` from a pinned image, and the visual suite runs
+  in CI inside the image the references are approved in.
+- **Majors, one at a time.** TypeScript 6.0.3 (exact; 7 does not start `vue-tsc`, which stays on
+  2.2.12, since 3.x reports two false errors in `Compose.vue`). vue-router 5.3.1: route guards
+  return a boolean instead of calling `next`. Express 5.2.1 with `express-static-gzip` 3.0.2: wildcard
+  routes are named (`/*splat`, `/{*splat}`), the MCP SDK's own Express 5 is now deduplicated with
+  ours. `@types/node` follows the Node of the image, 24.
+- **tsx against native type stripping.** Not in 0.0.14. Counted: about 780 relative imports without
+  an extension, 13 classes with parameter properties, 29 type imports used as values, JSON imports
+  without `with`. The order, when it is done: `erasableSyntaxOnly` and `verbatimModuleSyntax`
+  first, then the extensions, then the switch of `node --import tsx` in the image.
+- **Test bench.** `test/e2e/teardown.ts` stops `e2e-files` by project name, whatever compose file
+  a spec chose; the progress spec has a stack of its own and passes alone. A rootless Docker daemon is
+  not introduced: containers are chosen by exact name and project label, the 500/2000 measurements
+  run on the synthetic `DOCKGE_PERF_*` fixture, and CI runners are clean.
+- **`docker events`.** Polling stays at 10 s: the tick costs 85-155 ms. Revisit when a tick grows
+  past about a second.
+- **Small items.** `"mysql"` and `Database.getSize()`/`shrink()` are gone. 87 catalogue keys renamed
+  to camelCase and 13 unused ones removed; `frontend/src/server-message-keys.ts` maps the keys an
+  older agent or the original Dockge still sends (`Saved`, `Deployed`, ...), and
+  `test/frontend/i18n-catalogue.test.ts` holds both the naming and that map. `toastSuccess` and
+  `toastError` take a key and translate it themselves: a text translated before the call was
+  looked up again and shown as an unexpected error. `Cmd+V`: the e2e test passes on Linux without
+  the `metaKey` branch too, so it proves that Meta+V types no stray `v`, not the macOS paste itself;
+  an honest limit. A MCP key is reissued with an overlap: the new secret keeps the servers, stacks,
+  mode and lifetime, the old one works 24 hours more or until its own expiry, the same role and
+  scope checks apply, and the audit records `key_reissue`.
+- **Found on the way.** The ten second round reused the cached list of managed stacks and kept a
+  stack running after its project left Docker, until something dropped the cache; fixed in
+  `Stack.getStackList`, test in `test/backend/stack-list-cache.test.ts`. A race between
+  `bindTerminal` and the first output is fixed through `onAnswer`.
+- **Strict TypeScript in components.** Every component with a script is `lang="ts"` and passes
+  `vue-tsc` with `strictTemplates`; `test/frontend/sfc-type-check.test.ts` keeps a new one from
+  coming back as JavaScript. `Container.vue` now reads its compose page through one typed accessor
+  that fails loudly outside that page instead of reading `undefined`.
+
+## 2026-09-26: the final UX, accessibility and performance check
+
+- **2000 containers, 300 stacks.** `npm run test:performance` on the synthetic fixture, a
+  production build, CPU throttled four times. The filter's p95 is 137.1 ms over 5 cycles and
+  124.7 ms over 40, under the 200 ms bar. Over 32 seconds of snapshots `snapshotChurn` saw no node
+  added or removed in the list or the overview; the 2426 attribute changes in the overview are the
+  `title` of the 48 history buckets, whose window follows the clock, and cause no long task. DOM
+  nodes (9741) and event listeners (386) stay flat after warm-up at 5, 20 and 40 cycles, the heap
+  holds 24.5-26.2 MiB, no page error, pagination works from the keyboard. The fixture now goes up
+  to 5000 containers; stacks and cycles stay capped at 1000.
+- **The state matrix.** `test/visual/state-matrix.spec.ts` checks each state by its words rather
+  than a screenshot: loading, empty, stale, Docker unavailable (a retry, and the list says unknown
+  rather than stopped), attention, no history, a viewer's read-only stack page. Layout: the first
+  five of hundreds of stacks fit 1440x1000, the heading and first field of the create form fit
+  390x844, a long name is shortened with its full text in a title, and at 200% (720x500) neither
+  the list nor a stack page scrolls sideways. `?matrix=` of the scene changes only what the fixture
+  answers.
+- **Lighthouse accessibility** is 100 on the dashboard, a stack, its files, the create form, About
+  and Security. Two findings were fixed: the overview's counters are links, so the active one says
+  `aria-current` instead of `aria-pressed` (RouterLink ignores the query and marked every counter as
+  the current page), and the stack facts lost a `role="list"` that had no list items.
+- **Found on the way.** The panel's container card printed Docker's state word as is; it is
+  translated like the health check. The modal lifecycle probe mounts `Confirm` in an app of its own
+  and now installs i18n, since the dialog translates its own buttons.
+- **Server refusals.** About 40 refusals the interface can provoke were English sentences ("Stack not
+  found", "Unknown service: x") and a translated interface showed them as an unexpected error. They
+  are catalogue keys now, with the file, service or shell as values; `server-message-keys.ts` maps
+  the fixed sentences an older agent or the original Dockge still sends, and a sentence with a name
+  in it still arrives as an unexpected error from such an agent. `i18n-catalogue.test.ts` refuses a
+  new sentence in `ValidationError`; only the protocol checks ("Stack name must be a string") stay
+  English, since a well-formed client never provokes them.
+- **The session read was rate limited.** The full browser suite of 51 tests failed its last four:
+  after 60 session reads from one address with no quiet minute between them, Better Auth answered
+  `/get-session` with 429 until a minute after the last allowed one, and the interface showed "The
+  server did not respond". Its counter resets only after a whole window without a request, so a
+  team behind a proxy without `DOCKGE_TRUST_PROXY`, which shares one bucket, would hit the same
+  wall. `/get-session` is exempt: the signed cookie is the secret and the socket handshake does the
+  same lookup unlimited. Sign-in, setup and TOTP keep their limits; `auth-boundaries.test.ts` reads
+  the session 80 times from one address and fails on the 61st without the exemption.
+
+## 2026-09-26: 0.0.14 goes out as a release candidate first
+
+`v0.0.14-rc.1` is a GitHub prerelease. Every tag so far was stable, so the prerelease branch of
+`release.yml` has never run, and the update from the web interface needs a starting point that
+already carries the new updater. The review VPS reaches rc.1 with the host command, then updates
+from About with **Include beta releases** on, to rc.2 or 0.0.14. `latest` stays on 0.0.13 until
+the stable tag; its notes are `docs/releases/0.0.14.md`, the candidate's `0.0.14-rc.1.md`.

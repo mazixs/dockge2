@@ -1,0 +1,34 @@
+{
+    "description": "Labels survive, including a Traefik rule with backticks and parentheses.",
+    "command": "docker run -d -l com.example.team=infra --label 'traefik.http.routers.web.rule=Host(`example.test`)' nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "labels"
+        ],
+        "values": {
+            "image": "nginx",
+            "labels": [
+                "com.example.team=infra",
+                "traefik.http.routers.web.rule=Host(`example.test`)"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "-l",
+            "--label"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -24,6 +24,10 @@ type Screen = {
     ready : string;
     /** Снимать ли на узкой ширине: на телефоне проверяются экраны с другой раскладкой */
     phone : boolean;
+    /** Что закрыть на снимке: местное время зависит от часового пояса машины */
+    mask? : string[];
+    /** false для оверлея: он закреплен в окне, и ниже окна снимок показал бы страницу без него */
+    fullPage? : boolean;
 };
 
 const screens : Screen[] = [
@@ -67,6 +71,21 @@ const screens : Screen[] = [
         path: "/settings/about?update=available",
         ready: ".settings-page .update-news",
         phone: false },
+    { name: "panel-update-ready",
+        path: "/settings/about?update=available&panelUpdate=ready",
+        ready: ".settings-page .panel-update-flow .preview-title",
+        phone: false,
+        mask: [ ".update-expires" ] },
+    { name: "panel-update-running",
+        path: "/settings/about?update=available&panelUpdate=running",
+        ready: ".panel-update",
+        phone: true,
+        fullPage: false },
+    { name: "panel-update-rolled-back",
+        path: "/settings/about?update=available&panelUpdate=rolled-back",
+        ready: ".panel-update",
+        phone: false,
+        fullPage: false },
     { name: "login",
         path: "/login",
         ready: ".auth-screen",
@@ -98,7 +117,8 @@ for (const screen of screens) {
         await page.addStyleTag({ content: ".scene-mark { display: none }" });
 
         await expect(page).toHaveScreenshot(`${screen.name}.png`, {
-            fullPage: true,
+            fullPage: screen.fullPage ?? true,
+            mask: (screen.mask ?? []).map((selector) => page.locator(selector)),
             animations: "disabled",
             caret: "hide",
             scale: "css",

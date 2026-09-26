@@ -196,30 +196,75 @@ func (e *engine) recoverFailure(o options, state string, op operation, d docker,
 	if started {
 		if err := d.compose(ctx, op.Target.Config, "stop", "--timeout", "30", "dockge"); err != nil {
 			op.Phase = "recovery-required"
-			_ = writeJSON(filepath.Join(state, "operation.json"), op)
+			_ = e.writeJournal(state, op)
 			return fmt.Errorf("update failed; could not stop the target: %w", err)
 		}
 	}
+	if op.Previous != nil && started && op.Previous.Schema != op.Target.Schema && o.restoreOnFailedStart {
+		return e.restoreAfterFailedStart(state, op, d, cause)
+	}
 	if op.Previous == nil || started && op.Previous.Schema != op.Target.Schema {
 		op.Phase = "recovery-required"
-		_ = writeJSON(filepath.Join(state, "operation.json"), op)
+		_ = e.writeJournal(state, op)
 		return fmt.Errorf("update failed: %w; target stopped; inspect the journal and use --rollback --restore-data if the recorded snapshot is required", cause)
 	}
 	if err := d.up(ctx, op.Previous.Config); err != nil {
 		op.Phase = "recovery-required"
-		_ = writeJSON(filepath.Join(state, "operation.json"), op)
-		return fmt.Errorf("update failed (%v); recovery failed: %w", cause, err)
+		_ = e.writeJournal(state, op)
+		return fmt.Errorf("update failed (%w); recovery failed: %w", cause, err)
 	}
 	if err := d.verifyRuntime(ctx, op.Previous.ImageID, op.Previous.Version, op.Previous.Mode == "legacy"); err != nil {
 		op.Phase = "recovery-required"
-		_ = writeJSON(filepath.Join(state, "operation.json"), op)
+		_ = e.writeJournal(state, op)
 		return err
 	}
 	op.Phase = "recovered"
-	if err := writeJSON(filepath.Join(state, "operation.json"), op); err != nil {
+	if err := e.writeJournal(state, op); err != nil {
 		return err
 	}
 	return fmt.Errorf("update failed and previous deployment was recovered: %w", cause)
+}
+
+// restoreAfterFailedStart is --restore-on-failed-start: the target may have migrated the data
+// and is stopped, so the previous deployment comes back only on the verified snapshot. It
+// is the restore of --rollback --restore-data, with its own deadline after the stop.
+func (e *engine) restoreAfterFailedStart(state string, op operation, d docker, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	required := func(err error) error {
+		op.Phase = "recovery-required"
+		_ = e.writeJournal(state, op)
+		return fmt.Errorf("update failed: %w; target stopped; automatic data restore did not complete: %w; inspect the journal and use --rollback --restore-data", cause, err)
+	}
+	binary, err := e.checkRestore(ctx, d, state, op)
+	if err != nil {
+		return required(err)
+	}
+	e.message("Restoring the data snapshot and the previous deployment.")
+	op.RestoreData = true
+	op.Phase = "rolling-back"
+	if err = e.writeJournal(state, op); err != nil {
+		return required(err)
+	}
+	if err = d.restoreSnapshot(ctx, op.Previous.ImageID, binary, op.Previous.DataDir, op.Backup, op.ID); err != nil {
+		// The journal keeps rolling-back while a restore container may still write.
+		if errors.Is(err, errRestoreRunning) {
+			return fmt.Errorf("update failed: %w; target stopped; %w", cause, err)
+		}
+		return required(err)
+	}
+	if err = d.up(ctx, op.Previous.Config); err != nil {
+		return required(err)
+	}
+	if err = d.verifyRuntime(ctx, op.Previous.ImageID, op.Previous.Version, op.Previous.Mode == "legacy"); err != nil {
+		return required(err)
+	}
+	op.Phase = "recovered"
+	if err = e.writeJournal(state, op); err != nil {
+		return err
+	}
+	e.report.restoredData = true
+	return fmt.Errorf("update failed; data snapshot and previous deployment were restored, post-update data kept in %s: %w", failedDataDir(op.Previous.DataDir, op.ID), cause)
 }
 
 func loadOperation(path string) (operation, error) {
@@ -295,7 +340,7 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 			return nil
 		}
 		op.Phase = "failed-before-cutover"
-		return writeJSON(filepath.Join(state, "operation.json"), op)
+		return e.writeJournal(state, op)
 	}
 	if err = validateOperation(state, op); err != nil {
 		return err
@@ -346,14 +391,9 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 	if _, err = d.image(ctx, op.Previous.ImageID); err != nil {
 		return fmt.Errorf("previous local image unavailable; no mutable tag will replace it: %w", err)
 	}
+	binary := ""
 	if o.restoreData {
-		if !op.BackupVerified || !within(state, op.Backup) {
-			return errors.New("no verified data snapshot")
-		}
-		if err = verifySnapshot(op.Backup); err != nil {
-			return err
-		}
-		if err = d.checkSnapshot(ctx, op.Previous.ImageID, op.Backup); err != nil {
+		if binary, err = e.checkRestore(ctx, d, state, op); err != nil {
 			return err
 		}
 	}
@@ -369,45 +409,17 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 	}
 	op.RestoreData = o.restoreData
 	op.Phase = "rolling-back"
-	if err = writeJSON(filepath.Join(state, "operation.json"), op); err != nil {
+	if err = e.writeJournal(state, op); err != nil {
 		return err
 	}
 	if err = d.compose(ctx, op.Target.Config, "stop", "--timeout", "30", "dockge"); err != nil {
 		return err
 	}
 	if o.restoreData {
-		// Keep both directories on the data filesystem. The marker makes a crash
-		// between the two renames recoverable without overwriting newer data.
-		data := op.Previous.DataDir
-		staged := data + ".dockge-restore-" + op.ID
-		failed := data + ".dockge-failed-" + op.ID
-		if !exists(failed) {
-			if exists(staged) {
-				if err = os.RemoveAll(staged); err != nil {
-					return err
-				}
-			}
-			if err = copyTreeContext(ctx, op.Backup, staged); err != nil {
-				return err
-			}
+		if err = d.restoreSnapshot(ctx, op.Previous.ImageID, binary, op.Previous.DataDir, op.Backup, op.ID); err != nil {
+			return err
 		}
-		if !exists(failed) {
-			if err = os.Rename(data, failed); err != nil {
-				return err
-			}
-			if err = syncDir(filepath.Dir(data)); err != nil {
-				return err
-			}
-		}
-		if !exists(data) {
-			if err = os.Rename(staged, data); err != nil {
-				return err
-			}
-			if err = syncDir(filepath.Dir(data)); err != nil {
-				return err
-			}
-		}
-		e.message("Preserved post-update data: " + failed)
+		e.message("Preserved post-update data: " + failedDataDir(op.Previous.DataDir, op.ID))
 	}
 	if err = d.up(ctx, op.Previous.Config); err != nil {
 		return err
@@ -425,7 +437,7 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 		}
 	}
 	op.Phase = "recovered"
-	if err = writeJSON(filepath.Join(state, "operation.json"), op); err != nil {
+	if err = e.writeJournal(state, op); err != nil {
 		return err
 	}
 	// Retain the recovery executable; it can install the next verified release.
@@ -536,6 +548,12 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 	if !within(state, op.Target.Config) || !digestPattern.MatchString(op.Target.ImageID) || !versionPattern.MatchString(op.Target.Version) {
 		return errors.New("invalid target recovery record")
 	}
+	// Once the snapshot of this operation was restored, or its restore began, the target
+	// would migrate the restored data again, and a later rollback would take that data for
+	// the restored snapshot: the markers belong to the operation id, not to the attempt.
+	if op.Previous != nil && (op.RestoreData || exists(failedDataDir(op.Previous.DataDir, op.ID))) {
+		return errors.New("the data snapshot of this operation was restored or its restore began; finish with --rollback --restore-data, then start a new update")
+	}
 	if op.Previous != nil && !op.BackupVerified {
 		return errors.New("backup did not complete; use --rollback to recover before retrying")
 	}
@@ -597,7 +615,7 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 		return err
 	}
 	op.Phase = "starting-target"
-	if err = writeJSON(filepath.Join(state, "operation.json"), op); err != nil {
+	if err = e.writeJournal(state, op); err != nil {
 		return err
 	}
 	if err = d.up(ctx, op.Target.Config); err != nil {
@@ -615,5 +633,5 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 		return err
 	}
 	op.Phase = "success"
-	return writeJSON(filepath.Join(state, "operation.json"), op)
+	return e.writeJournal(state, op)
 }

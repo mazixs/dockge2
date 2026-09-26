@@ -22,6 +22,9 @@ docker-compose.override.yml
 # Local review artefacts and the leftovers of an interrupted type check
 output
 
+# A local `go build` of the updater; the release builds its own
+extra/updater/updater
+
 # Docker extra
 docker
 docker-compose.local.yml

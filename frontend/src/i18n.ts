@@ -20,8 +20,11 @@ const languageList: Record<string, string> = {
     "ru": "Русский",
 };
 
-const messages: Record<string, Record<string, string>> = {
-    en: en as Record<string, string>,
+/** A message catalogue: strings, grouped by nested keys such as `panelUpdateError.busy` */
+export type Catalogue = { [key : string] : string | Catalogue };
+
+const messages: Record<string, Catalogue> = {
+    en: en as Catalogue,
 };
 
 for (let lang in languageList) {

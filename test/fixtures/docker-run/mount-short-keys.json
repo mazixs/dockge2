@@ -1,0 +1,49 @@
+{
+    "description": "docker accepts src and dst in --mount, compose only source and target: the short keys are translated. The named volume is declared external, like one given with -v.",
+    "command": "docker run -d --mount type=volume,src=appdata,dst=/data nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services",
+            "volumes"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "volumes"
+        ],
+        "values": {
+            "image": "nginx",
+            "volumes": [
+                {
+                    "type": "volume",
+                    "source": "appdata",
+                    "target": "/data"
+                }
+            ]
+        },
+        "topLevelValues": {
+            "volumes": {
+                "appdata": {
+                    "external": true,
+                    "name": "appdata"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "--mount",
+                "reason": "flagVolumeExternal"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

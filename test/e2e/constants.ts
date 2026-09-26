@@ -7,6 +7,12 @@ export const E2E_ATTENTION_STACK = "e2e-attention";
 /** Stack with several compose files, several env files and a secret file */
 export const E2E_FILES_STACK = "e2e-files";
 
+/** Stack with one valid compose file, started and stopped by the progress spec alone */
+export const E2E_PROGRESS_STACK = "e2e-progress";
+
+/** Container started with docker run, outside every compose project, by the container page spec */
+export const E2E_STANDALONE_CONTAINER = "dockge-e2e-standalone";
+
 /** Stack the Git cycle test clones from the fixture repository */
 export const E2E_GIT_STACK = "e2e-git";
 

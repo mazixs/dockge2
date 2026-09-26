@@ -27,7 +27,10 @@ import ru from "../../frontend/src/lang/ru.json";
 import { i18n } from "../../frontend/src/i18n";
 import responsive from "../../frontend/src/mixins/responsive";
 import theme from "../../frontend/src/mixins/theme";
-import { ATTENTION, CREATED_STACK, EXITED, RUNNING, getComposeTerminalName } from "../../common/util-common";
+import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN, getComposeTerminalName } from "../../common/util-common";
+import type { PanelUpdateOperation, PanelUpdateStatus } from "../../common/panel-update";
+import { PANEL_CONTAINER_EVENT, type PanelContainer } from "../../common/types/panel-container";
+import { createPanelUpdateState, panelUpdateSuppressing, panelUpdateView, reducePanelUpdate, type PanelUpdateEvent, type PanelUpdateState } from "../../frontend/src/panel-update-machine";
 
 // Screenshot content must not change when the real release version is bumped.
 const sceneVersion = "0.0.7";
@@ -55,6 +58,11 @@ const source = { kind: "git",
     behind: 1,
     changedFiles: 3,
     checkedAt: CHECKED_AT };
+/**
+ * Which cell of the state matrix a check asks for (`test/visual/state-matrix.spec.ts`);
+ * the reference shots never set it
+ */
+const matrixScene = new URLSearchParams(window.location.search).get("matrix") ?? "";
 const names = [ "paperless", "immich", "uptime-kuma", "vaultwarden", "jellyfin" ];
 const stacks = Object.fromEntries(names.map((name, index) => [ `${name}_`, {
     name,
@@ -97,6 +105,33 @@ stacks.watchtower_ = { ...stacks.paperless_!,
     source: { kind: "local" },
     services: [{ name: "watchtower",
         state: "running" }] };
+// A name somebody really chose: it has to shorten with a title, not push the layout sideways
+if (matrixScene === "long-names") {
+    const name = "nextcloud-production-with-collabora-and-imaginary-previews-2026";
+    stacks[`${name}_`] = { ...stacks.paperless_!,
+        name,
+        dir: `/opt/stacks/${name}`,
+        source: { kind: "local" } };
+}
+// Hundreds of stacks on one server
+if (matrixScene === "many") {
+    for (let index = 0; index < 300; index++) {
+        const name = `service-${String(index).padStart(3, "0")}`;
+        stacks[`${name}_`] = { ...stacks.paperless_!,
+            name,
+            dir: `/opt/stacks/${name}`,
+            status: RUNNING,
+            issues: [],
+            source: { kind: "local" } };
+    }
+}
+// Docker did not answer: the server marks every stack unknown rather than stopped
+if (matrixScene === "docker-down") {
+    for (const stack of Object.values(stacks)) {
+        stack.status = UNKNOWN;
+        stack.issues = [];
+    }
+}
 const preview = { id: "visual-preview",
     branch: "main",
     currentCommit: source.commit,
@@ -556,6 +591,38 @@ const stabilityOverview = { observedAt: Date.now() - 20_000,
                 history: historyBuckets([ ...Array(24).keys() ], "stopped") }),
         ] }] };
 
+/**
+ * The overview a matrix cell asks for; without one, the reference fixture
+ * @returns {object} Overview as the server sends it
+ */
+function matrixOverview() : Record<string, unknown> {
+    if (matrixScene === "empty") {
+        return { ...stabilityOverview,
+            stacks: [] };
+    }
+    if (matrixScene === "stale") {
+        return { ...stabilityOverview,
+            observedAt: Date.now() - 10 * 60_000,
+            stale: true };
+    }
+    if (matrixScene === "docker-down") {
+        return { ...stabilityOverview,
+            stale: true,
+            error: "dockerUnavailable" };
+    }
+    if (matrixScene === "no-history") {
+        return { ...stabilityOverview,
+            stacks: stabilityOverview.stacks.map((stack) => ({ ...stack,
+                containers: stack.containers.map((container) => ({ ...container,
+                    availability: { ...availabilityClean,
+                        verdict: "noData",
+                        ratio: null,
+                        coveredMs: 0 },
+                    history: historyBuckets([], "running", 24) })) })) };
+    }
+    return stabilityOverview;
+}
+
 const originalFetch = window.fetch.bind(window);
 
 window.fetch = ((input : RequestInfo | URL, init? : RequestInit) => {
@@ -571,6 +638,128 @@ window.fetch = ((input : RequestInfo | URL, init? : RequestInit) => {
 
 /** Whether this shot wants the panel to have found a newer release */
 const updateScene = new URLSearchParams(window.location.search).get("update") === "available";
+
+// An installation that can update itself, in an invented directory. Only the dry run
+// answers; the scene never applies anything
+const sceneUpdateStatus : PanelUpdateStatus = { schema: 1,
+    panel: { version: sceneVersion,
+        managed: "yes",
+        installDir: "/opt/dockge2" } };
+
+/** Which state of the panel update a shot wants: `ready`, `running` or `rolled-back` */
+const panelUpdateScene = new URLSearchParams(window.location.search).get("panelUpdate");
+const sceneTarget = "9.9.9";
+const scenePreviewRequest = "5ce2e000-0000-4000-8000-000000000001";
+const sceneApplyRequest = "5ce2e000-0000-4000-8000-000000000002";
+
+/**
+ * A finished dry run of the scene
+ * @param requestId Request of the dry run
+ * @param version Target release
+ * @param schemaChanges Whether the release changes the stored data
+ * @returns Status carrying it
+ */
+function scenePreviewStatus(requestId : string, version : string, schemaChanges = false) : PanelUpdateStatus {
+    const at = new Date().toISOString();
+    return { ...sceneUpdateStatus,
+        operation: { requestId,
+            kind: "preview",
+            from: sceneVersion,
+            to: version,
+            startedAt: at,
+            running: false,
+            preview: { channel: "stable",
+                fields: [ "image" ],
+                schemaChanges },
+            result: { outcome: "previewed",
+                finishedAt: at } } };
+}
+
+/**
+ * An update started from this page, as the status reports it
+ * @param operation What differs from a fresh running apply
+ * @returns Status carrying it
+ */
+function sceneApplyStatus(operation : Partial<PanelUpdateOperation>) : PanelUpdateStatus {
+    return { ...sceneUpdateStatus,
+        operation: { requestId: sceneApplyRequest,
+            kind: "apply",
+            from: sceneVersion,
+            to: sceneTarget,
+            startedAt: new Date(Date.now() - 95_000).toISOString(),
+            running: true,
+            ...operation } };
+}
+
+/**
+ * The panel update as the root holds it, driven through the real reducer
+ * @returns Machine state: Available on the update shot, Current elsewhere, or the state a
+ * `panelUpdate` shot asks for
+ */
+function scenePanelUpdate() : PanelUpdateState {
+    const now = Date.now();
+    let state = createPanelUpdateState();
+    let ask = 0;
+    const step = (event : PanelUpdateEvent) => {
+        const next = reducePanelUpdate(state, event);
+        state = next.state;
+        for (const effect of next.effects) {
+            if (effect.type === "requestStatus") {
+                ask = effect.ask;
+            }
+        }
+    };
+    const answer = (status : PanelUpdateStatus) => step({ type: "ACK",
+        kind: "status",
+        ask,
+        result: { kind: "ok",
+            status },
+        now });
+    const following = panelUpdateScene === "running" || panelUpdateScene === "rolled-back";
+
+    step({ type: "BOOT",
+        persisted: following ? { v: 1,
+            request: sceneApplyRequest,
+            from: sceneVersion,
+            to: sceneTarget,
+            phase: "downloaded",
+            startedAt: now - 95_000,
+            stage: "running",
+            outcome: null } : null,
+        now });
+    step({ type: "INFO",
+        latestVersion: updateScene ? sceneTarget : sceneVersion,
+        updateAvailable: updateScene });
+    step({ type: "LINK_UP",
+        now });
+    if (panelUpdateScene === "running") {
+        // The panel stopped under the page: the expected disconnect of the cutover
+        answer(sceneApplyStatus({ phase: "stopping" }));
+        step({ type: "LINK_DOWN",
+            now });
+    } else if (panelUpdateScene === "rolled-back") {
+        answer(sceneApplyStatus({ running: false,
+            phase: "recovered",
+            result: { outcome: "recovered",
+                restoredData: true,
+                error: "the new version did not become ready within 180 seconds",
+                finishedAt: new Date(now).toISOString() } }));
+    } else {
+        answer(sceneUpdateStatus);
+        if (panelUpdateScene === "ready") {
+            step({ type: "CHECK",
+                owner: true,
+                requestId: scenePreviewRequest });
+            step({ type: "ACK",
+                kind: "preview",
+                requestId: scenePreviewRequest,
+                result: { kind: "ok",
+                    status: scenePreviewStatus(scenePreviewRequest, sceneTarget, true) },
+                now });
+        }
+    }
+    return state;
+}
 
 function socketAnswer(event : string) : object {
     if (event === "getSettings") {
@@ -602,6 +791,33 @@ function socketAnswer(event : string) : object {
                 email: "audit@example.com",
                 role: "viewer",
                 suspended: true }] };
+    }
+    if (event === PANEL_CONTAINER_EVENT) {
+        const container : PanelContainer = { id: "3f9c2a7d41b85e6f0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a",
+            name: "dockge2-dockge-1",
+            project: "dockge2",
+            service: "dockge",
+            workingDir: "/opt/dockge2",
+            configFiles: "/opt/dockge2/compose.yaml",
+            image: "ghcr.io/mazixs/dockge2:0.0.7",
+            digest: "sha256:4b1e0c9a7f3d2e8b6a5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+            state: "running",
+            health: "healthy",
+            startedAt: "2026-09-20T08:00:00Z",
+            restartCount: 0,
+            mounts: [{ type: "bind",
+                source: "/var/run/docker.sock",
+                destination: "/var/run/docker.sock",
+                readOnly: false }, { type: "bind",
+                source: "/opt/dockge2/data",
+                destination: "/app/data",
+                readOnly: false }, { type: "bind",
+                source: "/opt/stacks",
+                destination: "/opt/stacks",
+                readOnly: false }],
+            dockerSocket: true };
+        return { ok: true,
+            container };
     }
     return { ok: true,
         msg: "Сцена без сервера: сохранения не произошло" };
@@ -646,14 +862,16 @@ const scene = createApp({
             frontendVersion: sceneVersion,
             isFrontendBackendVersionMatched: true,
             loggedIn: true,
-            canManageStacks: true,
-            isAdmin: true,
+            canManageStacks: matrixScene !== "viewer",
+            isAdmin: matrixScene !== "viewer",
             authDisabled: true,
             userID: "1",
             language: "ru",
             username: "Visual fixture",
             usernameFirstChar: "D",
-            completeStackList: stacks,
+            completeStackList: matrixScene === "empty" ? {} : stacks,
+            // No containers outside the stacks, as an agent of an earlier build reports
+            hostContainers: {},
             agentList: { "": { name: "Домашний сервер",
                 endpoint: "" } },
             agentStatusList: { "": "online" },
@@ -663,9 +881,67 @@ const scene = createApp({
                 firstConnect: false },
             createStackSeed: "",
             composeTemplate: "",
-            envTemplate: "" };
+            envTemplate: "",
+            panelUpdate: scenePanelUpdate() };
+    },
+    computed: {
+        panelUpdateView() : "overlay" | "banner" | "none" {
+            return panelUpdateView(this.panelUpdate, { owner: true,
+                signedIn: true });
+        },
+        panelUpdateSuppressing() : boolean {
+            return panelUpdateSuppressing(this.panelUpdate);
+        },
     },
     methods: {
+        /**
+         * Advance the panel update; of its effects only the dry run is answered
+         * @param {object} event What happened
+         * @returns {void}
+         */
+        dispatchPanelUpdate(event : PanelUpdateEvent) {
+            const step = reducePanelUpdate(this.panelUpdate, event);
+            this.panelUpdate = step.state;
+            for (const effect of step.effects) {
+                if (effect.type === "emit" && effect.kind === "preview") {
+                    const [ requestId, version ] = effect.args;
+                    setTimeout(() => this.dispatchPanelUpdate({ type: "ACK",
+                        kind: "preview",
+                        requestId,
+                        result: { kind: "ok",
+                            status: scenePreviewStatus(requestId, version) },
+                        now: Date.now() }), 80);
+                }
+            }
+        },
+        panelUpdateInfo(latestVersion : string, updateAvailable : boolean) {
+            this.dispatchPanelUpdate({ type: "INFO",
+                latestVersion,
+                updateAvailable });
+        },
+        panelUpdateCheck() {
+            this.dispatchPanelUpdate({ type: "CHECK",
+                owner: true,
+                requestId: scenePreviewRequest });
+        },
+        panelUpdateConfirm() {
+            this.dispatchPanelUpdate({ type: "CONFIRM",
+                owner: true });
+        },
+        panelUpdateSubmit() {
+            // Deliberately nothing is applied: the dialog just closes
+            this.dispatchPanelUpdate({ type: "CLOSE" });
+        },
+        panelUpdateCancel() {
+            this.dispatchPanelUpdate({ type: "CANCEL",
+                owner: true });
+        },
+        panelUpdateDismiss() {
+            this.dispatchPanelUpdate({ type: "CLOSE" });
+        },
+        panelUpdateClose() {
+            this.dispatchPanelUpdate({ type: "CLOSE" });
+        },
         getSocket() {
             return fakeSocket();
         },
@@ -783,7 +1059,7 @@ const scene = createApp({
                             exitCode: 1 } : {}) }]])) };
             } else if (event === "stabilityOverview") {
                 return { ok: true,
-                    overview: { ...stabilityOverview,
+                    overview: { ...matrixOverview(),
                         windowHours: Number(args[0]) } };
             } else if (event === "stackAvailability") {
                 return { ok: true,
@@ -846,7 +1122,8 @@ const scene = createApp({
             const name = String(args[0]);
 
             // Keep creation pending so its layout can be inspected without Docker.
-            if (event === "deployStack") {
+            // The loading cell of the matrix waits the same way for its overview
+            if (event === "deployStack" || (event === "stabilityOverview" && matrixScene === "loading")) {
                 return;
             }
 

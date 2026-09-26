@@ -15,7 +15,7 @@
 
             <form class="auth-form form-stack" @submit.prevent="submit">
                 <div class="field">
-                    <label for="setup-language" class="form-label">{{ $t("Language") }}</label>
+                    <label for="setup-language" class="form-label">{{ $t("language") }}</label>
                     <select id="setup-language" v-model="$root.language" class="form-select">
                         <option v-for="language in availableLanguages" :key="language.code" :value="language.code">
                             {{ language.name }}
@@ -36,35 +36,37 @@
                 </div>
 
                 <div class="field">
-                    <label for="setup-email" class="form-label">{{ $t("Email") }}</label>
+                    <label for="setup-email" class="form-label">{{ $t("email") }}</label>
                     <input id="setup-email" v-model="email" type="email" class="form-control" placeholder="you@example.com" autocomplete="email" required :disabled="processing" data-cy="email-input">
                 </div>
 
                 <div class="field">
-                    <label for="setup-password" class="form-label">{{ $t("Password") }}</label>
+                    <label for="setup-password" class="form-label">{{ $t("password") }}</label>
                     <input id="setup-password" v-model="password" type="password" class="form-control" autocomplete="new-password" :minlength="minPasswordLength" required :disabled="processing" data-cy="password-input">
                     <p class="form-text">{{ $t("passwordMinLengthHint") }}</p>
                 </div>
 
                 <div class="field">
-                    <label for="setup-repeat" class="form-label">{{ $t("Repeat Password") }}</label>
+                    <label for="setup-repeat" class="form-label">{{ $t("repeatPassword") }}</label>
                     <input id="setup-repeat" v-model="repeatPassword" type="password" class="form-control" autocomplete="new-password" :minlength="minPasswordLength" required :disabled="processing" data-cy="password-repeat-input">
                 </div>
 
                 <button class="btn btn-primary" type="submit" :disabled="processing" data-cy="submit-setup-form">
-                    {{ $t("Create") }}
+                    {{ $t("create") }}
                 </button>
             </form>
         </div>
     </div>
 </template>
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import BrandMark from "../components/BrandMark.vue";
 import { bootstrapOwner } from "../auth-client";
 import { authErrorMessage } from "../auth-messages";
 import { availableLanguages } from "../i18n";
+import type { SocketResponse } from "../mixins/socket";
 
-export default {
+export default defineComponent({
     components: { BrandMark },
     data() {
         return {
@@ -79,9 +81,9 @@ export default {
     computed: {
         /**
          * Languages offered in the selector
-         * @returns {Array<object>} Language code and display name pairs
+         * @returns Language code and display name pairs
          */
-        availableLanguages() {
+        availableLanguages() : Array<{ code : string, name : string }> {
             return availableLanguages();
         },
 
@@ -89,14 +91,14 @@ export default {
          * Shortest password the server accepts, mirrored from `backend/auth.ts`
          * @returns {number} Minimum length
          */
-        minPasswordLength() {
+        minPasswordLength() : number {
             return 10;
         },
     },
     mounted() {
         // TODO: Check if it is a database setup
 
-        this.$root.getSocket().emit("needsSetup", (res) => {
+        this.$root.getSocket().emit("needsSetup", (res : SocketResponse | undefined) => {
             if (res?.ok && !res.needsSetup) {
                 this.$router.push("/");
             }
@@ -111,7 +113,7 @@ export default {
             this.processing = true;
 
             if (this.password !== this.repeatPassword) {
-                this.$root.toastError("PasswordsDoNotMatch");
+                this.$root.toastError("passwordsDoNotMatch");
                 this.processing = false;
                 return;
             }
@@ -140,7 +142,7 @@ export default {
                 this.token = "";
                 const login = await this.$root.signIn(this.username, this.password);
                 if (!login.ok) {
-                    this.$root.toastError(login.msg);
+                    this.$root.toastError(login.msg ?? "");
                 }
                 this.$router.push("/");
             } finally {
@@ -148,5 +150,5 @@ export default {
             }
         },
     },
-};
+});
 </script>

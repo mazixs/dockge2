@@ -82,11 +82,11 @@ test("confirming an action needs the password of the session behind the socket",
 
         await doubleCheckPassword(socket, TEST_PASSWORD);
 
-        await assert.rejects(doubleCheckPassword(socket, "wrong-password"), /Incorrect current password/);
+        await assert.rejects(doubleCheckPassword(socket, "wrong-password"), /incorrectCurrentPassword/);
         await assert.rejects(doubleCheckPassword(socket, 12345), /Wrong data type/);
 
         // A socket without a session cannot confirm anything, even with the right password
-        await assert.rejects(doubleCheckPassword(makeAuthenticatedSocket(), TEST_PASSWORD), /Incorrect current password/);
+        await assert.rejects(doubleCheckPassword(makeAuthenticatedSocket(), TEST_PASSWORD), /incorrectCurrentPassword/);
     });
 });
 

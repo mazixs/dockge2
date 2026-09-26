@@ -19,6 +19,8 @@ import (
 
 type runner interface {
 	run(context.Context, string, ...string) ([]byte, error)
+	// runEnv adds variables to the inherited environment of one command.
+	runEnv(context.Context, []string, string, ...string) ([]byte, error)
 }
 type commandRunner struct{}
 type boundedBuffer struct{ bytes.Buffer }
@@ -35,17 +37,55 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-var credentials = regexp.MustCompile(`(?i)(https?://)[^\s/@]+:[^\s/@]+@`)
+// Any URL userinfo, with or without a password: a token alone is a credential too.
+var credentials = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@`)
 var secretValue = regexp.MustCompile(`(?i)((?:password|token|secret|authorization|cookie)[=:]\s*)\S+`)
 
 func redact(s string) string {
 	s = credentials.ReplaceAllString(s, "${1}[REDACTED]@")
 	return secretValue.ReplaceAllString(s, "${1}[REDACTED]")
 }
-func (commandRunner) run(ctx context.Context, command string, args ...string) ([]byte, error) {
+
+// commandError keeps a command's output apart from its identity, so that a result line
+// for the panel can leave the output out. Error() is the human text it always was.
+type commandError struct {
+	base, name, detail string
+	err                error
+}
+
+func (c *commandError) Error() string {
+	return fmt.Sprintf("%s failed: %v\n%s", c.base, c.err, c.detail)
+}
+func (c *commandError) Unwrap() error { return c.err }
+
+// public keeps the last line of the output, except for Compose, which can quote resolved
+// configuration values.
+func (c *commandError) public() string {
+	s := c.name + " failed: " + c.err.Error()
+	if c.name == "docker compose" {
+		return s
+	}
+	lines := strings.Split(c.detail, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return s + ": " + line
+		}
+	}
+	return s
+}
+
+var subcommand = regexp.MustCompile(`^[a-z][a-z-]*$`)
+
+func (r commandRunner) run(ctx context.Context, command string, args ...string) ([]byte, error) {
+	return r.runEnv(ctx, nil, command, args...)
+}
+func (commandRunner) runEnv(ctx context.Context, env []string, command string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 5 * time.Second
@@ -58,7 +98,11 @@ func (commandRunner) run(ctx context.Context, command string, args ...string) ([
 		if len(detail) > 4000 {
 			detail = detail[len(detail)-4000:]
 		}
-		return nil, fmt.Errorf("%s failed: %w\n%s", filepath.Base(command), err, detail)
+		name := filepath.Base(command)
+		if len(args) > 0 && subcommand.MatchString(args[0]) {
+			name += " " + args[0]
+		}
+		return nil, &commandError{base: filepath.Base(command), name: name, detail: detail, err: err}
 	}
 	return stdout.Bytes(), nil
 }
@@ -298,6 +342,10 @@ func (d docker) localDaemon(ctx context.Context) (string, error) {
 	}
 	return id, nil
 }
+
+// stabilityWait is how long a started panel has to stay healthy; tests shorten it.
+var stabilityWait = 10 * time.Second
+
 func (d docker) verifyRuntime(ctx context.Context, expected, version string, legacy bool) error {
 	first, err := d.container(ctx)
 	if err != nil {
@@ -318,7 +366,7 @@ func (d docker) verifyRuntime(ctx context.Context, expected, version string, leg
 			return err
 		}
 	}
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(stabilityWait)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -412,6 +460,9 @@ func (d docker) otherWriters(ctx context.Context, self, dataDir string) error {
 			source := mount.Source
 			if canonical, err := filepath.EvalSymlinks(source); err == nil {
 				source = canonical
+			}
+			if source == "/tmp" && within(source, dataDir) {
+				return errors.New("panel data under /tmp is not supported: a running container, such as the update helper, mounts /tmp writable")
 			}
 			if within(source, dataDir) || within(dataDir, source) {
 				return errors.New("another running container has writable access to panel data; establish one writer before updating")

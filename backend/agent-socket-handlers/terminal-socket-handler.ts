@@ -31,13 +31,13 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     // Writing into a session the client never joined would let one client
                     // type into the shell of another, so the membership is checked
                     if (!terminal.hasClient(socket)) {
-                        throw new ValidationError("You are not attached to this terminal.");
+                        throw new ValidationError("terminalNotAttached");
                     }
 
                     //log.debug("terminalInput", "Terminal found, writing to terminal.");
                     terminal.write(cmd);
                 } else {
-                    throw new Error("Terminal not found or it is not a Interactive Terminal.");
+                    throw new Error("terminalNotFound");
                 }
 
                 // Answering the ack keeps the client from collecting callbacks forever
@@ -95,7 +95,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
 
                 // Only the allowed shells may reach Docker
                 if (!isContainerShell(shell)) {
-                    throw new ValidationError("Unsupported shell, use sh or bash.");
+                    throw new ValidationError("shellUnsupported");
                 }
 
                 log.debug("interactiveTerminal", "Stack name: " + stackName);
@@ -191,7 +191,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                 const stack = await Stack.getStack(server, stackName);
 
                 if (!stack.isManagedByDockge) {
-                    throw new ValidationError("This stack is not managed by Dockge.");
+                    throw new ValidationError("stackNotManagedByDockgeMsg");
                 }
 
                 if (logJoins.get(stackName) === token && socket.connected !== false) {
@@ -251,7 +251,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
 
                 // Resizing somebody else's terminal would garble their output
                 if (terminal && !terminal.hasClient(socket)) {
-                    throw new ValidationError("You are not attached to this terminal.");
+                    throw new ValidationError("terminalNotAttached");
                 }
 
                 // log.info("terminal", terminal);
@@ -260,7 +260,7 @@ export class TerminalSocketHandler extends AgentSocketHandler {
                     terminal.rows = rows;
                     terminal.cols = cols;
                 } else {
-                    throw new Error(`${terminalName} Terminal not found.`);
+                    throw new Error("terminalNotFound");
                 }
             } catch (e) {
                 const message = e instanceof Error ? e.message : String(e);

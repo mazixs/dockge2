@@ -155,6 +155,7 @@ test("UI and MCP share lifecycle command selection without rewriting Compose", a
         validated++;
     },
     getComposeOptions: (command: string, ...args: string[]) => [ "compose", "-f", "compose.yaml", command, ...args ],
+    assertNotPanel: async () => {},
     path: "/isolated" } as unknown as Stack;
     for (const action of [ "start", "stop", "restart" ] as const) {
         await Stack.prototype.control.call(stack, action, async (args, cwd) => {
@@ -229,6 +230,7 @@ test("shared image update preserves stopped stacks and restarts only running sta
             path: "/isolated",
             validateComposeConfig: async () => {},
             updateStatus: async () => {},
+            assertNotPanel: async () => {},
             getComposeOptions: (command: string, ...args: string[]) => [ command, ...args ] } as unknown as Stack;
         await Stack.prototype.control.call(stack, "update", async args => {
             commands.push(args);

@@ -3,7 +3,8 @@
     <router-view v-else :key="viewKey" />
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import StabilityDashboard from "../components/StabilityDashboard.vue";
 
 // Вкладки стека - один и тот же компонент на разных путях, поэтому ключ вида
@@ -11,7 +12,7 @@ import StabilityDashboard from "../components/StabilityDashboard.vue";
 // открытая оболочка умирала, а журнал перечитывался с нуля
 const STACK_TABS = [ "stackInspector", "stackInspectorEndpoint", "stackFiles", "stackLogs", "stackTerminal" ];
 
-export default {
+export default defineComponent({
     components: { StabilityDashboard },
     computed: {
         /**
@@ -20,7 +21,7 @@ export default {
          * и здесь пересоздание как раз нужно
          * @returns {string} Ключ router-view
          */
-        viewKey() {
+        viewKey() : string {
             if (STACK_TABS.includes(String(this.$route.name))) {
                 return `stack:${this.$route.params.endpoint ?? ""}`;
             }
@@ -28,5 +29,5 @@ export default {
             return this.$route.path;
         },
     },
-};
+});
 </script>

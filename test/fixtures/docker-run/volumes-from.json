@@ -1,0 +1,32 @@
+{
+    "description": "--volumes-from becomes volumes_from with the container: prefix, since a bare name there means a service of the stack.",
+    "command": "docker run -d --volumes-from data nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "volumes_from"
+        ],
+        "values": {
+            "image": "nginx",
+            "volumes_from": [
+                "container:data"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--volumes-from"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

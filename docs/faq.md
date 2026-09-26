@@ -2,9 +2,21 @@
 
 ### Can I manage a single container without a Compose file?
 
-No. A stack is a directory with a Compose file, and that is what keeps the files yours rather than
-the panel's. For a single container use the Docker CLI, or paste its `docker run` command into
+Partly. The list shows containers started without Compose, and those of Compose projects outside
+the stacks directory, with their state and a page of their own. Starting, stopping and restarting
+them is off by default: the owner turns it on per server in Settings -> Security, with the
+password. Removing them and running commands inside are not offered.
+
+Everything else a stack offers - files, deploy, updates - needs a directory with a Compose file,
+which is what keeps the files yours rather than the panel's. Paste a `docker run` command into
 New stack -> Paste Compose to turn it into a stack.
+
+### Can the panel's own compose file live in the stacks directory?
+
+Yes. The panel then lists itself as a stack, but refuses down, delete, start, restart, deploy and
+update on it, because each of them would recreate or remove the container that runs the command.
+Stop stays, with a warning that the page goes away with it. Update the panel from Settings ->
+About, see [Updating](updating.md#update-from-the-web-interface).
 
 ### Can I manage the stacks I already have?
 

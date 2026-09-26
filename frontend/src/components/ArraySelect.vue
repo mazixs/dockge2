@@ -4,7 +4,7 @@
             <ul v-if="isArrayInited" class="value-list">
                 <li v-for="(value, index) in array" :key="index" class="value-row">
                     <select v-model="array[index]" class="value-input">
-                        <option value="">{{ $t(`Select a network...`) }}</option>
+                        <option value="">{{ $t(`selectNetworkPlaceholder`) }}</option>
                         <option v-for="option in options" :key="option" :value="option">{{ option }}</option>
                     </select>
 
@@ -17,13 +17,31 @@
             <button class="btn btn-normal btn-sm add-value" @click="addField">{{ $t("addListItem", [ displayName ]) }}</button>
         </div>
         <div v-else class="form-text">
-            {{ $t("LongSyntaxNotSupported") }}
+            {{ $t("longSyntaxNotSupported") }}
         </div>
     </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent, type ComponentPublicInstance, type PropType } from "vue";
+
+/**
+ * The service the list belongs to, on the service card two components up: a transition
+ * sits in between
+ * @param field This list
+ * @returns The service as the compose file holds it
+ */
+function editedService(field : ComponentPublicInstance) : Record<string, unknown> {
+    const card = field.$parent?.$parent;
+
+    if (!card) {
+        throw new Error("A service list is shown outside a service card");
+    }
+
+    return (card as ComponentPublicInstance & { service : Record<string, unknown> }).service;
+}
+
+export default defineComponent({
     props: {
         name: {
             type: String,
@@ -38,7 +56,7 @@ export default {
             required: true,
         },
         options: {
-            type: Array,
+            type: Array as PropType<string[]>,
             required: true,
         },
     },
@@ -48,12 +66,10 @@ export default {
         };
     },
     computed: {
-        array() {
+        array() : unknown[] {
             // Create the array if not exists, it should be safe.
-            if (!this.service[this.name]) {
-                return [];
-            }
-            return this.service[this.name];
+            const value = this.service[this.name];
+            return Array.isArray(value) ? value : [];
         },
 
         /**
@@ -61,17 +77,18 @@ export default {
          * Prevent empty arrays inserted to the YAML file.
          * @return {boolean}
          */
-        isArrayInited() {
+        isArrayInited() : boolean {
             return this.service[this.name] !== undefined;
         },
 
-        service() {
-            return this.$parent.$parent.service;
+        service() : Record<string, unknown> {
+            return editedService(this);
         },
 
-        valid() {
+        valid() : boolean {
             // Check if the array is actually an array
-            if (!Array.isArray(this.array)) {
+            const value = this.service[this.name];
+            if (value && !Array.isArray(value)) {
                 return false;
             }
 
@@ -96,11 +113,11 @@ export default {
             }
             this.array.push("");
         },
-        remove(index) {
+        remove(index : number) {
             this.array.splice(index, 1);
         },
     }
-};
+});
 </script>
 
 <style lang="scss" scoped>

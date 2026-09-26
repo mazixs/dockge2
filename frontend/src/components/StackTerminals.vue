@@ -12,7 +12,7 @@
                 >
                     <button
                         class="label" type="button" role="tab"
-                        :aria-selected="String(session.key === activeKey)"
+                        :aria-selected="session.key === activeKey"
                         @click="activate(session.key)"
                     >
                         <InterfaceIcon name="terminal" />{{ session.label }}
@@ -40,7 +40,7 @@
                  одно действие - одно имя, где бы оно ни встретилось. Пока сессий
                  нет, выбор сервиса уже стоит в теле панели: два одинаковых
                  предложения в одной рамке спорят за нажатие -->
-            <BDropdown v-if="sessions.length > 0" right variant="normal" size="sm" class="new-session">
+            <BDropdown v-if="sessions.length > 0" variant="normal" size="sm" class="new-session">
                 <template #button-content>
                     <font-awesome-icon icon="plus" />{{ $t("openShell") }}
                 </template>
@@ -105,13 +105,25 @@
     </section>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
 import Terminal from "./Terminal.vue";
 import StateChip from "./StateChip.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
-import { getContainerExecTerminalName } from "../../../common/util-common";
+import { getContainerExecTerminalName, isContainerShell, type ContainerShell } from "../../../common/util-common";
+import type { InspectedService, ShellRequest } from "../stack-services";
 
-export default {
+/** An open shell of a container */
+interface ShellSession {
+    key : string;
+    label : string;
+    stackName : string;
+    endpoint : string;
+    serviceName : string;
+    shell : ContainerShell;
+}
+
+export default defineComponent({
     components: {
         Terminal,
         StateChip,
@@ -130,26 +142,27 @@ export default {
 
         /** Сервисы стека: из них берутся цели для оболочки */
         services: {
-            type: Array,
+            type: Array as PropType<Pick<InspectedService, "name" | "running">[]>,
             default: () => [],
         },
 
         /** Просьба открыть оболочку, приходит из таблицы сервисов */
         request: {
-            /** @type {import("vue").PropType<import("../stack-services").ShellRequest | null>} */
-            type: Object,
+            type: Object as PropType<ShellRequest | null>,
             default: null,
         },
     },
     data() {
         return {
-            sessions: [],
+            sessions: [] as ShellSession[],
             activeKey: "",
+            /** Следит за размером области консоли, пока она на экране */
+            observer: null as ResizeObserver | null,
         };
     },
     computed: {
         /** Открытая сессия: от нее зависит подпись под консолью */
-        activeSession() {
+        activeSession() : ShellSession | null {
             return this.sessions.find(session => session.key === this.activeKey) ?? null;
         },
 
@@ -157,7 +170,7 @@ export default {
          * Есть ли канал до контейнера. Локальный стек слушает наш сокет,
          * стек агента - соединение с этим агентом
          */
-        connected() {
+        connected() : boolean {
             if (this.endpoint === "") {
                 return this.$root.socketIO.connected;
             }
@@ -166,14 +179,14 @@ export default {
         },
 
         /** Кому можно открыть оболочку: остановленный контейнер ее не даст */
-        shellTargets() {
+        shellTargets() : string[] {
             return this.services.filter(service => service.running).map(service => service.name);
         },
     },
     watch: {
         request: {
             immediate: true,
-            handler(value) {
+            handler(value : ShellRequest | null) {
                 if (value?.serviceName) {
                     this.openShell(value);
                 }
@@ -187,10 +200,14 @@ export default {
         /**
          * Открыть shell контейнера. Имя сессии содержит оболочку, поэтому sh и bash
          * никогда не делят один PTY
-         * @param {object} target Сервис и оболочка
-         * @returns {void}
+         * @param target Сервис и оболочка
          */
-        openShell({ serviceName, shell = "sh" }) {
+        openShell({ serviceName, shell = "sh" } : { serviceName : string; shell? : string }) {
+            // Другой оболочки сервер не откроет
+            if (!isContainerShell(shell)) {
+                return;
+            }
+
             const key = getContainerExecTerminalName(this.endpoint, this.stackName, serviceName, shell, 0);
 
             if (!this.sessions.some(item => item.key === key)) {
@@ -207,7 +224,7 @@ export default {
             this.activate(key);
         },
 
-        activate(key) {
+        activate(key : string) {
             this.activeKey = key;
 
             // Скрытый xterm не знает своего размера: после показа его надо подогнать
@@ -217,7 +234,7 @@ export default {
             });
         },
 
-        close(key) {
+        close(key : string) {
             this.sessions = this.sessions.filter(item => item.key !== key);
 
             if (this.activeKey === key) {
@@ -231,10 +248,10 @@ export default {
         /**
          * Следить за размером области консоли. Высота считается от экрана, и после
          * изменения окна старая сетка xterm налезала на подпись
-         * @returns {void}
          */
         watchBody() {
-            if (this.observer || !this.$refs.body) {
+            const body = this.$refs.body as HTMLElement | undefined;
+            if (this.observer || !body) {
                 return;
             }
 
@@ -243,12 +260,20 @@ export default {
                     this.refit();
                 });
             });
-            this.observer.observe(this.$refs.body);
+            this.observer.observe(body);
+        },
+
+        /**
+         * Консоль показанной сессии
+         * @returns Компонент терминала, пока он смонтирован
+         */
+        activeTerminal() : InstanceType<typeof Terminal> | undefined {
+            return (this.$refs[`terminal-${this.activeKey}`] as InstanceType<typeof Terminal>[] | undefined)?.[0];
         },
 
         /** Подогнать показанную сессию под область */
         refit() {
-            this.$refs[`terminal-${this.activeKey}`]?.[0]?.updateTerminalSize?.();
+            this.activeTerminal()?.updateTerminalSize?.();
         },
 
         /** Подогнать показанную сессию и отдать ей ввод */
@@ -257,10 +282,10 @@ export default {
 
             // Открытая сессия ждет ввода: без этого первое слово уходит в кнопку,
             // с которой ее открыли, и человек думает, что оболочка не отвечает
-            this.$refs[`terminal-${this.activeKey}`]?.[0]?.terminal?.focus?.();
+            this.activeTerminal()?.terminal?.focus?.();
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

@@ -9,9 +9,16 @@ import type {
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /** How a request may be steered */
-export interface AgentRequestOptions {
+export interface AgentRequestOptions<R = unknown> {
     /** How long to wait for the acknowledgement */
     timeoutMs? : number;
+    /**
+     * Called with the answer in the task it arrived in, before any event the connection
+     * delivers after it. A promise continuation runs only once a batch of packets that
+     * arrived together has been dispatched, which is too late for a terminal joining a
+     * running command: its next output is in the same batch as the answer.
+     */
+    onAnswer? : (response : R) => void;
 }
 
 /**
@@ -76,14 +83,14 @@ export class AgentRequests {
      * @param endpoint Agent the request goes to
      * @param eventName Event of the agent protocol
      * @param args Arguments of that event, without the acknowledgement
-     * @param options How long to wait
+     * @param options How long to wait, and what to do the moment the answer arrives
      * @returns The answer, or the unknown result
      */
     request<E extends AgentRequestName>(
         endpoint : string,
         eventName : E,
         args : AgentRequestArgs<E>,
-        options : AgentRequestOptions = {},
+        options : AgentRequestOptions<AgentRequestResult<E>> = {},
     ) : Promise<AgentRequestResult<E>> {
         const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
 
@@ -98,6 +105,7 @@ export class AgentRequests {
                 answered = true;
                 clearTimeout(timer);
                 this.waitingList.delete(id);
+                options.onAnswer?.(response);
                 resolve(response);
             };
 

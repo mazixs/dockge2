@@ -36,7 +36,8 @@ npm run test:unit      # the same tests without coverage
 npm run test:install   # updater, release and bootstrap contracts; no container is touched
 npm run test:docker-integration   # needs a live Docker Compose
 npm run test:e2e       # Playwright, a real Chromium and real containers
-npm run test:visual    # reference screenshots; :approve re-approves them deliberately
+npm run test:visual    # reference screenshots in the pinned Playwright image; :approve re-approves them deliberately
+npm run lint:sh        # shellcheck over the tracked shell scripts
 npm run build:frontend # builds into frontend-dist/
 
 node --import tsx --test test/backend/util-stack.test.ts                       # one file
@@ -210,7 +211,9 @@ require recovery from `.git/dockge-recovery-*`.
 | `.github/CONTRIBUTING.md` | what kind of change is accepted and how to submit it |
 | `.github/SECURITY.md` | how to report a vulnerability |
 | `docs/self-updates.md` | release verification, migration, updater state and recovery in depth |
+| `docs/panel-update-statechart.md` | updating from the web interface inside: invariants, the updater's progress contract, the observer, the page statechart |
 | `docs/authentication.md` | accounts, roles, two-factor authentication, recovery, sessions, proxy configuration |
+| `docs/threat-model.md` | the Docker socket as root on the host, who reaches it, the browser security headers |
 | `docs/mcp.md` | the MCP contract, limits and verified clients |
 | `docs/design-system.md` | tokens and the current layout |
 | `frontend/src/lang/README.md` | which languages, and how to translate |

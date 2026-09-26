@@ -175,6 +175,24 @@ type releaseClient struct {
 	client   *http.Client
 	run      runner
 	verifier string
+	env      []string
+}
+
+// persistVerifierRoot gives Cosign a home under the installation's state, so its trust
+// root outlives a one-shot update container and the host and the panel's helper share it.
+// Before the state directory exists (fresh installation, legacy import) Cosign keeps the
+// inherited home.
+func (c *releaseClient) persistVerifierRoot(state string) error {
+	if !exists(state) {
+		return nil
+	}
+	home := filepath.Join(state, "cosign")
+	if err := privateDir(home); err != nil {
+		return err
+	}
+	// sigstore-go caches under $HOME/.sigstore/root; TUF_ROOT points the older client there too.
+	c.env = []string{"HOME=" + home, "TUF_ROOT=" + filepath.Join(home, ".sigstore", "root")}
+	return nil
 }
 
 func newReleaseClient(run runner, verifier string) releaseClient {
@@ -225,7 +243,7 @@ func (c releaseClient) latest(ctx context.Context) (string, error) {
 	return version, nil
 }
 func (c releaseClient) verify(ctx context.Context, path, version string) error {
-	_, err := c.run.run(ctx, c.verifier, "verify-blob", "--bundle", path+".sigstore.json",
+	_, err := c.run.runEnv(ctx, c.env, c.verifier, "verify-blob", "--bundle", path+".sigstore.json",
 		"--certificate-identity", "https://github.com/"+repository+"/.github/workflows/release.yml@refs/tags/v"+version,
 		"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com", path)
 	if err != nil {

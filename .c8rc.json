@@ -19,8 +19,7 @@
         "frontend/src/router.ts",
         "frontend/src/icon.ts",
         "frontend/src/auth-client.ts",
-        "frontend/src/directives/**",
-        "frontend/src/mixins/**"
+        "frontend/src/directives/**"
     ],
     "excludeAfterRemap": true,
     "checkCoverage": true,

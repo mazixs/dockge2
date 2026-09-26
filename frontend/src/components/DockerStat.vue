@@ -6,7 +6,7 @@
         <div class="stats">
             <div class="stat">
                 <div class="stat-label">
-                    {{ $t('CPU') }}
+                    {{ $t('cpu') }}
                 </div>
                 <div>
                     {{ stat.CPUPerc }}
@@ -40,15 +40,27 @@
     </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
+
+/** One container of `docker stats --format json`, the fields the card shows */
+export interface DockerStatRow {
+    Name : string;
+    CPUPerc : string;
+    MemUsage : string;
+    MemPerc : string;
+    NetIO : string;
+    BlockIO : string;
+}
+
+export default defineComponent({
     props: {
         stat: {
-            type: Object,
+            type: Object as PropType<DockerStatRow>,
             required: true
         }
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

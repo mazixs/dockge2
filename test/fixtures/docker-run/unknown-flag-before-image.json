@@ -1,0 +1,32 @@
+{
+    "description": "An unknown switch right before the image would take the image as its value. The flag is read again as a switch, so the image survives, and the report names the flag as left out.",
+    "command": "docker run -d --frobnicate nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image"
+        ],
+        "values": {
+            "image": "nginx"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--frobnicate",
+                "reason": "flagUnknown"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

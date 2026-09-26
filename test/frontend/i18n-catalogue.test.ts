@@ -146,12 +146,23 @@ test("every $t() literal names a key that exists", () => {
     for (const file of sourceFiles(path.join(process.cwd(), "frontend/src"), [ ".vue", ".ts" ])) {
         const source = readFileSync(file, "utf-8");
 
-        for (const match of source.matchAll(/\$t\(\s*"([^"]+)"\s*(\)|,)/g)) {
-            const key = match[1]!;
+        // The toasts translate what they are given, so a sentence there is a miss too
+        for (const match of source.matchAll(/(?:\$t|toastSuccess|toastError)\(\s*(["'`])([^"'`$]+)\1\s*(\)|,)/g)) {
+            const key = match[2]!;
 
             if (!english.has(key)) {
                 misses.push(`${path.relative(process.cwd(), file)}: ${key}`);
             }
+        }
+    }
+
+    // The toasts translate their argument, so a text translated before it is looked up
+    // as a key, misses, and is shown as an unexpected error
+    for (const file of sourceFiles(path.join(process.cwd(), "frontend/src"), [ ".vue", ".ts" ])) {
+        const source = readFileSync(file, "utf-8");
+
+        for (const match of source.matchAll(/toast(?:Success|Error)\(\s*[^)]*(\$t\(|serverText\()/g)) {
+            misses.push(`${path.relative(process.cwd(), file)}: ${match[0]}`);
         }
     }
 
@@ -226,4 +237,55 @@ test("the server sends keys, not sentences, to the toast", () => {
     }
 
     assert.deepEqual(unfilled, [], "thrown without the values its catalogue entry interpolates");
+
+    // A refusal the interface can provoke names a key too, or a Russian reader is told
+    // "Unexpected error: Stack not found". Only the checks of the protocol stay English:
+    // a well-formed client never sends a number where a stack name belongs
+    const sentences : string[] = [];
+
+    for (const file of sourceFiles(path.join(process.cwd(), "backend"), [ ".ts" ])) {
+        const source = readFileSync(file, "utf-8");
+
+        for (const match of source.matchAll(/new ValidationError\(\s*(?:"([^"]*)"\s*([),+])|(`))/g)) {
+            const [ , text, after, template ] = match;
+            const protocol = text !== undefined && /must (?:be|hold)\b|^Wrong data type\?$/.test(text);
+
+            if (template || after === "+" || (!protocol && !english.has(text!))) {
+                sentences.push(`${path.relative(process.cwd(), file)}: ${text ?? "template"}`);
+            }
+        }
+    }
+
+    assert.deepEqual(sentences, [], "ValidationError carries a sentence rather than a key of en.json");
+});
+
+test("keys are camelCase, with an identifier the code looks up after an underscore", () => {
+    const wrong : string[] = [];
+
+    for (const [ key, value ] of Object.entries(catalogue("en"))) {
+        if (!/^[a-z][a-zA-Z0-9]*(_[A-Za-z0-9_:.-]+)?$/.test(key)) {
+            wrong.push(key);
+        }
+        // A nested branch is keyed by a protocol value, such as an updater reason
+        if (value !== null && typeof value === "object") {
+            wrong.push(...Object.keys(value).filter((child) => !/^[a-z][a-z0-9-]*$/.test(child)).map((child) => `${key}.${child}`));
+        }
+    }
+
+    // "Current Password" next to "currentPassword" invited a second key for the same
+    // label, and a sentence as a key breaks the moment the English wording is improved
+    assert.deepEqual(wrong, [], "a key of en.json is not camelCase");
+});
+
+test("a message an older server sends still finds its entry", async () => {
+    const { FORMER_MESSAGE_KEYS, currentMessageKey } = await import("../../frontend/src/server-message-keys");
+    const english = catalogue("en");
+
+    for (const [ former, current ] of Object.entries(FORMER_MESSAGE_KEYS)) {
+        assert.equal(currentMessageKey(former), current);
+        assert.equal(typeof english[current], "string", `${former} points at ${current}, which en.json does not have`);
+        assert.equal(english[former], undefined, `${former} is still a key, the table is not needed for it`);
+    }
+    assert.equal(currentMessageKey("saved"), "saved");
+    assert.equal(currentMessageKey("constructor"), "constructor");
 });

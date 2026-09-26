@@ -57,7 +57,7 @@
                             <h2 class="modal-title">{{ $t("progressLogTitle") }}</h2>
                             <p class="log-subtitle">{{ title }} · {{ chipLabel }}</p>
                         </div>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" :aria-label="$t('Close')"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" :aria-label="$t('close')"></button>
                     </div>
 
                     <div class="modal-body">
@@ -103,7 +103,7 @@
                         <p class="progress-foot">
                             <font-awesome-icon icon="info-circle" />{{ $t("progressNote") }}
                         </p>
-                        <button type="button" class="btn btn-normal" data-bs-dismiss="modal">{{ $t("Close") }}</button>
+                        <button type="button" class="btn btn-normal" data-bs-dismiss="modal">{{ $t("close") }}</button>
                     </div>
                 </div>
             </div>
@@ -111,14 +111,15 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
 import Modal from "bootstrap/js/dist/modal";
-import { shallowRef } from "vue";
+import { defineComponent, shallowRef } from "vue";
+import type { IDisposable } from "@xterm/xterm";
 import { ownModal } from "../modal-lifecycle";
 import Terminal from "./Terminal.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { getComposeTerminalName, PROGRESS_TERMINAL_ROWS } from "../../../common/util-common";
-import { parseComposeProgress } from "../../../common/compose-progress";
+import { parseComposeProgress, type ComposeTask } from "../../../common/compose-progress";
 import { COMMAND_KEYS, KIND_ICONS, KIND_KEYS, VERB_KEYS, VERB_KIND_KEYS } from "../progress-labels";
 
 /** Вывод разбирается не чаще этого, иначе шаги дергались бы на каждый байт */
@@ -134,7 +135,10 @@ const SETTLE_DELAY = 400;
  */
 const TAIL_DELAY = 4000;
 
-export default {
+/** Консоль прогресса, как ее видит эта панель через ссылку шаблона */
+type TerminalView = InstanceType<typeof Terminal>;
+
+export default defineComponent({
     components: {
         Terminal,
         InterfaceIcon,
@@ -172,11 +176,11 @@ export default {
     data() {
         return {
             open: false,
-            releaseModal: null,
-            dialog: shallowRef(null),
+            releaseModal: null as (() => void) | null,
+            dialog: shallowRef<Modal | null>(null),
             /** Команда, чей ход сейчас показан: после конца ее имя еще нужно в строке */
             lastCommand: "",
-            tasks: [],
+            tasks: [] as ComposeTask[],
             done: 0,
             total: 0,
             /** Провал виден в шагах раньше, чем сервер ответит отказом */
@@ -185,39 +189,44 @@ export default {
             /** Шаги описывают настоящее: после конца команды правду говорит docker */
             live: false,
             rows: PROGRESS_TERMINAL_ROWS,
+            observer: shallowRef<ResizeObserver | null>(null),
+            writeSub: shallowRef<IDisposable | undefined>(undefined),
+            sampleTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+            settleTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+            tailTimer: undefined as ReturnType<typeof setTimeout> | undefined,
         };
     },
     computed: {
         /** Имя терминала прогресса: сюда сервер пишет вывод docker compose */
-        terminalName() {
+        terminalName() : string {
             return getComposeTerminalName(this.endpoint, this.stackName);
         },
 
         /** Заголовок - сама команда: "Запуск", "Перезапуск", "Обновление" */
-        title() {
+        title() : string {
             const key = COMMAND_KEYS[this.lastCommand];
             return key ? this.$t(key) : this.$t("progressTitle");
         },
 
-        failed() {
+        failed() : boolean {
             return this.outcome ? this.outcome === "failed" : this.stepFailed;
         },
 
         /**
          * Подтверждения не было. Это не отказ: команда могла выполниться, поэтому
          * строка не обещает ни удачи, ни провала, а отправляет смотреть состояние
-         * @returns {boolean} Итог команды остался неизвестным
+         * @returns Итог команды остался неизвестным
          */
-        resultUnknown() {
+        resultUnknown() : boolean {
             return this.outcome === "unknown";
         },
 
-        finished() {
+        finished() : boolean {
             return !this.running && this.outcome === "ok";
         },
 
         /** Шаг, о котором строка говорит сейчас: сначала провал, потом работа */
-        currentTask() {
+        currentTask() : ComposeTask | null {
             const failedTask = this.tasks.find((task) => task.state === "failed");
 
             if (failedTask) {
@@ -229,7 +238,7 @@ export default {
         },
 
         /** Что происходит прямо сейчас, одной строкой */
-        headline() {
+        headline() : string {
             if (this.failed) {
                 const task = this.tasks.find((item) => item.state === "failed");
                 return task ? this.$t("progressFailedAt", [ task.name ]) : this.$t("progressFailed");
@@ -253,7 +262,7 @@ export default {
         },
 
         /** Итог словами: он же стоит в подзаголовке окна вывода */
-        chipLabel() {
+        chipLabel() : string {
             if (this.running) {
                 return this.$t("deployRunningFor", [ this.elapsed ]);
             }
@@ -265,12 +274,12 @@ export default {
             return this.failed ? this.$t("progressFailed") : this.$t("progressFinished", [ this.elapsed ]);
         },
 
-        stepsTitle() {
+        stepsTitle() : string {
             return this.$t("progressSteps", [ this.done, this.total ]);
         },
 
         /** Нить без счета бежит сама, со счетом - показывает долю */
-        fillStyle() {
+        fillStyle() : { width? : string } {
             if (this.total === 0) {
                 return {};
             }
@@ -279,7 +288,7 @@ export default {
         },
     },
     watch: {
-        running(value) {
+        running(value : string) {
             if (value) {
                 this.startRun(value);
             } else {
@@ -288,15 +297,16 @@ export default {
         },
     },
     mounted() {
-        this.dialog = new Modal(this.$refs.dialog);
-        this.releaseModal = ownModal(this.$refs.dialog, this.dialog);
+        const dialog = this.$refs.dialog as HTMLElement;
+        this.dialog = new Modal(dialog);
+        this.releaseModal = ownModal(dialog, this.dialog);
         if (this.running) {
             this.startRun(this.running);
         }
 
         // Закрытое окно не имеет размера, и xterm не может себя измерить:
         // сетка подгоняется в тот момент, когда окно уже на экране
-        this.$refs.dialog.addEventListener("shown.bs.modal", this.refit);
+        dialog.addEventListener("shown.bs.modal", this.refit);
 
         // Высота консоли считается от экрана: после изменения окна старая сетка
         // xterm налезала бы на край окна, поэтому область под наблюдением
@@ -305,16 +315,16 @@ export default {
                 this.refit();
             });
         });
-        this.observer.observe(this.$refs.body);
+        this.observer.observe(this.$refs.body as HTMLElement);
 
         // Шаги берутся из того же текста, что видно в выводе: xterm уже свел
         // перерисованный блок compose к тому, что стоит на экране
-        this.writeSub = this.$refs.terminal?.terminal?.onWriteParsed(() => {
+        this.writeSub = (this.$refs.terminal as TerminalView | undefined)?.terminal?.onWriteParsed(() => {
             this.scheduleSample();
         });
     },
     beforeUnmount() {
-        this.$refs.dialog?.removeEventListener("shown.bs.modal", this.refit);
+        (this.$refs.dialog as HTMLElement | undefined)?.removeEventListener("shown.bs.modal", this.refit);
         // Окно уносит с собой затемнение: без явного закрытия оно осталось бы
         // висеть над следующим стеком
         this.releaseModal?.();
@@ -328,10 +338,9 @@ export default {
         /**
          * Команда началась: строка показывает ее с чистого листа, иначе шаги
          * прошлой команды выглядели бы как шаги этой
-         * @param {string} event Имя события команды
-         * @returns {void}
+         * @param event Имя события команды
          */
-        startRun(event) {
+        startRun(event : string) : void {
             this.lastCommand = event;
             this.open = true;
             this.tasks = [];
@@ -342,16 +351,15 @@ export default {
             this.live = true;
             clearTimeout(this.settleTimer);
             clearTimeout(this.tailTimer);
-            this.$refs.terminal?.terminal?.clear();
+            (this.$refs.terminal as TerminalView | undefined)?.terminal?.clear();
             this.publish();
         },
 
         /**
          * Команда кончилась: дочитываем хвост вывода, а потом отпускаем таблицу
          * сервисов - дальше о состоянии говорит docker, а не шаги
-         * @returns {void}
          */
-        finishRun() {
+        finishRun() : void {
             clearTimeout(this.settleTimer);
             this.settleTimer = setTimeout(() => {
                 this.sample();
@@ -371,18 +379,18 @@ export default {
         },
 
         /** Вывод пошел: строка показывается и тогда, когда команду запустил не этот экран */
-        onData() {
+        onData() : void {
             this.open = true;
             this.scheduleSample();
         },
 
-        scheduleSample() {
+        scheduleSample() : void {
             if (this.sampleTimer) {
                 return;
             }
 
             this.sampleTimer = setTimeout(() => {
-                this.sampleTimer = null;
+                this.sampleTimer = undefined;
                 this.sample();
             }, SAMPLE_DELAY);
         },
@@ -391,17 +399,16 @@ export default {
          * Прочитать вывод с экрана терминала и разобрать его в шаги.
          * Читается именно буфер xterm: в нем перерисовка compose уже свернута
          * к последнему состоянию блока
-         * @returns {void}
          */
-        sample() {
-            const terminal = this.$refs.terminal?.terminal;
+        sample() : void {
+            const terminal = (this.$refs.terminal as TerminalView | undefined)?.terminal;
 
             if (!terminal) {
                 return;
             }
 
             const buffer = terminal.buffer.active;
-            const lines = [];
+            const lines : string[] = [];
 
             for (let row = 0; row < buffer.length; row++) {
                 const line = buffer.getLine(row);
@@ -435,9 +442,8 @@ export default {
         /**
          * Рассказать странице о ходе: по этим шагам таблица сервисов называет
          * состояние словами compose, пока команда идет
-         * @returns {void}
          */
-        publish() {
+        publish() : void {
             // Шаги приходят из терминала стека, поэтому в сообщении сказано,
             // чьи они: страница остается той же при смене стека
             this.$emit("progress", { endpoint: this.endpoint,
@@ -447,16 +453,16 @@ export default {
         },
 
         /** Открыть окно с полным выводом команды */
-        openLog() {
+        openLog() : void {
             this.dialog?.show();
         },
 
         /**
          * Что происходит с ресурсом, словами
-         * @param {object} task Шаг разбора
-         * @returns {string} Слово для строки
+         * @param task Шаг разбора
+         * @returns Слово для строки
          */
-        verbLabel(task) {
+        verbLabel(task : ComposeTask) : string {
             const key = VERB_KEYS[task.verb];
 
             if (!key) {
@@ -473,29 +479,29 @@ export default {
 
         /**
          * Значок вида ресурса
-         * @param {object} task Шаг разбора
-         * @returns {string} Имя значка InterfaceIcon
+         * @param task Шаг разбора
+         * @returns Имя значка InterfaceIcon
          */
-        kindIcon(task) {
+        kindIcon(task : ComposeTask) : string {
             return KIND_ICONS[task.kind] ?? "box";
         },
 
         /**
          * Вид ресурса словом: значок показывает его быстрее, но не всем
-         * @param {object} task Шаг разбора
-         * @returns {string} Контейнер, сеть, том или образ
+         * @param task Шаг разбора
+         * @returns Контейнер, сеть, том или образ
          */
-        kindLabel(task) {
+        kindLabel(task : ComposeTask) : string {
             const key = KIND_KEYS[task.kind];
             return key ? this.$t(key) : task.kind;
         },
 
         /** Подогнать вывод под область */
-        refit() {
-            this.$refs.terminal?.updateTerminalSize?.();
+        refit() : void {
+            (this.$refs.terminal as TerminalView | undefined)?.updateTerminalSize?.();
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

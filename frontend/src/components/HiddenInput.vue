@@ -9,7 +9,7 @@
             :maxlength="maxlength"
             :autocomplete="autocomplete"
             :required="required"
-            :readonly="readonly"
+            :readonly="typeof readonly === 'string'"
         >
 
         <button v-if="visibility === 'password'" class="btn btn-normal" type="button" :aria-label="$t('showPassword')" @click="showInput()">
@@ -21,8 +21,10 @@
     </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent } from "vue";
+
+export default defineComponent({
     props: {
         /** The value of the input */
         modelValue: {
@@ -62,10 +64,10 @@ export default {
     },
     computed: {
         model: {
-            get() {
+            get() : string {
                 return this.modelValue;
             },
-            set(value) {
+            set(value : string) {
                 this.$emit("update:modelValue", value);
             }
         }
@@ -80,5 +82,5 @@ export default {
             this.visibility = "password";
         },
     }
-};
+});
 </script>

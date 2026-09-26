@@ -16,6 +16,7 @@
 
 | Page | What it covers |
 | --- | --- |
+| [The Docker socket](threat-model.md) | Why the socket is root on the host, who reaches it through the panel, what limits it |
 | [Verified self-updates](self-updates.md) | The release contract and its trust root, cutover and recovery, the legacy import |
 | [Release notes](releases/) | What changed in each release |
 

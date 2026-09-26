@@ -87,11 +87,11 @@ test("a request to an agent that is not connected fails instead of waiting", asy
 
         // The browser is waiting for an answer, so the caller has to be told that there
         // is nothing to send to rather than be left holding the request
-        await assert.rejects(manager.emitToEndpoint("remote.example", "getStack", "app"), /not found/);
+        await assert.rejects(manager.emitToEndpoint("remote.example", "getStack", "app"), /agentNotConnected/);
 
         const sent : SentEvent[] = [];
         manager.addFakeAgent("remote.example", 2, sent, false);
-        await assert.rejects(manager.emitToEndpoint("remote.example", "getStack", "app"), /not connected/);
+        await assert.rejects(manager.emitToEndpoint("remote.example", "getStack", "app"), /agentNotConnected/);
         assert.equal(sent.length, 0);
     });
 });
@@ -176,6 +176,7 @@ test("managing agents answers the browser and refuses what it cannot read", asyn
         const socket = Object.assign(new EventEmitter(), makeAuthenticatedSocket({ cookie,
             userID: identity.userID ?? "" }));
         const added : unknown[] = [];
+        const renamed : unknown[] = [];
         let listsSent = 0;
         let refreshedOthers = 0;
         socket.instanceManager = {
@@ -187,6 +188,7 @@ test("managing agents answers the browser and refuses what it cannot read", asyn
                     throw new Error("Agent not found");
                 }
             },
+            update: async (...args : unknown[]) => renamed.push(args),
             sendAgentList: async () => {
                 listsSent += 1;
             },
@@ -210,6 +212,24 @@ test("managing agents answers the browser and refuses what it cannot read", asyn
         assert.equal(added1.msg, "agentAddedSuccessfully");
         assert.equal(added.length, 1);
         assert.equal(refreshedOthers, 1);
+        assert.equal((added[0] as unknown[])[3], "Agent");
+
+        // A name is text that fits the column, stored without the spaces around it
+        assert.equal((await call("updateAgent", "http://agent.example:5001", "  Office NAS  ")).ok, true);
+        assert.equal((await call("updateAgent", "http://agent.example:5001", "")).ok, true);
+        assert.deepEqual(await call("updateAgent", "http://agent.example:5001", "x".repeat(256)), { ok: false,
+            type: 1,
+            msg: { key: "agentNameInvalid",
+                values: { max: "255" } },
+            msgi18n: true });
+        assert.equal((await call("updateAgent", "http://agent.example:5001", { name: "x" })).ok, false);
+        assert.equal((await call("updateAgent", 42, "Office")).ok, false);
+        assert.equal((await call("addAgent", { url: "http://agent.example:5002",
+            username: "owner",
+            password: TEST_PASSWORD,
+            name: 42 })).ok, false);
+        assert.deepEqual(renamed, [[ "http://agent.example:5001", "Office NAS" ], [ "http://agent.example:5001", "" ]]);
+        assert.equal(added.length, 1, "a malformed name stops the agent before it is added");
 
         const removedWrong = await call("removeAgent", 42);
         assert.equal(removedWrong.ok, false);
@@ -220,8 +240,8 @@ test("managing agents answers the browser and refuses what it cannot read", asyn
 
         // The list of agents is sent again after a change, so another browser tab of the
         // same session does not keep showing an agent that is gone
-        await waitFor(() => listsSent === 2);
-        assert.equal(listsSent, 2);
+        await waitFor(() => listsSent === 4);
+        assert.equal(listsSent, 4);
     });
 });
 

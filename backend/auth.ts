@@ -320,6 +320,10 @@ function buildAuth(server : DockgeServer, secret : string) {
                     max: 3 },
                 "/two-factor/verify-totp": { window: 60,
                     max: 5 },
+                // Reading one's own session guesses nothing: the cookie is the secret, and the
+                // socket handshake does the same lookup unlimited. Limited, it locked everyone
+                // behind one address, such as a proxy without DOCKGE_TRUST_PROXY, out of the page
+                "/get-session": false,
             },
         },
         databaseHooks: {

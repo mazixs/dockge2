@@ -1,5 +1,6 @@
-import composerize from "composerize";
 import type { LooseObject } from "../../common/util-common";
+import { MAX_DOCKER_RUN_COMMAND_LENGTH } from "../../common/docker-run-flags";
+import { convertDockerRunCommand, type DockerRunConversion } from "../../common/docker-run-compose";
 import { SocketHandler } from "../socket-handler.js";
 import { DockgeServer } from "../dockge-server";
 import { log } from "../log";
@@ -19,6 +20,7 @@ import path from "path";
 import { runInBackground } from "../background";
 import { MainTerminal } from "../terminal";
 import { CONSOLE_OPERATORS_SETTING, listUsers } from "../auth-access";
+import { CONTAINER_CONTROL_SETTING, SET_CONTAINER_CONTROL_EVENT } from "../../common/types/container";
 
 export class MainSocketHandler extends SocketHandler {
     create(socket : DockgeSocket, server : DockgeServer) {
@@ -115,7 +117,7 @@ export class MainSocketHandler extends SocketHandler {
 
                 callbackResult({
                     ok: true,
-                    msg: "Saved",
+                    msg: "saved",
                     msgi18n: true,
                 }, callback);
 
@@ -198,6 +200,36 @@ export class MainSocketHandler extends SocketHandler {
             }
         });
 
+        // Starting, stopping and restarting containers the panel does not manage: they
+        // belong to somebody else's project or to nobody's, so an owner turns it on with
+        // the password. Turning it off needs no confirmation
+        socket.on(SET_CONTAINER_CONTROL_EVENT, async (enabled : unknown, currentPassword : unknown, callback) => {
+            try {
+                checkLogin(socket);
+                if (socket.userRole !== "admin") {
+                    throw new ValidationError("authPermissionDenied");
+                }
+                if (typeof enabled !== "boolean") {
+                    throw new ValidationError("Wrong data type?");
+                }
+                if (enabled) {
+                    await doubleCheckPassword(socket, currentPassword);
+                }
+
+                await Settings.set(CONTAINER_CONTROL_SETTING, enabled, "security");
+                log.info("containerControl", `Control of unmanaged containers turned ${enabled ? "on" : "off"} by user ${socket.userID}`);
+
+                callbackResult({
+                    ok: true,
+                    msg: enabled ? "containerControlTurnedOn" : "containerControlTurnedOff",
+                    msgi18n: true,
+                }, callback);
+                runInBackground("stack list", () => server.sendStackList(true));
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         // Disconnect all other socket clients of the user
         socket.on("disconnectOtherSocketClients", async () => {
             try {
@@ -210,21 +242,15 @@ export class MainSocketHandler extends SocketHandler {
             }
         });
 
-        // composerize
-        socket.on("composerize", async (dockerRunCommand : unknown, callback) => {
+        socket.on("convertDockerRun", async (dockerRunCommand : unknown, callback) => {
             try {
                 checkLogin(socket);
-
-                if (typeof(dockerRunCommand) !== "string") {
-                    throw new ValidationError("dockerRunCommand must be a string");
-                }
-
-                // Option: 'latest' | 'v2x' | 'v3x'
-                const composeTemplate = stripGeneratedProjectName(composerize(dockerRunCommand, "", "latest"));
+                const { compose, report } = convertDockerRun(dockerRunCommand);
 
                 callback({
                     ok: true,
-                    composeTemplate,
+                    composeTemplate: compose,
+                    report,
                 });
             } catch (e) {
                 callbackError(e, callback);
@@ -235,24 +261,29 @@ export class MainSocketHandler extends SocketHandler {
 }
 
 /**
- * Remove the project name the converter generates, and nothing else.
+ * Turn a `docker run` command into a compose file, the one way the server does it.
  *
- * Cutting the first line blindly is wrong: when a flag is not supported the
- * converter reports it as a comment above the name, so the cut used to remove
- * the report and leave `name: <your project name>` inside the file of the user.
- * @param composeTemplate Output of the converter
- * @returns Compose file without the generated name line
+ * The length is checked first, so that a pasted megabyte is refused before it is read.
+ * @param command Command the client sent
+ * @returns Compose file with one service, and what happened to every flag
+ * @throws {ValidationError} When the command is not a string, is too long or names no image
  */
-export function stripGeneratedProjectName(composeTemplate : string) : string {
-    const lines = composeTemplate.split("\n");
-    const index = lines.findIndex((line) => /^name:\s*<[^>]*>\s*$/.test(line));
-
-    if (index === -1) {
-        return composeTemplate;
+export function convertDockerRun(command : unknown) : DockerRunConversion {
+    if (typeof(command) !== "string") {
+        throw new ValidationError("dockerRunCommand must be a string");
     }
 
-    lines.splice(index, 1);
-    return lines.join("\n");
+    if (command.length > MAX_DOCKER_RUN_COMMAND_LENGTH) {
+        throw new ValidationError("dockerRunCommandTooLong", { max: String(MAX_DOCKER_RUN_COMMAND_LENGTH) });
+    }
+
+    const conversion = convertDockerRunCommand(command);
+
+    if (!conversion) {
+        throw new ValidationError("dockerRunNoImage");
+    }
+
+    return conversion;
 }
 
 /** Settings the general settings screen is allowed to write */

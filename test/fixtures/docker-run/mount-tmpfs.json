@@ -1,0 +1,38 @@
+{
+    "description": "A tmpfs mount with a size becomes the long syntax with tmpfs.size.",
+    "command": "docker run -d --mount type=tmpfs,destination=/cache,tmpfs-size=64m nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "volumes"
+        ],
+        "values": {
+            "image": "nginx",
+            "volumes": [
+                {
+                    "type": "tmpfs",
+                    "target": "/cache",
+                    "tmpfs": {
+                        "size": "64m"
+                    }
+                }
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--mount"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

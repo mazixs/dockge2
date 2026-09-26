@@ -21,11 +21,13 @@
         <template v-else-if="name === 'key'"><circle cx="7.5" cy="12" r="3.5" /><path d="M11 12h9.5M17 12v3.2M20.5 12v2.4" /></template>
     </svg>
 </template>
-<script>
-export default {
+<script lang="ts">
+import { defineComponent } from "vue";
+
+export default defineComponent({
     props: { name: { type: String,
         required: true } },
-};
+});
 </script>
 <style scoped>
 .interface-icon { width: 1em; height: 1em; flex-shrink: 0; vertical-align: -.125em; }

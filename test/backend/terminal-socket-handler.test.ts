@@ -48,7 +48,8 @@ test("the interactive terminal event refuses anything but the allowed shells", a
         // A service the compose file does not declare is refused as well
         const unknownService = await call(agentSocket, "interactiveTerminal", "shell-stack", "nope", "sh");
         assert.equal(unknownService.ok, false);
-        assert.match(String(unknownService.msg), /Unknown service/);
+        assert.deepEqual(unknownService.msg, { key: "serviceUnknown",
+            values: { service: "nope" } });
 
         // Wrong types never reach the stack lookup
         for (const args of [
@@ -89,7 +90,7 @@ test("terminal events answer the browser instead of leaving it waiting", async (
         // state in the callback would otherwise stay there
         const missing = await call(agentSocket, "terminalInput", "container-exec-nothing", "ls");
         assert.equal(missing.ok, false);
-        assert.match(String(missing.msg), /not found|Interactive/);
+        assert.equal(missing.msg, "terminalNotFound");
 
         const wrongType = await call(agentSocket, "terminalInput", 5, "ls");
         assert.equal(wrongType.ok, false);
@@ -100,7 +101,7 @@ test("terminal events answer the browser instead of leaving it waiting", async (
 
         const refused = await call(agentSocket, "mainTerminal", "console");
         assert.equal(refused.ok, false);
-        assert.match(String(refused.msg), /Console is not enabled/);
+        assert.equal(refused.msg, "consoleOff");
 
         // A terminal nobody opened has no output, which is not an error
         const joined = await call(agentSocket, "terminalJoin", "container-exec-nothing");

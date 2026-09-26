@@ -15,15 +15,17 @@
     </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent, type PropType } from "vue";
+
+export default defineComponent({
     props: {
         visible: {
             type: Boolean,
             default: false,
         },
         position: {
-            type: Object,
+            type: Object as PropType<{ x : number, y : number }>,
             default: () => ({ x: 0,
                 y: 0 }),
         },
@@ -39,7 +41,7 @@ export default {
          * Keep the menu inside the window, so a right click near an edge stays usable
          * @returns {object} Inline style
          */
-        menuStyle() {
+        menuStyle() : { top : string, left : string } {
             const width = 180;
             const height = 90;
             const maxX = Math.max(0, window.innerWidth - width);
@@ -52,14 +54,14 @@ export default {
         },
     },
     watch: {
-        visible(value) {
+        visible(value : boolean) {
             if (value) {
                 document.addEventListener("click", this.onDocumentClick, true);
                 document.addEventListener("keydown", this.onKeydown, true);
 
                 // Focus the action, otherwise the menu cannot be used from the keyboard
                 this.$nextTick(() => {
-                    this.$refs.pasteButton?.focus();
+                    (this.$refs.pasteButton as HTMLButtonElement | undefined)?.focus();
                 });
             } else {
                 this.removeListeners();
@@ -84,8 +86,9 @@ export default {
          * @param {MouseEvent} event Click event
          * @returns {void}
          */
-        onDocumentClick(event) {
-            if (this.$refs.menu && !this.$refs.menu.contains(event.target)) {
+        onDocumentClick(event : MouseEvent) {
+            const menu = this.$refs.menu as HTMLElement | undefined;
+            if (menu && !menu.contains(event.target as Node | null)) {
                 this.$emit("close");
             }
         },
@@ -95,7 +98,7 @@ export default {
          * @param {KeyboardEvent} event Key event
          * @returns {void}
          */
-        onKeydown(event) {
+        onKeydown(event : KeyboardEvent) {
             if (event.key === "Escape") {
                 // Without this the escape also reaches the PTY and confuses the shell
                 event.preventDefault();
@@ -104,7 +107,7 @@ export default {
             }
         },
     },
-};
+});
 </script>
 
 <style scoped lang="scss">

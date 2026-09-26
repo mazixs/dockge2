@@ -1,9 +1,10 @@
 # Verified self-updates
 
-Release installation is a host-side operation. It does not use the browser, update stack images,
-fetch a production branch, or modify the user's checkout. `install.sh` authenticates a native
-updater; `extra/update-dockge.sh` is the optional npm entry point to the same engine in
-`extra/updater/`. Only explicit `--development --ref REF` builds source.
+Release installation is a host-side operation, whether an owner starts it from the web interface or
+on the host. It does not update stack images, fetch a production branch, or modify the user's
+checkout. `install.sh` authenticates a native updater; `extra/update-dockge.sh` is the optional npm
+entry point to the same engine in `extra/updater/`. Only explicit `--development --ref REF` builds
+source.
 
 ## Release contract and trust
 
@@ -46,9 +47,50 @@ The bootstrap forwards interruption to the native updater and waits for recovery
 its temporary verifier. `--resume` and `--rollback` use the recorded source; combining them with
 a new version/image selection is rejected.
 
+## Updates started from the web interface
+
+The panel never runs Compose on itself. For a preview or an update it starts a one-shot helper
+container from its own image (it carries the Docker CLI and the Compose plugin) that runs the
+installed launcher `<installation>/.dockge2/update`. The helper is outside the Compose project, has
+`--restart no` and the `json-file` log driver, and is not removed on exit, so its exit code and
+output outlive the panel restart. Names are fixed per kind,
+`dockge2-update-<project>-preview|apply`, so Docker refuses a second one atomically; the request id,
+versions and start time are labels. A container without those labels that holds the name is
+reported as such and left alone; remove it on the host.
+
+The installation directory is the Compose working-directory label of the panel's own container, the
+label the updater verifies itself. The helper mounts it and the data directory read-only, and
+`.dockge2`, host `/tmp` (the project lock and staging) and the Docker socket writable, all at
+identical paths, with `--mount`, which refuses a missing source instead of creating it. Read-only
+binds are not writers, so the helper passes the updater's writer check and cannot damage the data.
+When the data snapshot has to be restored, the updater does the directory renames in a nested
+container with only the data directory's parent writable.
+
+The helper runs `--progress json`: stdout carries JSON lines (a line per journal phase, a preview
+line on a dry run, and exactly one result line on every exit path), stderr the usual text. The panel
+keeps no update state: any panel that answers - the old one, the new one, or the old one after a
+recovery - derives the status from the helper's labels, exit code and lines, fail closed. Success
+needs the updater's `success` for that request, exit code 0 and the answering panel on the target
+version. A helper that left no result line is resolved from the journal by a read-only `--status`
+helper, and only by the journal of that update: the same versions, and the operation the helper
+reported or, if it reported none, one that began after the helper started. A recovered journal
+also says whether the snapshot replaced the data; an older updater's journal leaves that unknown,
+and the page then says nothing about the data. An apply is accepted
+only with the owner's password and a finished preview of the same version from the last ten
+minutes. Cancel sends SIGTERM and is refused once the image is downloaded; a running helper is never
+stopped or removed. The events are owner-only, are not agent events and have no MCP tool.
+
+Updates from the web interface pass `--restore-on-failed-start`: when the target never became ready
+and the schema changed, the verified stopped-data snapshot is restored and the previous version
+started, and the data the failed version wrote is kept as `.dockge-failed-<id>`. From the host the
+same behaviour is opt-in with the same flag; without it such a failure stays `recovery-required`.
+
+The invariants, every line of the progress contract and the page statechart are in
+[Updating from the web interface: state machines](panel-update-statechart.md).
+
 ## WebUI results
 
-The About screen discovers releases; installation runs through the host updater. Discovery keeps
+The About screen discovers releases. Discovery keeps
 network errors, deadlines, GitHub rate limits, HTTP failures, invalid responses and channels without
 a complete release distinct. A failed check preserves the last successful timestamp and does not
 claim that the installed version is current. Losing the browser acknowledgement is a separate
@@ -120,8 +162,10 @@ probe, and checks identity/health/restart count again after 10 seconds. Health p
 An unchanged schema permits automatic image/configuration recovery without data restoration.
 Before target startup, the previous panel can be recovered independently of the target schema.
 Schema identity includes migration files, auth code and resolved dependency identities; a release
-number change alone does not change the schema hash. Other schema changes require explicit data
-restoration. Missing future migrations now stop application startup instead of allowing a downgrade.
+number change alone does not change the schema hash. Other schema changes require data restoration:
+explicit, or automatic with `--restore-on-failed-start` when the target never became ready and the
+snapshot is verified (updates from the web interface always pass it). Missing future migrations now
+stop application startup instead of allowing a downgrade.
 
 ```bash
 sudo .dockge2/update --status
@@ -136,9 +180,23 @@ Newer data is preserved beside it as `.dockge-failed-<id>`. A staged replacement
 restore intent allow a retry after interruption between directory renames. This does not restore
 stack files or volumes. Preserve failed data until the incident is understood.
 
+The copy and the renames run in a short-lived container of the previous image with no network, a
+read-only root, no capabilities beyond file ownership, and only the data directory's parent
+writable; the statically linked updater is mounted into it. So the restore works the same from the host and
+from the helper of the web interface, which sees the data read-only. A data directory directly under
+`/` or under `/tmp` is refused, and Docker with user namespace remapping is not supported.
+
+The container is named `dockge2-restore-<project>-<id>`. When the restore fails or its deadline
+passes, the updater removes the container by that name on a deadline of its own: killing the
+`docker run` client would not stop the container, which belongs to the daemon. If the removal
+cannot be confirmed, the journal stays `rolling-back`: wait until that container has exited, then run
+`--rollback --restore-data`. While it runs, the writer check refuses any other recovery.
+
 `--resume` retries the recorded target after an external problem has been fixed; it never changes
 the target release or restores data. It refuses phases without a completed backup for an existing
-installation. An interruption before cutover can be marked failed with `--rollback`, without
+installation, and an operation whose snapshot was restored or whose restore began: the target would
+migrate the restored data again, and the next rollback would take that data for the snapshot. Finish
+such an operation with `--rollback --restore-data`, then start a new update. An interruption before cutover can be marked failed with `--rollback`, without
 recreating a running panel. A failed first installation has no previous release to roll back to:
 retry its recorded target with `--resume` when the initial configuration was written. If it was not,
 mark preparation failed with `--rollback` and repeat the fresh installation. Preserve the journal

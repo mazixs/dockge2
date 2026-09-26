@@ -1,0 +1,30 @@
+{
+    "description": "A restart policy survives as it is.",
+    "command": "docker run -d --restart unless-stopped nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "restart"
+        ],
+        "values": {
+            "image": "nginx",
+            "restart": "unless-stopped"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--restart"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -1,0 +1,39 @@
+{
+    "description": "The env file is referenced by its path relative to the stack directory, so it has to be there: docker compose config fails when it is missing, and the report says so.",
+    "command": "docker run -d --env-file ./app.env nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "env_file"
+        ],
+        "values": {
+            "image": "nginx",
+            "env_file": [
+                "./app.env"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "--env-file",
+                "reason": "flagEnvFileMustExist"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true,
+        "files": {
+            "app.env": "LOG_LEVEL=info\n"
+        }
+    }
+}

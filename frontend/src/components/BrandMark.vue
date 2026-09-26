@@ -5,10 +5,12 @@
     <span class="brand-mark">dockge<span class="generation">2</span></span>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent } from "vue";
+
+export default defineComponent({
     name: "BrandMark",
-};
+});
 </script>
 
 <style lang="scss" scoped>

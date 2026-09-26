@@ -11,7 +11,7 @@
             </div>
 
             <div class="auth-head">
-                <h1>{{ $t(tokenRequired ? "Token" : "Login") }}</h1>
+                <h1>{{ $t(tokenRequired ? "token" : "login") }}</h1>
                 <p v-if="tokenRequired" class="auth-lede">{{ $t("twoFactorCodeHint") }}</p>
             </div>
 
@@ -23,22 +23,22 @@
                     </div>
 
                     <div class="field">
-                        <label for="login-password" class="form-label">{{ $t("Password") }}</label>
+                        <label for="login-password" class="form-label">{{ $t("password") }}</label>
                         <input id="login-password" v-model="password" type="password" class="form-control" autocomplete="current-password" :disabled="processing" required>
                     </div>
                 </template>
 
                 <!-- Резервный код длиннее кода из приложения, поэтому поле принимает оба -->
                 <div v-else class="field">
-                    <label for="login-otp" class="form-label">{{ $t("Token") }}</label>
+                    <label for="login-otp" class="form-label">{{ $t("token") }}</label>
                     <input id="login-otp" ref="otp" v-model="token" type="text" maxlength="16" class="form-control" placeholder="123456" autocomplete="one-time-code" inputmode="numeric" :disabled="processing" required>
                 </div>
 
-                <p v-if="res && !res.ok" class="alert alert-danger" role="alert">{{ $t(res.msg) }}</p>
+                <p v-if="res && !res.ok && res.msg" class="alert alert-danger" role="alert">{{ $t(res.msg) }}</p>
 
                 <button class="btn btn-primary" type="submit" :disabled="processing">
                     <span v-if="processing" class="spinner-border spinner-border-sm"></span>
-                    {{ $t("Login") }}
+                    {{ $t("login") }}
                 </button>
 
                 <button v-if="tokenRequired" class="btn btn-normal" type="button" :disabled="processing" @click="restart">
@@ -48,10 +48,12 @@
         </div>
     </div>
 </template>
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import BrandMark from "./BrandMark.vue";
+import type { SocketResponse } from "../mixins/socket";
 
-export default {
+export default defineComponent({
     components: { BrandMark },
     data() {
         return {
@@ -59,7 +61,7 @@ export default {
             email: "",
             password: "",
             token: "",
-            res: null,
+            res: null as SocketResponse | null,
             tokenRequired: false,
         };
     },
@@ -93,7 +95,7 @@ export default {
                     this.res = res.msg ? res : null;
 
                     await this.$nextTick();
-                    this.$refs.otp?.focus();
+                    (this.$refs.otp as HTMLInputElement | undefined)?.focus();
                     return;
                 }
 
@@ -120,7 +122,7 @@ export default {
         },
 
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

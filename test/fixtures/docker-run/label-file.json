@@ -1,0 +1,39 @@
+{
+    "description": "The label file is referenced by its path, so it has to be there when the stack is loaded, and label_file needs Compose 2.32 or later. The report says both.",
+    "command": "docker run -d --label-file ./labels nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "label_file"
+        ],
+        "values": {
+            "image": "nginx",
+            "label_file": [
+                "./labels"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "--label-file",
+                "reason": "flagLabelFileMustExist"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true,
+        "files": {
+            "labels": "com.example.team=infra\n"
+        }
+    }
+}

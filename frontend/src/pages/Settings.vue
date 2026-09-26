@@ -7,10 +7,10 @@
             <font-awesome-icon icon="chevron-left" />{{ $t("familiarAllSettings") }}
         </router-link>
 
-        <h1 v-show="show">{{ $t("Settings") }}</h1>
+        <h1 v-show="show">{{ $t("settings") }}</h1>
 
         <div class="settings-layout">
-            <nav v-if="showSubMenu" class="settings-menu" :aria-label="$t('Settings')">
+            <nav v-if="showSubMenu" class="settings-menu" :aria-label="$t('settings')">
                 <template v-for="(group, groupIndex) in menuGroups" :key="groupIndex">
                     <hr v-if="groupIndex > 0" class="menu-split" />
                     <router-link v-for="item in group" :key="item.key" :to="`/settings/${item.key}`" class="menu-item">
@@ -20,7 +20,7 @@
 
                 <!-- Выход стоит здесь только на узком экране: на широком он в шапке -->
                 <a v-if="$root.loggedIn && !$root.authDisabled" class="menu-item logout d-lg-none" @click.prevent="$root.logout">
-                    <font-awesome-icon icon="sign-out-alt" />{{ $t("Logout") }}
+                    <font-awesome-icon icon="sign-out-alt" />{{ $t("logout") }}
                 </a>
             </nav>
 
@@ -37,20 +37,60 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import { useRoute } from "vue-router";
 
-export default {
+/** General settings as the server keeps them; a key the answer leaves out is not set */
+export interface GeneralSettings {
+    disableAuth? : boolean;
+    checkUpdate? : boolean;
+    checkBeta? : boolean;
+    trustProxy? : boolean;
+    keepDataPeriodDays? : number;
+    primaryHostname? : string;
+    serverTimezone? : string;
+    globalENV? : string;
+    [key : string] : unknown;
+}
+
+/** The answer of a settings request */
+export interface SettingsResponse {
+    ok : boolean;
+    msg? : string;
+    msgi18n? : boolean;
+    data? : GeneralSettings;
+}
+
+/**
+ * What the settings sections reach through `$parent`.
+ *
+ * The sections are rendered by the router inside this page and read the settings it
+ * loaded, so this names what they may rely on.
+ */
+export interface SettingsPageApi {
+    settings : GeneralSettings;
+    settingsLoaded : boolean;
+    loadSettings() : void;
+    saveSettings(callback? : (res : SettingsResponse) => void, currentPassword? : string) : void;
+}
+
+/** A section of the menu */
+interface SubMenu {
+    title : string;
+}
+
+export default defineComponent({
     data() {
         return {
             show: true,
-            settings: {},
+            settings: {} as GeneralSettings,
             settingsLoaded: false,
         };
     },
 
     computed: {
-        currentPage() {
+        currentPage() : string | null {
             let pathSplit = useRoute().path.split("/");
             let pathEnd = pathSplit[pathSplit.length - 1];
             if (!pathEnd || pathEnd === "settings") {
@@ -59,7 +99,7 @@ export default {
             return pathEnd;
         },
 
-        showSubMenu() {
+        showSubMenu() : boolean {
             if (this.$root.isMobile) {
                 return !this.currentPage;
             } else {
@@ -67,17 +107,17 @@ export default {
             }
         },
 
-        subMenus() {
+        subMenus() : Record<string, SubMenu | undefined> {
             return {
-                appearance: { title: this.$t("Appearance") },
-                security: { title: this.$t("Security") },
+                appearance: { title: this.$t("appearance") },
+                security: { title: this.$t("security") },
                 ...(this.$root.isAdmin ? {
                     general: { title: this.$t("general") },
                     users: { title: this.$t("familiarUsers") },
                     agents: { title: this.$t("dockgeAgent", 2) },
                     mcp: { title: this.$t("mcpTitle") },
-                    globalEnv: { title: this.$t("GlobalEnv") },
-                    about: { title: this.$t("About") },
+                    globalEnv: { title: this.$t("globalEnv") },
+                    about: { title: this.$t("about") },
                 } : {}),
             };
         },
@@ -86,16 +126,17 @@ export default {
          * Разделы идут тремя группами: сначала то, что настраивает себе каждый,
          * потом сервер, потом справка. Линия между группами отвечает на вопрос,
          * почему список не отсортирован по алфавиту
-         * @returns {Array<Array<{key: string, title: string}>>} Группы разделов
+         * @returns Группы разделов
          */
-        menuGroups() {
+        menuGroups() : { key : string, title : string }[][] {
             const groups = [[ "appearance", "security" ], [ "general", "users", "agents", "mcp", "globalEnv" ], [ "about" ]];
 
             return groups
-                .map((keys) => keys
-                    .filter((key) => this.subMenus[key])
-                    .map((key) => ({ key,
-                        title: this.subMenus[key].title })))
+                .map((keys) => keys.flatMap((key) => {
+                    const menu = this.subMenus[key];
+                    return menu ? [{ key,
+                        title: menu.title }] : [];
+                }))
                 .filter((group) => group.length > 0);
         },
     },
@@ -125,7 +166,7 @@ export default {
 
         /** Load settings from server */
         loadSettings() {
-            this.$root.getSocket().emit("getSettings", (res) => {
+            this.$root.getSocket().emit("getSettings", (res : SettingsResponse) => {
                 if (!res?.ok) {
                     this.$root.toastRes(res);
                     return;
@@ -141,20 +182,14 @@ export default {
         },
 
         /**
-         * Callback for saving settings
-         * @callback saveSettingsCB
-         * @param {Object} res Result of operation
-         */
-
-        /**
          * Save Settings
-         * @param {saveSettingsCB} [callback]
-         * @param {string} [currentPassword] Only need for disableAuth to true
+         * @param callback Called with the answer, only when the save succeeded
+         * @param currentPassword Only need for disableAuth to true
          */
-        saveSettings(callback, currentPassword) {
+        saveSettings(callback? : (res : SettingsResponse) => void, currentPassword? : string) {
             let valid = this.validateSettings();
             if (valid.success) {
-                this.$root.getSocket().emit("setSettings", this.settings, currentPassword, (res) => {
+                this.$root.getSocket().emit("setSettings", this.settings, currentPassword, (res : SettingsResponse) => {
                     this.$root.toastRes(res);
                     this.loadSettings();
 
@@ -171,10 +206,10 @@ export default {
 
         /**
          * Ensure settings are valid
-         * @returns {Object} Contains success state and error msg
+         * @returns Contains success state and error msg
          */
-        validateSettings() {
-            if (this.settings.keepDataPeriodDays < 0) {
+        validateSettings() : { success : boolean, msg : string } {
+            if ((this.settings.keepDataPeriodDays ?? 0) < 0) {
                 return {
                     success: false,
                     msg: this.$t("dataRetentionTimeError"),
@@ -186,7 +221,7 @@ export default {
             };
         },
     }
-};
+});
 </script>
 
 <style lang="scss" scoped>

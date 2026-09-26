@@ -1,0 +1,38 @@
+{
+    "description": "The log driver and its options become logging, and a numeric option stays a string.",
+    "command": "docker run -d --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "logging"
+        ],
+        "values": {
+            "image": "nginx",
+            "logging": {
+                "driver": "json-file",
+                "options": {
+                    "max-size": "10m",
+                    "max-file": "3"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--log-driver",
+            "--log-opt",
+            "--log-opt"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

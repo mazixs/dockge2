@@ -1,0 +1,30 @@
+{
+    "description": "privileged appears only when the command asks for it.",
+    "command": "docker run -d --privileged docker:dind",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "docker",
+        "keys": [
+            "image",
+            "privileged"
+        ],
+        "values": {
+            "image": "docker:dind",
+            "privileged": true
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--privileged"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

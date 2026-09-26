@@ -1,6 +1,6 @@
 <template>
     <div class="dashboard">
-        <button ref="stackToggle" class="mobile-stack-toggle" type="button" :aria-expanded="String(listOpen)" aria-controls="stack-navigation" @click="listOpen = !listOpen">
+        <button ref="stackToggle" class="mobile-stack-toggle" type="button" :aria-expanded="listOpen" aria-controls="stack-navigation" @click="listOpen = !listOpen">
             <font-awesome-icon icon="list" />{{ $t("stacksTab") }}<span>{{ stackCount }}</span><font-awesome-icon :icon="listOpen ? 'times' : 'chevron-down'" />
         </button>
         <aside v-show="!$root.isMobile || listOpen" id="stack-navigation" class="list-column" :aria-label="$t('stacksTab')">
@@ -25,11 +25,12 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import ShieldCheck from "../components/ShieldCheck.vue";
 import StackList from "../components/StackList.vue";
-export default {
+export default defineComponent({
     components: { InterfaceIcon,
         StackList,
         ShieldCheck },
@@ -37,7 +38,7 @@ export default {
         return { listOpen: false };
     },
     computed: {
-        stackCount() {
+        stackCount() : number {
             return Object.values(this.$root.completeStackList).filter(stack => this.$root.selectedEndpoint === null || (stack.endpoint || "") === this.$root.selectedEndpoint).length;
         },
     },
@@ -46,11 +47,11 @@ export default {
             const fromNavigation = this.listOpen && this.$root.isMobile;
             this.listOpen = false;
             if (fromNavigation) {
-                this.$nextTick(() => this.$refs.workspace?.focus({ preventScroll: true }));
+                this.$nextTick(() => (this.$refs.workspace as HTMLElement | undefined)?.focus({ preventScroll: true }));
             }
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

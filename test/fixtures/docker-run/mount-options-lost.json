@@ -1,0 +1,49 @@
+{
+    "description": "A volume option the service cannot hold is reported as lost, and the volume is still declared, so the file stays valid.",
+    "command": "docker run -d --mount type=volume,source=cache,target=/cache,volume-opt=type=nfs nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services",
+            "volumes"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "volumes"
+        ],
+        "values": {
+            "image": "nginx",
+            "volumes": [
+                {
+                    "type": "volume",
+                    "source": "cache",
+                    "target": "/cache"
+                }
+            ]
+        },
+        "topLevelValues": {
+            "volumes": {
+                "cache": {
+                    "external": true,
+                    "name": "cache"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--mount",
+                "reason": "flagOptionsLost"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -1,0 +1,66 @@
+{
+    "description": "A switch turned off asks for nothing, and a value docker itself would refuse is reported rather than written, so the file keeps only what docker would have run.",
+    "command": "docker run -d --privileged=false --init=false --cpus abc --ulimit nofile --health-retries x --log-opt novalue --stop-timeout 30s --mount type=bind,source=/a --mount type=bind,source=/a,target=/b,readonly=maybe --gpus foo=bar --network '' nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image"
+        ],
+        "values": {
+            "image": "nginx"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--privileged",
+            "--init"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--cpus",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--ulimit",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--health-retries",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--log-opt",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--stop-timeout",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--mount",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--mount",
+                "reason": "flagNotAccepted"
+            },
+            {
+                "flag": "--gpus",
+                "reason": "flagGpusDropped"
+            },
+            {
+                "flag": "--network",
+                "reason": "flagNotAccepted"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

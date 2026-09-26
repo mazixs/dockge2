@@ -1,14 +1,16 @@
 import { strict as assert } from "node:assert";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import test from "node:test";
-import { looksLikeContainerId, readOwnProjectName, resolveProjectStatus } from "../../backend/stack-state";
+import { readOwnProjectName, resolveProjectStatus } from "../../backend/stack-state";
+import { findOwnContainerId } from "../../backend/own-container";
 import type { ComposePsEntry } from "../../common/compose-status";
 import { ATTENTION, CREATED_STACK, EXITED, RUNNING, UNKNOWN } from "../../common/util-common";
 
 const project = "demo";
 
 /**
- * Build the host wide container map the way readInstanceMap() returns it
+ * Build the host wide container map the way readHostContainers() groups it
  * @param entries Containers of the demo project
  * @returns Instance map
  */
@@ -143,20 +145,6 @@ test("a stack whose compose project was renamed is still matched by its director
     assert.equal(nameOnly.status, UNKNOWN);
 });
 
-test("the panel recognises its own container by hostname, and nothing else", () => {
-    // Docker names a container after its short id when `hostname:` is not set
-    for (const own of [ "8be97d7c3c12", "0123456789ab", "ffffffffffff" ]) {
-        assert.equal(looksLikeContainerId(own), true, `${own} is a short container id`);
-    }
-
-    // A chosen hostname, the host's own name, or a full id: inspecting any of these
-    // would ask the daemon about whatever else answers to that name
-    for (const other of [ "fi-vmmini", "dockge2", "", "8be97d7c3c1", "8be97d7c3c123",
-        "8be97d7c3c12f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829", "8BE97D7C3C12", "my-panel-01" ]) {
-        assert.equal(looksLikeContainerId(other), false, `${other} is not a short container id`);
-    }
-});
-
 test("asking which project the panel runs as never throws, and is asked once", async () => {
     // Deliberately not asserting a value: these tests run on a development machine, in
     // CI, and inside the container ./local.sh builds, and the honest answer differs in
@@ -168,7 +156,7 @@ test("asking which project the panel runs as never throws, and is asked once", a
     assert.equal(second, first, "the answer is cached, not asked again");
 
     // Outside a container there is no own project, and nothing is hidden from the list
-    if (!looksLikeContainerId(os.hostname())) {
+    if (!findOwnContainerId(await readFile("/proc/self/mountinfo", "utf8").catch(() => ""), os.hostname())) {
         assert.equal(first, "");
     }
 });

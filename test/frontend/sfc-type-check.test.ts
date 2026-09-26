@@ -1,41 +1,30 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { DockgeRootApi } from "../../frontend/src/root-api";
 
 /**
- * `allowJs` without `checkJs` compiles a single file component but never looks inside its
- * own methods, so a call to an agent event could name an event that does not exist, forget
- * its arguments or read a field the answer does not carry, and the check would still pass.
- * What turns checking on is `// @ts-check` at the top of the script block, one file at a
- * time. The test below holds that the components which write stacks still ask for the
- * check; `wrongAgentCallsDoNotCompile` holds that the agent API they call stays strict.
+ * `vue-tsc` checks a plain `<script>` block only as loosely as `allowJs` does: a call to
+ * an agent event could name an event that does not exist, forget its arguments or read a
+ * field the answer does not carry, and the check would still pass. Every component moved
+ * to TypeScript in 0.0.14; the test below keeps a new one from coming back as JavaScript,
+ * and `wrongAgentCallsDoNotCompile` holds that the agent API they call stays strict.
  */
 
-const root = fileURLToPath(new URL("../../", import.meta.url));
+const sources = fileURLToPath(new URL("../../frontend/src/", import.meta.url));
 
-/** Where a wrong agent call has to be caught: the inspector, the editor and the writing screens */
-const CHECKED_COMPONENTS = [
-    "frontend/src/pages/StackInspector.vue",
-    "frontend/src/pages/Compose.vue",
-    "frontend/src/pages/NewStack.vue",
-    "frontend/src/pages/StackGitChanges.vue",
-    "frontend/src/components/CreateStackSheet.vue",
-];
+test("every single file component with a script is written in TypeScript", () => {
+    const components = readdirSync(sources, { recursive: true,
+        encoding: "utf8" }).filter((file) => file.endsWith(".vue"));
+    const loose = components.filter((file) => {
+        const source = readFileSync(path.join(sources, file), "utf8");
+        return /<script[\s>]/.test(source) && !/<script(?: setup)? lang="ts"[\s>]/.test(source);
+    });
 
-test("the components that read and write stacks ask for their own script to be checked", () => {
-    for (const file of CHECKED_COMPONENTS) {
-        const source = readFileSync(root + file, "utf8");
-        const script = source.split("\n<script>\n")[1];
-
-        assert.ok(script, `${file}: a plain <script> block is what // @ts-check applies to`);
-
-        const firstLine = script.split("\n").find((line) => line.trim() !== "");
-
-        assert.equal(firstLine?.trim(), "// @ts-check",
-            `${file}: without // @ts-check its own methods are compiled but never checked`);
-    }
+    assert.ok(components.length > 40, "the components were found");
+    assert.deepEqual(loose, [], "a plain <script> block is checked only as loosely as JavaScript");
 });
 
 /**

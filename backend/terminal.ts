@@ -571,7 +571,7 @@ export class MainTerminal extends InteractiveTerminal {
      */
     static async open(server : DockgeServer, socket : DockgeSocket) : Promise<Terminal> {
         if (!await MainTerminal.enabled()) {
-            throw new Error("Console is not enabled.");
+            throw new Error("consoleOff");
         }
 
         const owner = terminalOwner(socket);

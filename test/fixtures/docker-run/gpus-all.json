@@ -1,0 +1,48 @@
+{
+    "description": "--gpus all becomes a device reservation for every NVIDIA GPU, without a runtime key.",
+    "command": "docker run -d --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "cuda",
+        "keys": [
+            "image",
+            "deploy",
+            "command"
+        ],
+        "values": {
+            "image": "nvidia/cuda:12.4.1-base-ubuntu22.04",
+            "deploy": {
+                "resources": {
+                    "reservations": {
+                        "devices": [
+                            {
+                                "driver": "nvidia",
+                                "count": "all",
+                                "capabilities": [
+                                    "gpu"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "command": [
+                "nvidia-smi"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--gpus"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

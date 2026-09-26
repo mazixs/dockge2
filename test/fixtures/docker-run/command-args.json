@@ -1,0 +1,39 @@
+{
+    "description": "Arguments after the image that look like flags stay with the container: they are neither parsed nor reported. The command becomes a list, as the shell split it, and yes stays a string.",
+    "command": "docker run -d redis:7 redis-server --appendonly yes --save 60 1",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "redis",
+        "keys": [
+            "image",
+            "command"
+        ],
+        "values": {
+            "image": "redis:7",
+            "command": [
+                "redis-server",
+                "--appendonly",
+                "yes",
+                "--save",
+                "60",
+                "1"
+            ]
+        },
+        "text": [
+            "- \"yes\""
+        ]
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -1,23 +1,18 @@
 import test from "node:test";
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
+import { componentOptions } from "../helpers/sfc";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed, statusStateName } from "../../common/util-common";
 
-const source = readFileSync(new URL("../../frontend/src/components/Uptime.vue", import.meta.url), "utf8");
-const script = source.split("<script>")[1]!.split("</script>")[0]!.replace(/^import .*;$/gm, "").replace("export default", "result =");
-const context = { ATTENTION,
-    CREATED_FILE,
-    CREATED_STACK,
-    EXITED,
-    RUNNING,
-    isStackFailed,
-    statusStateName,
-    StateChip: {},
-    result: { computed: { state() {},
-        statusName() {},
-        issueText() {} } } };
-runInNewContext(script, context);
+const context = { result: componentOptions<{ computed : { state : () => unknown,
+    statusName : () => unknown,
+    issueText : () => unknown } }>(new URL("../../frontend/src/components/Uptime.vue", import.meta.url), { ATTENTION,
+        CREATED_FILE,
+        CREATED_STACK,
+        EXITED,
+        RUNNING,
+        isStackFailed,
+        statusStateName,
+        StateChip: {} }) };
 
 test("stack chip distinguishes saved files, stopped containers, running and failure", () => {
     for (const [ status, expected ] of [[ CREATED_FILE, "pagesNotDeployed" ], [ CREATED_STACK, "pagesStopped" ], [ RUNNING, "pagesRunning" ], [ EXITED, "pagesFailed" ], [ ATTENTION, "pagesAttention" ], [ undefined, "pagesUnknown" ]]) {

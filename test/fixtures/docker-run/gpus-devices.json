@@ -1,0 +1,47 @@
+{
+    "description": "A device selection becomes a reservation of exactly those devices, with the gpu capability docker always asks for. The device ids stay strings.",
+    "command": "docker run -d --gpus '\"device=0,1\"' nvidia/cuda:12.4.1-base-ubuntu22.04",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "cuda",
+        "keys": [
+            "image",
+            "deploy"
+        ],
+        "values": {
+            "image": "nvidia/cuda:12.4.1-base-ubuntu22.04",
+            "deploy": {
+                "resources": {
+                    "reservations": {
+                        "devices": [
+                            {
+                                "driver": "nvidia",
+                                "device_ids": [
+                                    "0",
+                                    "1"
+                                ],
+                                "capabilities": [
+                                    "gpu"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--gpus"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

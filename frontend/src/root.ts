@@ -2,6 +2,7 @@ import { defineComponent, h } from "vue";
 import App from "./App.vue";
 import { toast } from "vue3-toastify";
 import type { DockgeRootApi } from "./root-api";
+import { currentMessageKey } from "./server-message-keys";
 
 // Mixins
 import socket from "./mixins/socket";
@@ -49,13 +50,14 @@ export function rootApp() {
              * interface. Anything without a catalogue entry is therefore shown as the
              * raw detail of a translated frame, so the reader at least gets told in
              * their own language that something unexpected happened.
-             * @param {string} key Key or raw message from the server
+             * @param {string} message Key or raw message from the server
              * @param {object} values Named values of the key, if it has any
              * @returns {string} Text for the toast
              */
-            translateServerMessage(key : string, values? : Record<string, unknown>) : string {
+            translateServerMessage(message : string, values? : Record<string, unknown>) : string {
+                const key = currentMessageKey(message);
                 if (!this.$te(key)) {
-                    return this.$t("unexpectedServerError", { detail: key });
+                    return this.$t("unexpectedServerError", { detail: message });
                 }
 
                 return values ? this.$t(key, values) : this.$t(key);

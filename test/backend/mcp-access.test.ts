@@ -56,7 +56,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { withDatabase, createTestAccount, TEST_PASSWORD } from "../helpers/database";
 import { Database } from "../../backend/database";
 import { Settings } from "../../backend/settings";
-import { McpKeys, synchronizeStackIdentities } from "../../backend/mcp-keys";
+import { McpKeys, REISSUE_OVERLAP_MS, synchronizeStackIdentities } from "../../backend/mcp-keys";
 import { mountMcp, validateMcpURL, readMcpTool } from "../../backend/mcp-server";
 import { flushMcpAudit, resetMcpAudit, auditReason, auditText } from "../../backend/mcp-audit";
 import { failureMessage, MCP_TOOL_ORDER } from "../../backend/mcp-catalog";
@@ -445,10 +445,16 @@ test("management requires actual owner session and password and cannot use machi
             data: { id: keyId } });
         const headers = { Origin: base,
             "Content-Type": "application/json" };
-        assert.equal((await fetch(endpoint, { method: "POST",
+        const machine = await fetch(endpoint, { method: "POST",
             headers: { ...headers,
                 Authorization: "Bearer " + secret },
-            body })).status, 403);
+            body });
+        assert.equal(machine.status, 403);
+        assert.deepEqual(await machine.json(), { error: "mcpOwnerRequired" });
+        const foreign = await fetch(base + "/api/mcp", { headers: { Origin: "https://attacker.example",
+            Cookie: cookie } });
+        assert.equal(foreign.status, 403);
+        assert.deepEqual(await foreign.json(), { error: "mcpOriginDenied" }, "a foreign page is told apart from a missing owner");
         assert.equal((await fetch(endpoint, { method: "POST",
             headers: { ...headers,
                 Cookie: cookie },
@@ -459,6 +465,61 @@ test("management requires actual owner session and password and cannot use machi
                 Cookie: cookie },
             body })).status, 200);
         await assert.rejects(new McpKeys(Database.getKnex()).authenticate(secret));
+    });
+});
+
+test("a reissued key hands over to a new secret, and the old one runs out after the overlap", async () => {
+    await withMcp(async ({ base, secret, cookie, keyId }) => {
+        const knex = Database.getKnex();
+        const keys = new McpKeys(knex);
+        const before = Date.now();
+        const response = await fetch(base + "/api/mcp/reissue", { method: "POST",
+            headers: { Origin: base,
+                "Content-Type": "application/json",
+                Cookie: cookie },
+            body: JSON.stringify({ password: TEST_PASSWORD,
+                data: { id: keyId } }) });
+        assert.equal(response.status, 200);
+        const issued = await response.json() as { id : string; secret : string; previousExpiresAt : number };
+        assert.notEqual(issued.id, keyId);
+
+        // Both work during the overlap, with the same authority
+        const fresh = await keys.authenticate(issued.secret);
+        const old = await keys.authenticate(secret);
+        assert.deepEqual({ ...fresh,
+            keyId: "" }, { ...old,
+            keyId: "" });
+        assert.ok(issued.previousExpiresAt >= before + REISSUE_OVERLAP_MS && issued.previousExpiresAt <= Date.now() + REISSUE_OVERLAP_MS);
+        const rows = await knex("mcp_key").whereIn("id", [ keyId, issued.id ]).select("id", "expires_at");
+        assert.equal(Number(rows.find((row) => row.id === keyId)?.expires_at), issued.previousExpiresAt);
+        assert.ok(Number(rows.find((row) => row.id === issued.id)?.expires_at) > before + 29 * 86_400_000, "the new key gets the lifetime the old one was issued with");
+        await flushMcpAudit();
+        assert.ok(await knex("mcp_audit").where({ tool: "key_reissue",
+            key_id: keyId }).first());
+
+        await knex("mcp_key").where({ id: keyId }).update({ expires_at: Date.now() - 1 });
+        await assert.rejects(keys.authenticate(secret));
+        assert.equal((await keys.authenticate(issued.secret)).keyId, issued.id);
+        await assert.rejects(keys.reissue(keyId), /mcpInvalidReissue/);
+        await keys.revoke(issued.id);
+        await assert.rejects(keys.reissue(issued.id), /mcpInvalidReissue/);
+    });
+});
+
+test("a key whose owner lost the role is not carried forward by a reissue", async () => {
+    await withMcp(async ({ stackId, userId }) => {
+        const knex = Database.getKnex();
+        const keys = new McpKeys(knex);
+        await knex("user").where({ id: userId }).update({ role: "operator" });
+        const operator = await keys.issue({ name: "operator",
+            userId,
+            role: "operator",
+            actions: [ "stacks:control" ],
+            mode: "approval",
+            stacks: [ stackId ] });
+        await knex("user").where({ id: userId }).update({ role: "viewer" });
+        await assert.rejects(keys.reissue(operator.id), /mcpInvalidRole/);
+        assert.equal(await knex("mcp_key").count({ count: "*" }).first().then((row) => Number(row?.count)), 2, "nothing was issued");
     });
 });
 

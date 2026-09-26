@@ -30,7 +30,7 @@
                 v-for="state in states" :key="state"
                 :to="filterLink(state)"
                 :class="[ `count-${state}`, { zero: counts[state] === 0, on: activeFilter === state } ]"
-                :aria-pressed="String(activeFilter === state)"
+                :aria-current="activeFilter === state ? 'true' : undefined"
                 :title="$t(`stabilityCountLink_${state}`)"
             >
                 <strong>{{ counts[state] }}</strong> {{ $t(`stabilityState_${state}`) }}

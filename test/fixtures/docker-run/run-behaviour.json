@@ -1,0 +1,41 @@
+{
+    "description": "Flags about how docker run itself behaves: -d is not needed, -it becomes stdin_open and tty, --pull becomes pull_policy, and --rm does not apply to a long-running service, which the report asks to look at.",
+    "command": "docker run -d --rm -it --pull always nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "stdin_open",
+            "tty",
+            "pull_policy"
+        ],
+        "values": {
+            "image": "nginx",
+            "stdin_open": true,
+            "tty": true,
+            "pull_policy": "always"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "-i",
+            "-t",
+            "--pull"
+        ],
+        "review": [
+            {
+                "flag": "--rm",
+                "reason": "flagRmNotApplicable"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

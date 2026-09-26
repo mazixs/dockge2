@@ -1,0 +1,34 @@
+{
+    "description": "Devices survive with their container path and permissions, without privileged.",
+    "command": "docker run -d --device /dev/dri:/dev/dri --device=/dev/ttyUSB0:/dev/ttyUSB0:rwm jellyfin/jellyfin",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "jellyfin",
+        "keys": [
+            "image",
+            "devices"
+        ],
+        "values": {
+            "image": "jellyfin/jellyfin",
+            "devices": [
+                "/dev/dri:/dev/dri",
+                "/dev/ttyUSB0:/dev/ttyUSB0:rwm"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--device",
+            "--device"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

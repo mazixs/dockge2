@@ -121,10 +121,15 @@
     </div>
 </template>
 
-<script>
-// @ts-check
+<script lang="ts">
+import { defineComponent } from "vue";
 import { canApplyGitChoices, diffLineRows } from "../git-ui";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed } from "../../../common/util-common";
+import type { GitFileChoice, GitPreviewFile, GitSaveResult, GitUpdatePreview } from "../../../common/types/stack-git";
+import type { StackSummaryDTO, ViewerStackSummary } from "../../../common/types/stack";
+
+/** A line of one side of the comparison */
+type DiffLine = ReturnType<typeof diffLineRows>[number];
 
 /**
  * How long the acknowledgement of an apply is waited for.
@@ -135,52 +140,48 @@ import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed 
  */
 const APPLY_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
-export default {
+export default defineComponent({
     /**
      * Hold the person on the page while the files are being applied
-     * @this {{ applying : boolean }}
-     * @returns {boolean} Whether leaving is allowed
+     * @param this The page, which the router types without its own fields
+     * @returns Whether leaving is allowed
      */
-    beforeRouteLeave() {
+    beforeRouteLeave(this : { applying : boolean }) : boolean {
         return !this.applying;
     },
     data() {
         return {
-            /** @type {import("../../../common/types/stack-git").GitUpdatePreview | null} */
-            preview: null,
+            preview: null as GitUpdatePreview | null,
             previewEndpoint: "",
             previewStackName: "",
             selectedPath: "",
-            /** @type {Record<string, import("../../../common/types/stack-git").GitFileChoice>} */
-            choices: {},
-            /** Черновик результата по каждому файлу @type {Record<string, string>} */
-            editedContents: {},
+            choices: {} as Record<string, GitFileChoice>,
+            /** Черновик результата по каждому файлу */
+            editedContents: {} as Record<string, string>,
             loading: false,
             applying: false,
             failure: "",
             review: false,
-            /** @type {import("../../../common/types/stack-git").GitSaveResult | null} */
-            result: null,
+            result: null as GitSaveResult | null,
             requestVersion: 0,
         };
     },
     computed: {
-        stackName() {
+        stackName() : string {
             // Параметр маршрута может прийти списком: страница работает с одним стеком
             return String(this.$route.params.stackName ?? "");
         },
-        endpoint() {
+        endpoint() : string {
             return String(this.$route.params.endpoint || "");
         },
-        stackPath() {
+        stackPath() : string {
             return `/stack/${encodeURIComponent(this.stackName)}${this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : ""}`;
         },
-        currentStack() {
+        currentStack() : StackSummaryDTO | ViewerStackSummary | undefined {
             return this.$root.completeStackList[this.stackName + "_" + this.endpoint];
         },
-        statusLabel() {
-            /** @type {Record<number, string>} */
-            const labels = { [CREATED_FILE]: "pagesNotDeployed",
+        statusLabel() : string {
+            const labels : Record<number, string> = { [CREATED_FILE]: "pagesNotDeployed",
                 [CREATED_STACK]: "pagesStopped",
                 [RUNNING]: "pagesRunning",
                 [ATTENTION]: "pagesAttention" };
@@ -194,30 +195,30 @@ export default {
             }
             return labels[status] || "pagesUnknown";
         },
-        servicesRunning() {
+        servicesRunning() : boolean {
             return this.statusLabel === "pagesRunning";
         },
-        selectedFile() {
+        selectedFile() : GitPreviewFile | undefined {
             return this.preview?.files.find(file => file.path === this.selectedPath);
         },
-        serverLines() {
+        serverLines() : DiffLine[] {
             return diffLineRows(this.selectedFile?.serverText ?? null, this.selectedFile?.gitText ?? null);
         },
-        gitLines() {
+        gitLines() : DiffLine[] {
             return diffLineRows(this.selectedFile?.gitText ?? null, this.selectedFile?.serverText ?? null);
         },
-        resolvedCount() {
+        resolvedCount() : number {
             return this.preview?.files.filter(file => Object.hasOwn(this.choices, file.path)).length || 0;
         },
-        ready() {
+        ready() : boolean {
             return this.$root.canManageStacks && canApplyGitChoices(this.preview?.files || [], this.choices, this.editedContents);
         },
-        hasLocalChoice() {
+        hasLocalChoice() : boolean {
             return Object.values(this.choices).some(choice => choice === "server" || choice === "edited");
         },
     },
     watch: {
-        "$root.socketIO.connected"(connected) {
+        "$root.socketIO.connected"(connected : boolean) {
             if (!connected && this.applying) {
                 this.applying = false;
                 this.failure = this.$t("gitUiResultUnknown");
@@ -242,9 +243,8 @@ export default {
          *
          * The wait is ended here, not the work on the server: an apply that was sent
          * carries on, and the state it leaves is read again by the next preview.
-         * @returns {void}
          */
-        forgetRequest() {
+        forgetRequest() : void {
             if (this.preview && !this.applying) {
                 this.$root.emitAgentRequest(this.previewEndpoint, "gitDiscardPreview", [ this.previewStackName, this.preview.id ]);
             }
@@ -255,18 +255,18 @@ export default {
         },
         /**
          * Show the commit identifier provided by the server.
-         * @param {string} [commit] Commit the preview named
-         * @returns {string} Its short form
+         * @param commit Commit the preview named
+         * @returns Its short form
          */
-        shortCommit(commit) {
+        shortCommit(commit? : string) : string {
             return commit?.slice(0, 7) || "?";
         },
         /**
          * Read the exact per-file decision, never an inherited object property.
-         * @param {string} path File the decision is about
-         * @returns {string} What the decision says
+         * @param path File the decision is about
+         * @returns What the decision says
          */
-        choiceLabel(path) {
+        choiceLabel(path : string) : string {
             if (!Object.hasOwn(this.choices, path)) {
                 return this.$t("gitUiNeedsChoice");
             }
@@ -277,10 +277,9 @@ export default {
         },
         /**
          * Record an explicit selection while preserving all other file decisions.
-         * @param {"server" | "git" | "edited"} choice Which version wins for this file
-         * @returns {void}
+         * @param choice Which version wins for this file
          */
-        choose(choice) {
+        choose(choice : GitFileChoice) : void {
             this.choices = { ...this.choices,
                 [this.selectedPath]: choice };
         },
@@ -340,10 +339,9 @@ export default {
         },
         /**
          * Apply the reviewed snapshot; the server revalidates disk state before writing.
-         * @param {boolean} deploy Whether the stack is started once the files are written
-         * @returns {void}
+         * @param deploy Whether the stack is started once the files are written
          */
-        apply(deploy) {
+        apply(deploy : boolean) : void {
             if (!this.ready || this.applying || this.failure || !this.preview) {
                 return;
             }
@@ -372,7 +370,7 @@ export default {
             });
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

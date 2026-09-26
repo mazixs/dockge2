@@ -5,13 +5,9 @@ import path from "path";
 import knex from "knex";
 import type { Knex } from "knex";
 
+/** Contents of `db-config.json`: SQLite is the only database, any other type is refused */
 interface DBConfig {
-    type?: "sqlite" | "mysql";
-    hostname?: string;
-    port?: string;
-    database?: string;
-    username?: string;
-    password?: string;
+    type : string;
 }
 
 export class Database {
@@ -21,7 +17,7 @@ export class Database {
      */
     static sqlitePath : string;
 
-    static dbConfig: DBConfig = {};
+    static dbConfig: DBConfig = { type: "sqlite" };
 
     static knexMigrationsPath = "./backend/migrations";
 
@@ -55,8 +51,7 @@ export class Database {
     /**
      * Read the database config
      * @throws {Error} If the config is invalid
-     * @typedef {string|undefined} envString
-     * @returns {{type: "sqlite"} | {type:envString, hostname:envString, port:envString, database:envString, username:envString, password:envString}} Database config
+     * @returns {DBConfig} Database config
      */
     static readDBConfig() : DBConfig {
         const dbConfigString = fs.readFileSync(path.join(this.server.config.dataDir, "db-config.json")).toString("utf-8");
@@ -73,7 +68,6 @@ export class Database {
     }
 
     /**
-     * @typedef {string|undefined} envString
      * @param dbConfig the database configuration that should be written
      * @returns {void}
      */
@@ -83,10 +77,9 @@ export class Database {
 
     /**
      * Connect to the database.
-     * @param {boolean} _autoloadModels Kept for compatibility with the old database API.
      * @returns {Promise<void>}
      */
-    static async connect(_autoloadModels = true) {
+    static async connect() {
         let dbConfig : DBConfig;
         try {
             dbConfig = this.readDBConfig();
@@ -216,36 +209,10 @@ export class Database {
         log.info("db", "Closing the database");
 
         // Flush WAL to main database
-        if (Database.dbConfig.type === "sqlite") {
-            await db.raw("PRAGMA wal_checkpoint(TRUNCATE)");
-        }
+        await db.raw("PRAGMA wal_checkpoint(TRUNCATE)");
 
         await db.destroy();
         Database.knexInstance = undefined;
         log.info("db", "Database closed");
-    }
-
-    /**
-     * Get the size of the database (SQLite only)
-     * @returns {number} Size of database
-     */
-    static getSize() {
-        if (Database.dbConfig.type === "sqlite") {
-            log.debug("db", "Database.getSize()");
-            const stats = fs.statSync(Database.sqlitePath);
-            log.debug("db", stats);
-            return stats.size;
-        }
-        return 0;
-    }
-
-    /**
-     * Shrink the database
-     * @returns {Promise<void>}
-     */
-    static async shrink() {
-        if (Database.dbConfig.type === "sqlite") {
-            await Database.getKnex().raw("VACUUM");
-        }
     }
 }

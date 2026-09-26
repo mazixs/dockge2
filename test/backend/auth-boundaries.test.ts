@@ -249,6 +249,22 @@ test("guessing a password over the endpoints is rate limited per client address"
     });
 });
 
+test("reading one's own session is not rate limited, so a shared address is not locked out", async () => {
+    await withDatabase(async () => {
+        const cookie = await createTestAccount();
+        const read = () => getAuth().handler(new Request("http://localhost:5001/api/auth/get-session", {
+            headers: { cookie,
+                [CLIENT_IP_HEADER]: "198.51.100.7" },
+        }));
+
+        // Every page load and reconnect reads the session, and the counter of the library
+        // only resets after a quiet minute: a team behind one proxy never gives it one
+        for (let index = 0; index < 80; index += 1) {
+            assert.equal((await read()).status, 200, `session read ${index + 1} was refused`);
+        }
+    });
+});
+
 test("a client whose session was revoked loses its open socket", async () => {
     await withDatabase(async () => {
         const cookie = await createTestAccount();
@@ -302,7 +318,7 @@ test("with authentication disabled the socket acts as the owner and keeps workin
         // Such a socket has no session, so confirming a password has to work without one
         const socket = makeAuthenticatedSocket({ userID });
         await doubleCheckPassword(socket, TEST_PASSWORD);
-        await assert.rejects(doubleCheckPassword(socket, "wrong-password"), /Incorrect current password/);
+        await assert.rejects(doubleCheckPassword(socket, "wrong-password"), /incorrectCurrentPassword/);
         clearPasswordAttempts(socket);
 
         // And that socket must not be dropped by the periodic check
@@ -318,7 +334,7 @@ test("password confirmation over the socket stops accepting guesses", async () =
         clearPasswordAttempts(socket);
 
         for (let attempt = 0; attempt < 5; attempt += 1) {
-            await assert.rejects(doubleCheckPassword(socket, `guess-${attempt}`), /Incorrect current password/);
+            await assert.rejects(doubleCheckPassword(socket, `guess-${attempt}`), /incorrectCurrentPassword/);
         }
 
         // Locked: even the right password is refused now, which is what stops guessing

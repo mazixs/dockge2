@@ -61,7 +61,7 @@ export class AgentManager {
     async test(url : string, username : string, password : string) : Promise<void> {
         const endpoint = new URL(url).host;
         if (this.agentSocketList[endpoint]) {
-            throw new Error("The Dockge URL already exists");
+            throw new Error("agentUrlExists");
         }
         await signInAgent(url, username, password);
     }
@@ -91,7 +91,7 @@ export class AgentManager {
             runInBackground("agent list", () => this.sendAgentList());
             delete this.agentSocketList[endpoint];
         } else {
-            throw new Error("Agent not found");
+            throw new Error("agentNotFound");
         }
     }
 
@@ -105,7 +105,7 @@ export class AgentManager {
         if (agent) {
             runInBackground("agent list", () => this.sendAgentList());
         } else {
-            throw new Error("Agent not found");
+            throw new Error("agentNotFound");
         }
     }
 
@@ -294,7 +294,7 @@ export class AgentManager {
 
         if (!client) {
             log.error("agent-manager", "Socket client not found for endpoint: " + endpoint);
-            throw new Error("Socket client not found for endpoint: " + endpoint);
+            throw new Error("agentNotConnected");
         }
 
         if (!client.connected || !this.agentLoggedInList[endpoint]) {
@@ -316,7 +316,7 @@ export class AgentManager {
 
             if (!ok) {
                 log.error("agent-manager", `${endpoint}: Socket client not connected`);
-                throw new Error("Socket client not connected for endpoint: " + endpoint);
+                throw new Error("agentNotConnected");
             }
         }
 

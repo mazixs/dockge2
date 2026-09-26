@@ -1,0 +1,67 @@
+{
+    "description": "CPU, memory and health check tuning flags land in their compose keys, with numbers where compose expects them.",
+    "command": "docker run -d -c 512 --cpuset-cpus 0-1 --cpu-period 100000 --cpu-quota 50000 --cpu-rt-period 1000000 --cpu-rt-runtime 950000 --cpu-count 2 --cpu-percent 50 --memory-swappiness 10 --oom-kill-disable --oom-score-adj 100 --health-cmd 'true' --health-start-interval 5s nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "cpu_shares",
+            "cpuset",
+            "cpu_period",
+            "cpu_quota",
+            "cpu_rt_period",
+            "cpu_rt_runtime",
+            "cpu_count",
+            "cpu_percent",
+            "mem_swappiness",
+            "oom_kill_disable",
+            "oom_score_adj",
+            "healthcheck"
+        ],
+        "values": {
+            "image": "nginx",
+            "cpu_shares": 512,
+            "cpuset": "0-1",
+            "cpu_period": 100000,
+            "cpu_quota": 50000,
+            "cpu_rt_period": 1000000,
+            "cpu_rt_runtime": 950000,
+            "cpu_count": 2,
+            "cpu_percent": 50,
+            "mem_swappiness": 10,
+            "oom_kill_disable": true,
+            "oom_score_adj": 100,
+            "healthcheck": {
+                "test": "true",
+                "start_interval": "5s"
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "-c",
+            "--cpuset-cpus",
+            "--cpu-period",
+            "--cpu-quota",
+            "--cpu-rt-period",
+            "--cpu-rt-runtime",
+            "--cpu-count",
+            "--cpu-percent",
+            "--memory-swappiness",
+            "--oom-kill-disable",
+            "--oom-score-adj",
+            "--health-cmd",
+            "--health-start-interval"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

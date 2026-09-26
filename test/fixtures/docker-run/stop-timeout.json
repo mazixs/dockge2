@@ -1,0 +1,33 @@
+{
+    "description": "docker takes the stop timeout in seconds, compose a duration with a unit: 30 becomes 30s.",
+    "command": "docker run -d --stop-timeout 30 --stop-signal SIGINT nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "stop_grace_period",
+            "stop_signal"
+        ],
+        "values": {
+            "image": "nginx",
+            "stop_grace_period": "30s",
+            "stop_signal": "SIGINT"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--stop-timeout",
+            "--stop-signal"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

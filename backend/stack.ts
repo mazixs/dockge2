@@ -54,8 +54,9 @@ import type { Availability } from "../common/availability";
 import { Settings } from "./settings";
 import { withStackLock } from "./stack-lock";
 import { clearImageUpdateCache } from "./image-updates";
+import { isPanelStack, readPanelIdentity } from "./own-container";
 import {
-    type ComposeLsEntry, readComposeProjects, readInstanceMap, readOwnProjectName, readStatusList,
+    type ComposeLsEntry, readComposeProjects, readHostContainers, readStatusList,
     resolveProjectStatus,
 } from "./stack-state";
 
@@ -68,9 +69,9 @@ import {
  * @param filePath Absolute path inside the stack directory
  * @returns Content of the file, or the error code that prevented reading it
  */
-function readStackFileSync(filePath : string) : { content : string, code? : string, missing? : boolean } {
+async function readStackFile(filePath : string) : Promise<{ content : string, code? : string, missing? : boolean }> {
     try {
-        return { content: fs.readFileSync(filePath, "utf-8") };
+        return { content: await fsAsync.readFile(filePath, "utf-8") };
     } catch (e) {
         const code = (e as NodeJS.ErrnoException).code ?? "EIO";
         if (code === "ENOENT") {
@@ -103,6 +104,8 @@ export class Stack {
     /** Selected files that do not exist, told apart from files that are empty */
     protected _missingFiles : Set<string> = new Set();
     protected _inventory? : StackFileInventory;
+    /** Service that runs the panel itself, told by the container and not by the name */
+    protected _panelService = "";
     protected server: DockgeServer;
 
     protected combinedTerminal? : Terminal;
@@ -216,7 +219,7 @@ export class Stack {
      */
     static validateName(name : string) : void {
         if (!name.match(/^[a-z0-9_-]+$/)) {
-            throw new ValidationError("Stack name can only contain [a-z][0-9] _ - only");
+            throw new ValidationError("stackNameInvalid");
         }
     }
 
@@ -257,7 +260,7 @@ export class Stack {
         const relative = path.relative(base, resolved);
 
         if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-            throw new ValidationError("Stack path is outside the stacks directory");
+            throw new ValidationError("stackPathOutside");
         }
 
         return resolved;
@@ -272,7 +275,7 @@ export class Stack {
         try {
             const stat = await fsAsync.lstat(dir);
             if (stat.isSymbolicLink()) {
-                throw new ValidationError("Stack path is outside the stacks directory");
+                throw new ValidationError("stackPathOutside");
             }
         } catch (e) {
             if (e instanceof ValidationError) {
@@ -363,6 +366,7 @@ export class Stack {
             dir: this.isManagedByDockge ? this.path : "",
             // What is known about the last day, computed from recorded status changes
             availability: this._availability,
+            panelService: this._panelService,
         };
     }
 
@@ -392,38 +396,63 @@ export class Stack {
         // Prevent "setenv: The parameter is incorrect"
         // It only happens when there is one line and it doesn't contain "="
         if (lines.length === 1 && !firstLine.includes("=") && firstLine.length > 0) {
-            throw new ValidationError("Invalid .env format");
+            throw new ValidationError("envFormatInvalid");
         }
     }
 
+    /**
+     * The selected compose text, as `loadTexts()` read it or as an edit passed it in
+     * @returns Compose text
+     */
     get composeYAML() : string {
         if (this._composeYAML === undefined) {
-            this._composeYAML = this.readSelectedFile(this._composeFileName);
+            throw new Error(`The files of ${this.name} were not read: call loadTexts() first`);
         }
         return this._composeYAML;
     }
 
+    /**
+     * The selected env text, as `loadTexts()` read it or as an edit passed it in
+     * @returns Env text
+     */
     get composeENV() : string {
         if (this._composeENV === undefined) {
-            this._composeENV = this.readSelectedFile(this.activeEnvFileName);
+            throw new Error(`The files of ${this.name} were not read: call loadTexts() first`);
         }
         return this._composeENV;
     }
 
     /**
+     * Read the selected compose and env files into memory.
+     *
+     * Once, and without blocking: the list scan touches every stack every few seconds,
+     * and a synchronous read there held up every socket of the panel for each file. A
+     * text passed to the constructor is an edit and is kept.
+     * @returns void
+     */
+    async loadTexts() : Promise<void> {
+        if (this._composeYAML === undefined) {
+            this._composeYAML = await this.readSelectedFile(this._composeFileName);
+        }
+        if (this._composeENV === undefined) {
+            this._composeENV = await this.readSelectedFile(this.activeEnvFileName);
+        }
+    }
+
+    /**
      * Read one of the selected files and remember a failure instead of hiding it.
      *
-     * The getters cannot throw: the stack list shows every directory, including the ones
-     * whose files this process may not read. What they must not do is let a caller treat
+     * Reading cannot throw: the stack list shows every directory, including the ones
+     * whose files this process may not read. What it must not do is let a caller treat
      * an unreadable file as an empty one, so the failure is kept and reported separately.
      * @param fileName Selected compose or env file
      * @returns Content, or an empty text when the file is absent or unreadable
      */
-    protected readSelectedFile(fileName : string) : string {
+    protected async readSelectedFile(fileName : string) : Promise<string> {
         let result : { content : string, code? : string, missing? : boolean };
 
         try {
-            result = readStackFileSync(resolveStackFilePathSync(this.path, fileName));
+            result = await readStackFile(await resolveStackFilePath(this.path, fileName));
         } catch (e) {
             // The name or the directory itself is not usable: not an empty file either
             result = { content: "",
@@ -582,14 +611,14 @@ export class Stack {
         const exists = await fileExists(this.path);
 
         if (isAdd && exists) {
-            throw new ValidationError("Stack name already exists");
+            throw new ValidationError("stackNameExists");
         }
         if (isAdd) {
             await fsAsync.mkdir(this.path);
             return;
         }
         if (!exists) {
-            throw new ValidationError("Stack not found");
+            throw new ValidationError("stackNotFound");
         }
     }
 
@@ -719,7 +748,7 @@ export class Stack {
 
             // Compose normally reports keys and paths, but the message is redacted anyway:
             // a secret value must never reach the client through an error
-            throw new ValidationError("Invalid compose configuration: " + (await this.redactSecrets(reason)).slice(0, 2000));
+            throw new ValidationError("composeConfigInvalid", { reason: (await this.redactSecrets(reason)).slice(0, 2000) });
         }
     }
 
@@ -747,17 +776,39 @@ export class Stack {
         return result;
     }
 
+    /**
+     * Refuse a command that would take the panel down in the middle of running it.
+     *
+     * Compose runs inside the panel's container. `down` removes it, and `up` recreates it
+     * whenever the file changed - restart here is `up --force-recreate`, so always: the
+     * command is killed with the old container, and the new one is left created but never
+     * started. Stopping stays possible, with a warning on the page, because it does exactly
+     * what it says. The panel is updated from Settings, About, where a helper container
+     * outside the panel does the work.
+     * @param serviceName Service the command is limited to, when it is
+     * @returns void
+     * @throws {ValidationError} When the command would stop the panel
+     */
+    protected async assertNotPanel(serviceName? : string) : Promise<void> {
+        const own = await readPanelIdentity();
+
+        if (isPanelStack(own, this.path) && (serviceName === undefined || serviceName === own?.service)) {
+            throw new ValidationError("stackIsPanel");
+        }
+    }
+
     async deploy(socket : DockgeSocket) : Promise<number> {
         return this.control("deploy", (args, cwd) => Terminal.exec(this.server, socket, getComposeTerminalName(socket.endpoint, this.name), "docker", args, cwd));
     }
 
     /** Delete even an unconfigured stack, without asking broken Compose files to clean it up. */
     async delete(socket: DockgeSocket) : Promise<number> {
+        await this.assertNotPanel();
         return withStackLock(this.path, async () => {
             await Stack.assertNotSymlink(this.path);
             const terminalName = getComposeTerminalName(socket.endpoint, this.name);
             if (Terminal.getTerminal(terminalName)) {
-                throw new ValidationError("Another operation is already running, please try again later.");
+                throw new ValidationError("operationBusy");
             }
             const execute = (args : string[]) => Terminal.exec(this.server, socket, terminalName, "docker", args, this.path);
             let valid = true;
@@ -818,42 +869,11 @@ export class Stack {
     }
 
     static async getStackList(server : DockgeServer, useCacheForManaged = false) : Promise<Map<string, Stack>> {
-        let stacksDir = server.stacksDir;
-        let stackList : Map<string, Stack>;
-
-        // Use cached stack list?
-        if (useCacheForManaged && this.managedStackList.size > 0) {
-            stackList = this.managedStackList;
-        } else {
-            stackList = new Map<string, Stack>();
-
-            // Scan the stacks directory, and get the stack list
-            let filenameList = await fsAsync.readdir(stacksDir);
-
-            for (let filename of filenameList) {
-                try {
-                    // Check if it is a directory
-                    let stat = await fsAsync.stat(path.join(stacksDir, filename));
-                    if (!stat.isDirectory()) {
-                        continue;
-                    }
-                    // If no compose file exists, skip it
-                    if (!await Stack.composeFileExists(stacksDir, filename)) {
-                        continue;
-                    }
-                    let stack = await this.getStack(server, filename);
-                    stack._status = CREATED_FILE;
-                    stackList.set(filename, stack);
-                } catch (e) {
-                    if (e instanceof Error) {
-                        log.warn("getStackList", `Failed to get stack ${filename}, error: ${e.message}`);
-                    }
-                }
-            }
-
-            // Cache by copying
-            this.managedStackList = new Map(stackList);
-        }
+        // A copy: the projects the panel does not manage are added to it below, and one
+        // kept in the cache stayed listed long after Docker forgot it
+        const stackList = useCacheForManaged && this.managedStackList.size > 0
+            ? new Map(this.managedStackList)
+            : await this.scanManagedStacks(server);
 
         // Get the project list and config paths from docker compose ls
         let composeList : ComposeLsEntry[];
@@ -871,26 +891,76 @@ export class Stack {
                 stack._status = UNKNOWN;
                 stack._issues = [];
             }
+            server.standaloneContainers.lose();
 
             await this.fillStackDetails(stackList);
 
             return stackList;
         }
 
-        if (composeList.length === 0) {
-            await this.fillStackDetails(stackList);
-            return stackList;
+        // Every container of the host in one Docker call: the compose projects and the
+        // containers outside them, which the list shows on their own
+        const host = await readHostContainers();
+        const own = await readPanelIdentity();
+        if (host) {
+            // A panel started with `docker run` is standalone, and hidden like its project would be
+            server.standaloneContainers.observe(host.standalone.filter((row) => row.id !== own?.id));
+        } else {
+            server.standaloneContainers.lose();
         }
 
-        // Container states of every compose project, read in one Docker call
-        const instanceMap = await readInstanceMap();
+        this.applyComposeProjects(server, stackList, composeList, host?.instances ?? null, own?.project ?? "");
+        await this.fillStackDetails(stackList);
 
-        // The panel's own project, so it does not list itself as a stack it cannot touch.
-        // "dockge" is kept beside it for an installation carried over from upstream, where
-        // that was the project name
-        const ownProject = await readOwnProjectName();
+        return stackList;
+    }
 
-        for (let composeStack of composeList) {
+    /**
+     * Read the stacks directory and remember what it holds for the rounds that follow
+     * @param server Server whose stacks directory is read
+     * @returns Every directory with a compose file, by name
+     */
+    protected static async scanManagedStacks(server : DockgeServer) : Promise<Map<string, Stack>> {
+        const stacksDir = server.stacksDir;
+        const stackList = new Map<string, Stack>();
+
+        for (const filename of await fsAsync.readdir(stacksDir)) {
+            try {
+                const stat = await fsAsync.stat(path.join(stacksDir, filename));
+                if (!stat.isDirectory() || !await Stack.composeFileExists(stacksDir, filename)) {
+                    continue;
+                }
+                const stack = await this.getStack(server, filename);
+                stack._status = CREATED_FILE;
+                stackList.set(filename, stack);
+            } catch (e) {
+                if (e instanceof Error) {
+                    log.warn("getStackList", `Failed to get stack ${filename}, error: ${e.message}`);
+                }
+            }
+        }
+
+        this.managedStackList = new Map(stackList);
+        return stackList;
+    }
+
+    /**
+     * Put what Docker says about each compose project onto the list.
+     *
+     * A managed stack missing from the answer is back to what its files alone say. The ten
+     * second round reuses the stacks of the last directory scan, and one brought down from
+     * a shell used to stay "running" until the panel itself changed something.
+     * @param server Server the stacks belong to
+     * @param stackList Stacks of this round, extended here with the projects the panel does not manage
+     * @param composeList Projects as `docker compose ls` describes them
+     * @param instanceMap Containers by project and by working directory, null when Docker could not be read
+     * @param ownProject Compose project of the panel itself
+     * @returns Nothing; the stacks of the list are updated
+     */
+    protected static applyComposeProjects(server : DockgeServer, stackList : Map<string, Stack>, composeList : ComposeLsEntry[], instanceMap : Map<string, ComposePsEntry[]> | null, ownProject : string) : void {
+        const seen = new Set<string>();
+
+        for (const composeStack of composeList) {
             let stack = stackList.get(composeStack.Name);
 
             // This stack probably is not managed by Dockge, but we still want to show it
@@ -898,7 +968,8 @@ export class Stack {
                 // Hide the panel itself: stopping or redeploying it from inside would take
                 // away the very thing showing the buttons. A copy the user has deliberately
                 // put in the stacks directory is a different matter - that one is managed,
-                // so it was found above and never reaches this branch
+                // so it was found above and never reaches this branch. "dockge" is kept for
+                // an installation carried over from upstream, where that was the project name
                 if (composeStack.Name === ownProject || composeStack.Name === "dockge") {
                     continue;
                 }
@@ -906,6 +977,7 @@ export class Stack {
                 stackList.set(composeStack.Name, stack);
             }
 
+            seen.add(composeStack.Name);
             const detailed = resolveProjectStatus(composeStack, instanceMap, stack);
             stack._status = detailed.status;
             stack._issues = detailed.issues;
@@ -917,9 +989,14 @@ export class Stack {
             );
         }
 
-        await this.fillStackDetails(stackList);
-
-        return stackList;
+        for (const [ name, stack ] of stackList) {
+            if (!seen.has(name) && stack._status !== CREATED_FILE) {
+                stack._status = CREATED_FILE;
+                stack._issues = [];
+                // Summarised again from the file alone, without the containers that are gone
+                stack._services = [];
+            }
+        }
     }
 
     /**
@@ -1062,10 +1139,11 @@ export class Stack {
                 let stack = stackList.get(stackName);
 
                 if (stack) {
+                    await stack.loadTexts();
                     return stack;
                 } else {
                     // Really not found
-                    throw new ValidationError("Stack not found");
+                    throw new ValidationError("stackNotFound");
                 }
             }
         } else {
@@ -1085,6 +1163,9 @@ export class Stack {
 
         if (!skipFSOperations) {
             await stack.loadFileConfig();
+            await stack.loadTexts();
+            const own = await readPanelIdentity();
+            stack._panelService = own && isPanelStack(own, stack.path) ? own.service : "";
         }
 
         return stack;
@@ -1112,6 +1193,9 @@ export class Stack {
     async control(action: "start" | "stop" | "restart" | "deploy" | "update", execute: (args: string[], cwd: string) => Promise<number>): Promise<number> {
         if (![ "start", "stop", "restart", "deploy", "update" ].includes(action)) {
             throw new Error("Unsupported stack control action");
+        }
+        if (action !== "stop") {
+            await this.assertNotPanel();
         }
         if ([ "start", "deploy", "update", "restart" ].includes(action)) {
             await this.validateComposeConfig();
@@ -1169,10 +1253,11 @@ export class Stack {
     }
 
     async down(socket: DockgeSocket) : Promise<number> {
+        await this.assertNotPanel();
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", this.getComposeOptions("down"), this.path);
         if (exitCode !== 0) {
-            throw new Error("Failed to down, please check the terminal output for more information.");
+            throw new Error("stackDownFailed");
         }
         return exitCode;
     }
@@ -1213,7 +1298,7 @@ export class Stack {
      */
     async joinContainerTerminal(socket: DockgeSocket, serviceName: string, shell : ContainerShell = "sh", index: number = 0) : Promise<string> {
         if (!isContainerShell(shell)) {
-            throw new ValidationError("Unsupported shell: " + shell);
+            throw new ValidationError("shellUnsupported");
         }
 
         this.assertServiceExists(serviceName);
@@ -1243,18 +1328,18 @@ export class Stack {
      */
     assertServiceExists(serviceName : string) : void {
         if (serviceName.startsWith("-")) {
-            throw new ValidationError("Unknown service: " + serviceName);
+            throw new ValidationError("serviceUnknown", { service: serviceName });
         }
 
         const services = readComposeServices(this.composeYAML);
 
         if (services.length === 0) {
             // The compose file could not be read, so nothing can be confirmed
-            throw new ValidationError("Cannot read the compose file of this stack");
+            throw new ValidationError("stackComposeUnreadable");
         }
 
         if (!services.includes(serviceName)) {
-            throw new ValidationError("Unknown service: " + serviceName);
+            throw new ValidationError("serviceUnknown", { service: serviceName });
         }
     }
 
@@ -1274,7 +1359,7 @@ export class Stack {
             });
         } catch (e) {
             log.debug("assertShellExists", `${shell} is not usable in ${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
-            throw new ValidationError(`${shell} is not available in this container`);
+            throw new ValidationError("shellMissing", { shell });
         }
     }
 
@@ -1295,9 +1380,10 @@ export class Stack {
             await StackConfig.set(this.name, validated);
             await this.loadFileConfig();
 
-            // Drop cached texts, the selected files may be different now
+            // The selected files may be different now
             this._composeYAML = undefined;
             this._composeENV = undefined;
+            await this.loadTexts();
 
             return validated;
         });
@@ -1310,7 +1396,7 @@ export class Stack {
      */
     async writeEnvFile(fileName : string, content : string) : Promise<void> {
         if (classifyStackFile(fileName) !== "env") {
-            throw new ValidationError("Not an env file: " + fileName);
+            throw new ValidationError("stackFileNotEnv", { file: fileName });
         }
 
         await writeStackFiles(this.path, [{ name: fileName,
@@ -1424,9 +1510,10 @@ export class Stack {
     }
 
     async startService(socket: DockgeSocket, serviceName: string) {
+        await this.assertNotPanel(serviceName);
         const exitCode = await this.execServiceCommand(socket, "up", serviceName, "-d");
         if (exitCode !== 0) {
-            throw new Error(`Failed to start service ${serviceName}, please check logs for more information.`);
+            throw new Error("serviceStartFailed");
         }
 
         return exitCode;
@@ -1435,7 +1522,7 @@ export class Stack {
     async stopService(socket: DockgeSocket, serviceName: string): Promise<number> {
         const exitCode = await this.execServiceCommand(socket, "stop", serviceName);
         if (exitCode !== 0) {
-            throw new Error(`Failed to stop service ${serviceName}, please check logs for more information.`);
+            throw new Error("serviceStopFailed");
         }
 
         return exitCode;
@@ -1443,10 +1530,11 @@ export class Stack {
 
     async restartService(socket: DockgeSocket, serviceName: string): Promise<number> {
         this.assertServiceExists(serviceName);
+        await this.assertNotPanel(serviceName);
         await this.validateComposeConfig();
         const exitCode = await this.execServiceCommand(socket, "up", serviceName, "-d", "--no-deps", "--force-recreate");
         if (exitCode !== 0) {
-            throw new Error(`Failed to restart service ${serviceName}, please check logs for more information.`);
+            throw new Error("serviceRestartFailed");
         }
 
         return exitCode;
@@ -1455,6 +1543,7 @@ export class Stack {
     /** Update only the selected service image and recreate its container. */
     async updateService(socket: DockgeSocket, serviceName: string): Promise<number> {
         this.assertServiceExists(serviceName);
+        await this.assertNotPanel(serviceName);
         await this.validateComposeConfig();
         const definition = yaml.parse(this.composeYAML).services[serviceName];
         const builds = Boolean(definition.build);

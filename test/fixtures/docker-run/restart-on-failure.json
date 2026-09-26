@@ -1,0 +1,30 @@
+{
+    "description": "A restart policy with a retry count, written with =, survives in the form compose accepts.",
+    "command": "docker run -d --restart=on-failure:5 nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "restart"
+        ],
+        "values": {
+            "image": "nginx",
+            "restart": "on-failure:5"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--restart"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

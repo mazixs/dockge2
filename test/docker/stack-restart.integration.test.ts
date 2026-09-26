@@ -70,7 +70,7 @@ services:
             await stack.updateService(socket, "app");
             assert.notEqual(await docker("ps", "-q", "app"), beforeUpdate);
             assert.equal(await docker("ps", "-q", "sibling"), siblingAfterRestart);
-            await assert.rejects(stack.updateService(socket, "--all"), /Unknown service/);
+            await assert.rejects(stack.updateService(socket, "--all"), /serviceUnknown/);
             assert.equal(await readFile(path.join(directory, "selected.yml"), "utf8"), compose);
             assert.equal(await readFile(path.join(directory, ".env.selected"), "utf8"), "TEST_VALUE=stack\n");
         } finally {

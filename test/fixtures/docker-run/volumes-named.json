@@ -1,0 +1,45 @@
+{
+    "description": "A named volume is declared external with the same name. That keeps the data of a container being migrated, but docker compose up stops on a host where the volume does not exist yet, while docker run would create it.",
+    "command": "docker run -d -v pgdata:/var/lib/postgresql/data postgres:16",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services",
+            "volumes"
+        ],
+        "service": "postgres",
+        "keys": [
+            "image",
+            "volumes"
+        ],
+        "values": {
+            "image": "postgres:16",
+            "volumes": [
+                "pgdata:/var/lib/postgresql/data"
+            ]
+        },
+        "topLevelValues": {
+            "volumes": {
+                "pgdata": {
+                    "external": true,
+                    "name": "pgdata"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "-v",
+                "reason": "flagVolumeExternal"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -1,0 +1,50 @@
+{
+    "description": "The advanced --network syntax carries its alias and address under the network, which is declared external.",
+    "command": "docker run -d --network name=proxy,alias=web,ip=172.20.0.5 nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services",
+            "networks"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "networks"
+        ],
+        "values": {
+            "image": "nginx",
+            "networks": {
+                "proxy": {
+                    "aliases": [
+                        "web"
+                    ],
+                    "ipv4_address": "172.20.0.5"
+                }
+            }
+        },
+        "topLevelValues": {
+            "networks": {
+                "proxy": {
+                    "external": true,
+                    "name": "proxy"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [
+            {
+                "flag": "--network",
+                "reason": "flagNetworkExternal"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

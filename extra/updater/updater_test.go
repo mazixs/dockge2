@@ -16,14 +16,30 @@ import (
 type fakeRunner struct {
 	call  func(string, []string) ([]byte, error)
 	calls []string
+	envs  [][]string
+	// ignoreContext lets a command finish although a signal cancelled the context.
+	ignoreContext bool
 }
 
-func (f *fakeRunner) run(_ context.Context, c string, a ...string) ([]byte, error) {
+// run behaves like commandRunner under a signal: a cancelled context fails the command.
+func (f *fakeRunner) run(ctx context.Context, c string, a ...string) ([]byte, error) {
 	f.calls = append(f.calls, c+" "+strings.Join(a, " "))
-	if f.call != nil {
-		return f.call(c, a)
+	if err := ctx.Err(); err != nil && !f.ignoreContext {
+		return nil, err
 	}
-	return nil, nil
+	var output []byte
+	var err error
+	if f.call != nil {
+		output, err = f.call(c, a)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil && !f.ignoreContext {
+		return nil, ctxErr
+	}
+	return output, err
+}
+func (f *fakeRunner) runEnv(ctx context.Context, env []string, c string, a ...string) ([]byte, error) {
+	f.envs = append(f.envs, env)
+	return f.run(ctx, c, a...)
 }
 func fixture(t *testing.T) (Release, string) {
 	t.Helper()

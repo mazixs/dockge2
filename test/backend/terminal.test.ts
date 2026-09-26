@@ -169,7 +169,7 @@ test("leaving a container terminal without other clients kills the session", asy
     assert.equal(Terminal.getTerminal(name), undefined);
 });
 
-test("a client that never joined cannot end or write to a session", async () => {
+test("a client that never joined cannot end or write to a session", async (context) => {
     const server = { stacksDir: os.tmpdir() } as unknown as DockgeServer;
     const name = "container-exec-test-ownership";
     const owner = makeSocket("owner");
@@ -184,6 +184,7 @@ test("a client that never joined cannot end or write to a session", async () => 
     terminal.onExit((code) => {
         exitCode = code;
     });
+    context.after(() => terminal.kill());
 
     terminal.join(owner);
     terminal.start();
@@ -198,7 +199,7 @@ test("a client that never joined cannot end or write to a session", async () => 
     // A stranger cannot type into the session
     const written = await call(stranger, "terminalInput", name, "exit\r");
     assert.equal(written.ok, false);
-    assert.match(String(written.msg), /not attached/i);
+    assert.equal(written.msg, "terminalNotAttached");
 
     // And cannot end it either
     const left = await call(stranger, "terminalLeave", name);

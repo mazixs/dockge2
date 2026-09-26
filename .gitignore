@@ -37,6 +37,8 @@ docker-compose.override.yml
 
 # Local artifacts
 *.log
+# `go build` in extra/updater; releases build the binaries in CI
+/extra/updater/updater
 npm-debug.log*
 *.tsbuildinfo
 .eslintcache

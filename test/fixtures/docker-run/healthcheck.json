@@ -1,0 +1,40 @@
+{
+    "description": "Every health check flag lands in healthcheck. The test is a string, which compose runs with CMD-SHELL like docker does, and the retry count is a number.",
+    "command": "docker run -d --health-cmd 'curl -f http://localhost/ || exit 1' --health-interval 30s --health-timeout 5s --health-retries 3 --health-start-period 10s nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "healthcheck"
+        ],
+        "values": {
+            "image": "nginx",
+            "healthcheck": {
+                "test": "curl -f http://localhost/ || exit 1",
+                "interval": "30s",
+                "timeout": "5s",
+                "retries": 3,
+                "start_period": "10s"
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--health-cmd",
+            "--health-interval",
+            "--health-timeout",
+            "--health-retries",
+            "--health-start-period"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

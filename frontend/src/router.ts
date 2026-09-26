@@ -13,6 +13,7 @@ const Console = () => import("./pages/Console.vue");
 const Compose = () => import("./pages/Compose.vue");
 const StackInspector = () => import("./pages/StackInspector.vue");
 const ContainerTerminal = () => import("./pages/ContainerTerminal.vue");
+const ContainerPage = () => import("./pages/ContainerPage.vue");
 
 const NewStack = () => import("./pages/NewStack.vue");
 const StackGitChanges = () => import("./pages/StackGitChanges.vue");
@@ -86,6 +87,11 @@ const routes = [
                             {
                                 path: "/compose/:stackName",
                                 redirect: (to : RouteLocationGeneric) => `/stack/${to.params.stackName}/files`,
+                            },
+                            {
+                                path: "/container/:containerId/:endpoint?",
+                                component: ContainerPage,
+                                name: "containerPage",
                             },
                             {
                                 path: "/terminal/:stackName/:serviceName/:type",

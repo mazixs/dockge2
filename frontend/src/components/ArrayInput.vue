@@ -13,13 +13,40 @@
             <button class="btn btn-normal btn-sm add-value" @click="addField">{{ $t("addListItem", [ displayName ]) }}</button>
         </div>
         <div v-else>
-            {{ $t("LongSyntaxNotSupported") }}
+            {{ $t("longSyntaxNotSupported") }}
         </div>
     </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent, type ComponentPublicInstance } from "vue";
+
+/** The service card, which holds the list when it edits a service */
+interface ServiceCard {
+    service : Record<string, unknown>;
+}
+
+/** The compose editor, which holds the list when it edits the extension of the panel */
+interface ComposeEditor {
+    jsonConfig : { "x-dockge"? : Record<string, unknown> };
+}
+
+/**
+ * The editor that holds the list, two components up: a transition sits in between
+ * @param field This list
+ * @returns The service card or the compose editor, whichever the list is placed in
+ */
+function listHost<T>(field : ComponentPublicInstance) : T {
+    const host = field.$parent?.$parent;
+
+    if (!host) {
+        throw new Error("A list field is shown outside an editor");
+    }
+
+    return host as ComponentPublicInstance & T;
+}
+
+export default defineComponent({
     props: {
         name: {
             type: String,
@@ -44,12 +71,10 @@ export default {
         };
     },
     computed: {
-        array() {
+        array() : unknown[] {
             // Create the array if not exists, it should be safe.
-            if (!this.service[this.name]) {
-                return [];
-            }
-            return this.service[this.name];
+            const value = this.service[this.name];
+            return Array.isArray(value) ? value : [];
         },
 
         /**
@@ -57,33 +82,35 @@ export default {
          * Prevent empty arrays inserted to the YAML file.
          * @return {boolean}
          */
-        isArrayInited() {
+        isArrayInited() : boolean {
             return this.service[this.name] !== undefined;
         },
 
         /**
          * Not a good name, but it is used to get the object.
          */
-        service() {
+        service() : Record<string, unknown> {
             if (this.objectType === "service") {
                 // Used in Container.vue
-                return this.$parent.$parent.service;
+                return listHost<ServiceCard>(this).service;
             } else if (this.objectType === "x-dockge") {
+                const extension = listHost<ComposeEditor>(this).jsonConfig["x-dockge"];
 
-                if (!this.$parent.$parent.jsonConfig["x-dockge"]) {
+                if (!extension) {
                     return {};
                 }
 
                 // Used in Compose.vue
-                return this.$parent.$parent.jsonConfig["x-dockge"];
+                return extension;
             } else {
                 return {};
             }
         },
 
-        valid() {
+        valid() : boolean {
             // Check if the array is actually an array
-            if (!Array.isArray(this.array)) {
+            const value = this.service[this.name];
+            if (value && !Array.isArray(value)) {
                 return false;
             }
 
@@ -105,8 +132,9 @@ export default {
 
             // Create the object if not exists.
             if (this.objectType === "x-dockge") {
-                if (!this.$parent.$parent.jsonConfig["x-dockge"]) {
-                    this.$parent.$parent.jsonConfig["x-dockge"] = {};
+                const editor = listHost<ComposeEditor>(this);
+                if (!editor.jsonConfig["x-dockge"]) {
+                    editor.jsonConfig["x-dockge"] = {};
                 }
             }
 
@@ -117,11 +145,11 @@ export default {
 
             this.array.push("");
         },
-        remove(index) {
+        remove(index : number) {
             this.array.splice(index, 1);
         },
     }
-};
+});
 </script>
 
 <style lang="scss" scoped>

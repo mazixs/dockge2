@@ -17,27 +17,31 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import { isStackFailed, seriousIssuesFirst, stackNeedsAttention } from "../../../common/util-common";
+import type { StackSummaryDTO, ViewerStackSummary } from "../../../common/types/stack";
 
 /** Сколько стеков названо прямо в полосе: остальные - под "Еще N" */
 const SHOWN = 3;
 
-export default {
+type StackRow = StackSummaryDTO | ViewerStackSummary;
+
+export default defineComponent({
     computed: {
         /**
          * Stacks that need attention, the strip exists only for them. The owner's own
          * stacks come before foreign projects, and a crash before a degradation
          */
-        stacks() {
-            const rank = (stack) => (stack.isManagedByDockge ? 0 : 2) + (isStackFailed(stack.status, stack.issues) ? 0 : 1);
+        stacks() : StackRow[] {
+            const rank = (stack : StackRow) => (stack.isManagedByDockge ? 0 : 2) + (isStackFailed(stack.status, stack.issues) ? 0 : 1);
 
             return Object.values(this.$root.completeStackList)
                 .filter((stack) => stackNeedsAttention(stack))
                 .sort((first, second) => rank(first) - rank(second) || first.name.localeCompare(second.name));
         },
 
-        shown() {
+        shown() : Array<{ name : string, url : string, reason : string }> {
             return this.stacks.slice(0, SHOWN).map((stack) => ({
                 name: stack.name,
                 url: stack.endpoint ? `/stack/${stack.name}/${stack.endpoint}` : `/stack/${stack.name}`,
@@ -45,7 +49,7 @@ export default {
             }));
         },
 
-        hidden() {
+        hidden() : number {
             return Math.max(this.stacks.length - SHOWN, 0);
         },
     },
@@ -55,7 +59,7 @@ export default {
          * @param {object} stack Стек из списка
          * @returns {string} Причина или пустая строка
          */
-        reasonOf(stack) {
+        reasonOf(stack : StackRow) : string {
             const [ issue ] = seriousIssuesFirst(stack.issues ?? []);
 
             if (!issue) {
@@ -66,7 +70,7 @@ export default {
             return `${issue.service}: ${this.$t(issue.reason)}${detail}`;
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

@@ -1,5 +1,6 @@
 import { createApp, h, nextTick, shallowRef } from "vue";
 import Confirm from "../../frontend/src/components/Confirm.vue";
+import { i18n } from "../../frontend/src/i18n";
 
 /** Mount the real component and unmount it inside Bootstrap's asynchronous transition. */
 export async function unmountModal(phase : "opening" | "open" | "closing") : Promise<void> {
@@ -9,7 +10,7 @@ export async function unmountModal(phase : "opening" | "open" | "closing") : Pro
     const app = createApp({ render: () => h(Confirm, { ref: dialog,
         title: "Lifecycle probe",
         "data-modal-probe": "true" }) });
-    app.mount(root);
+    app.use(i18n).mount(root);
     await nextTick();
     const modal = root.querySelector<HTMLElement>(".modal")!;
     const shown = new Promise<void>(resolve => modal.addEventListener("shown.bs.modal", () => resolve(), { once: true }));

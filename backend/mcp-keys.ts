@@ -22,6 +22,9 @@ const issueKeySchema = z.object({
     days: z.number().int().min(1).max(90).default(30),
 }).strict();
 
+/** How long the old secret of a reissued key keeps working */
+export const REISSUE_OVERLAP_MS = 24 * 3_600_000;
+
 export interface MachineIdentity {
     keyId : string;
     userId : string;
@@ -111,6 +114,42 @@ export class McpKeys {
         await recordMcpAudit({ key_id: id,
             tool: "key_reduce",
             outcome: "allowed" });
+    }
+
+    /**
+     * Give a key a new secret with the same authority, and let the old one run out.
+     *
+     * The old secret stays valid for a day, or until its own expiry if that comes first,
+     * so a client can be switched over without a moment in which nothing works. The new
+     * key goes through every check a fresh one does: a stack that is gone or an owner who
+     * lost the role makes the reissue fail instead of carrying stale authority forward.
+     * @param id Key to reissue
+     * @param remoteResources Stacks each delegated server offers
+     * @returns The new key with its secret, shown once, and when the old one stops working
+     */
+    async reissue(id : string, remoteResources : Record<string, string[]> = {}) {
+        const row = await this.knex("mcp_key").where({ id }).first();
+        if (!row || row.revoked_at !== null || Number(row.expires_at) <= Date.now()) {
+            throw new Error("mcpInvalidReissue");
+        }
+        const lifetime = Number(row.expires_at) - Number(row.created_at);
+        const issued = await this.issue({ name: row.name,
+            userId: row.user_id,
+            role: row.role,
+            actions: JSON.parse(row.actions),
+            mode: row.mode,
+            resources: JSON.parse(row.resources),
+            servers: JSON.parse(row.servers),
+            stacks: JSON.parse(row.stacks),
+            days: Math.min(90, Math.max(1, Math.round(lifetime / 86_400_000))) }, remoteResources);
+        const previousExpiresAt = Math.min(Number(row.expires_at), Date.now() + REISSUE_OVERLAP_MS);
+        await this.knex("mcp_key").where({ id }).update({ expires_at: previousExpiresAt });
+        await recordMcpAudit({ key_id: id,
+            tool: "key_reissue",
+            outcome: "allowed",
+            detail: issued.id });
+        return { ...issued,
+            previousExpiresAt };
     }
 
     /** Revocation is read directly from the database on every request and response. */

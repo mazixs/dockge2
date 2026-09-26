@@ -12,7 +12,15 @@
 
         <div class="panel-rows">
             <div v-for="(agentItem, endpoint) in $root.agentList" :key="endpoint" class="panel-row agent">
-                <template v-if="$root.agentStatusList[endpoint]">
+                <!-- Имя меняется на месте: адрес, логин и пароль остаются прежними -->
+                <form v-if="renaming === endpoint" class="agent-rename" @submit.prevent="saveName(agentItem.url ?? '')" @keydown.esc.prevent="renaming = null">
+                    <label :for="`agent-name-${endpoint}`" class="visually-hidden">{{ $t("friendlyName") }}</label>
+                    <input :id="`agent-name-${endpoint}`" ref="nameInput" v-model="newName" type="text" class="form-control form-control-sm" maxlength="255" :placeholder="endpoint" :disabled="savingName">
+                    <button type="submit" class="btn btn-sm btn-primary" :disabled="savingName">{{ $t("save") }}</button>
+                    <button type="button" class="btn btn-sm btn-normal" :disabled="savingName" @click="renaming = null">{{ $t("cancel") }}</button>
+                </form>
+
+                <template v-else-if="$root.agentStatusList[endpoint]">
                     <span class="agent-identity">
                         <span class="agent-name">
                             <template v-if="endpoint === '' && agentItem.name === ''">{{ $t("thisServer") }}</template>
@@ -29,11 +37,17 @@
                     />
                 </template>
 
-                <button v-if="endpoint !== ''" class="btn btn-sm btn-normal btn-danger-text" type="button" :aria-label="$t('removeAgent')" @click="showRemoveAgentDialog[agentItem.url] = !showRemoveAgentDialog[agentItem.url]">
+                <button v-if="endpoint !== '' && renaming !== endpoint" class="btn btn-sm btn-normal" type="button" :aria-label="`${$t('renameAgent')}: ${agentItem.name || endpoint}`" :title="$t('renameAgent')" @click="startRename(String(endpoint), agentItem.name)">
+                    <font-awesome-icon icon="pen" />
+                </button>
+                <button v-if="endpoint !== '' && renaming !== endpoint" class="btn btn-sm btn-normal btn-danger-text" type="button" :aria-label="$t('removeAgent')" @click="removing = agentItem.url ?? ''">
                     <font-awesome-icon icon="trash" />
                 </button>
 
-                <BModal v-model="showRemoveAgentDialog[agentItem.url]" :okTitle="$t('removeAgent')" okVariant="danger" @ok="removeAgent(agentItem.url)">
+                <BModal
+                    :model-value="removing !== null && removing === agentItem.url" :okTitle="$t('removeAgent')" okVariant="danger"
+                    @update:model-value="(open : boolean) => { if (!open) removing = null; }" @ok="removeAgent(agentItem.url ?? '')"
+                >
                     <p>{{ agentItem.url }}</p>
                     {{ $t("removeAgentMsg") }}
                 </BModal>
@@ -47,17 +61,17 @@
             </div>
 
             <div class="field">
-                <label for="username" class="form-label">{{ $t("Username") }}</label>
+                <label for="username" class="form-label">{{ $t("username") }}</label>
                 <input id="username" v-model="agent.username" type="text" class="form-control" required>
             </div>
 
             <div class="field">
-                <label for="password" class="form-label">{{ $t("Password") }}</label>
+                <label for="password" class="form-label">{{ $t("password") }}</label>
                 <input id="password" v-model="agent.password" type="password" class="form-control" required autocomplete="new-password">
             </div>
 
             <div class="field">
-                <label for="name" class="form-label">{{ $t("Friendly Name") }}</label>
+                <label for="name" class="form-label">{{ $t("friendlyName") }}</label>
                 <input id="name" v-model="agent.name" type="text" class="form-control">
             </div>
 
@@ -72,17 +86,27 @@
     </section>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent, nextTick } from "vue";
 import StateChip from "../StateChip.vue";
 import InterfaceIcon from "../InterfaceIcon.vue";
+import type { SocketResponse } from "../../mixins/socket";
 
-export default {
+/** How long a change of the agent list waits for the panel to answer */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+export default defineComponent({
     components: { StateChip,
         InterfaceIcon },
     data() {
         return { showAgentForm: false,
             connectingAgent: false,
-            showRemoveAgentDialog: {},
+            /** Адрес агента, удаление которого ждет подтверждения */
+            removing: null as string | null,
+            /** Адрес агента, чье имя сейчас правится */
+            renaming: null as string | null,
+            newName: "",
+            savingName: false,
             agent: { url: "http://",
                 username: "",
                 password: "",
@@ -91,10 +115,10 @@ export default {
     methods: {
         /**
          * Состояние агента в словаре системы: онлайн - работает, офлайн - сорвалось
-         * @param {string} endpoint Адрес агента
-         * @returns {string} Имя состояния для чипа
+         * @param endpoint Адрес агента
+         * @returns Имя состояния для чипа
          */
-        agentState(endpoint) {
+        agentState(endpoint : string | number) : string {
             const status = this.$root.agentStatusList[endpoint];
 
             if (status === "online") {
@@ -106,11 +130,11 @@ export default {
 
         /**
          * Ключ строки состояния: у промежуточных состояний сервер присылает свой
-         * @param {string} endpoint Адрес агента
-         * @returns {string} Ключ перевода
+         * @param endpoint Адрес агента
+         * @returns Ключ перевода
          */
-        agentStatusLabel(endpoint) {
-            const status = this.$root.agentStatusList[endpoint];
+        agentStatusLabel(endpoint : string | number) : string {
+            const status = this.$root.agentStatusList[endpoint] ?? "";
 
             if (status === "online") {
                 return "agentOnline";
@@ -121,10 +145,13 @@ export default {
 
         addAgent() {
             this.connectingAgent = true;
-            this.$root.getSocket().emit("addAgent", this.agent, (res) => {
-                this.$root.toastRes(res);
+            this.$root.getSocket().timeout(REQUEST_TIMEOUT_MS).emit("addAgent", this.agent, (error : Error | null, res : SocketResponse) => {
                 this.connectingAgent = false;
-                if (res.ok) {
+                this.$root.toastRes(error ? { ok: false,
+                    msg: "requestResultUnknown",
+                    msgi18n: true } : { ...res,
+                    ok: res.ok === true });
+                if (!error && res.ok) {
                     this.showAgentForm = false;
                     this.agent = { url: "http://",
                         username: "",
@@ -133,16 +160,51 @@ export default {
                 }
             });
         },
-        removeAgent(url) {
-            this.$root.getSocket().emit("removeAgent", url, (res) => {
-                this.$root.toastRes(res);
+
+        removeAgent(url : string) {
+            this.$root.getSocket().emit("removeAgent", url, (res : SocketResponse) => {
+                this.$root.toastRes({ ...res,
+                    ok: res.ok === true });
                 if (res.ok) {
                     delete this.$root.allAgentStackList[new URL(url).host];
                 }
             });
         },
+
+        /**
+         * Открыть правку имени в строке агента
+         * @param endpoint Адрес агента
+         * @param name Имя сейчас, пустое - если его не давали
+         * @returns Промис, который ждет поле ввода
+         */
+        async startRename(endpoint : string, name : string) : Promise<void> {
+            this.renaming = endpoint;
+            this.newName = name;
+            await nextTick();
+            const input = this.$refs.nameInput as HTMLInputElement[] | HTMLInputElement | undefined;
+            (Array.isArray(input) ? input[0] : input)?.focus();
+        },
+
+        /**
+         * Сохранить имя; пустое имя возвращает показ адреса
+         * @param url Адрес агента, по которому он записан
+         */
+        saveName(url : string) {
+            this.savingName = true;
+            this.$root.getSocket().timeout(REQUEST_TIMEOUT_MS).emit("updateAgent", url, this.newName.trim(), (error : Error | null, res : SocketResponse) => {
+                this.savingName = false;
+                // Без ответа имя могло и сохраниться: список агентов придет сам и покажет, какое оно
+                this.$root.toastRes(error ? { ok: false,
+                    msg: "requestResultUnknown",
+                    msgi18n: true } : { ...res,
+                    ok: res.ok === true });
+                if (!error && res.ok) {
+                    this.renaming = null;
+                }
+            });
+        },
     },
-};
+});
 </script>
 <style lang="scss" scoped>
 .agent-identity {
@@ -162,6 +224,20 @@ export default {
 
     &::first-letter {
         text-transform: uppercase;
+    }
+}
+
+.agent-rename {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gap-sm);
+    min-width: 0;
+
+    input {
+        flex: 1 1 12rem;
+        min-width: 0;
     }
 }
 

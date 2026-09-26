@@ -22,7 +22,7 @@
                     v-if="!deploying && !inline"
                     class="sheet-close"
                     type="button"
-                    :aria-label="$t('Close')"
+                    :aria-label="$t('close')"
                     @click="requestClose"
                 >
                     ✕
@@ -67,10 +67,10 @@
                         rows="10"
                     ></textarea>
 
-                    <!-- Из отчета на экране остается то, из-за чего сервис не заработает -->
+                    <!-- The report keeps on screen the first flag that was lost or needs a look -->
                     <div v-if="report" class="line report">
                         <template v-if="firstProblem">
-                            <i class="dot failed"></i>
+                            <i class="dot" :class="firstProblem.outcome === 'dropped' ? 'failed' : 'attention'"></i>
                             <span><code>{{ firstProblem.flag }}</code> {{ $t(firstProblem.reason || "flagNoComposeKey") }}</span>
                         </template>
                         <template v-else>
@@ -89,7 +89,7 @@
                     </div>
 
                     <ul v-if="report && showAllFlags" class="flag-list">
-                        <li v-for="item in allFlags" :key="item.flag + (item.value || '')">
+                        <li v-for="(item, index) in allFlags" :key="index">
                             <span class="kind" :class="item.outcome">{{ $t("flagOutcome_" + item.outcome) }}</span>
                             <span><code>{{ item.flag }}</code><span v-if="item.value" class="value"> {{ item.value }}</span><span v-if="item.reason"> — {{ $t(item.reason) }}</span></span>
                         </li>
@@ -152,14 +152,23 @@
     </div>
 </template>
 
-<script>
-// @ts-check
+<script lang="ts">
+import { defineComponent } from "vue";
 import { parse } from "yaml";
-import { analyseConversion } from "../../../common/docker-run-flags";
+import type { ConversionReport, FlagReportItem } from "../../../common/docker-run-flags";
 import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
+
+/** Answer of the server to a `docker run` command */
+interface ConversionResponse {
+    ok : boolean;
+    msg? : string | { key : string, values? : Record<string, unknown> };
+    composeTemplate? : string;
+    report? : ConversionReport;
+}
 
 /** Пауза после ввода, после которой имеет смысл распознавать формат */
 const RECOGNISE_DELAY_MS = 400;
+const CONVERSION_TIMEOUT_MS = 15_000;
 
 /** Как долго строка нового стека остается подсвеченной в списке */
 const FRESH_MS = 60_000;
@@ -176,10 +185,9 @@ const ENV_DEFAULT = "# VARIABLE=value #comment";
  */
 const CREATE_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let recogniseTimer;
+let recogniseTimer : ReturnType<typeof setTimeout> | undefined;
 
-export default {
+export default defineComponent({
     props: {
         /** Встроенный режим: бриф стоит прямо в рабочей области, а не поверх списка */
         inline: {
@@ -199,19 +207,15 @@ export default {
     data() {
         return {
             visible: false,
-            /**
-             * Элемент, которому вернется фокус после закрытия
-             * @type {HTMLElement | null}
-             */
-            opener: null,
+            /** Элемент, которому вернется фокус после закрытия */
+            opener: null as HTMLElement | null,
             source: "",
             composeENV: this.$root.envTemplate || ENV_DEFAULT,
             /** Исходная команда, чтобы ее можно было вернуть: правка поля ломает отмену браузера */
             originalCommand: "",
             converted: false,
             skipRecognition: false,
-            /** @type {import("../../../common/docker-run-flags").ConversionReport | null} */
-            report: null,
+            report: null as ConversionReport | null,
             showAllFlags: false,
             name: "",
             nameTouched: false,
@@ -224,8 +228,7 @@ export default {
             /** Какая попытка владеет брифом: ответ прежней ничего здесь не меняет */
             attempt: 0,
             elapsed: 0,
-            /** @type {ReturnType<typeof setInterval> | undefined} */
-            elapsedTimer: undefined,
+            elapsedTimer: undefined as ReturnType<typeof setInterval> | undefined,
             titleId: "create-stack-title",
             pasteId: "create-stack-paste",
         };
@@ -233,7 +236,7 @@ export default {
 
     computed: {
         /** Можно ли уже что-то разворачивать */
-        canDeploy() {
+        canDeploy() : boolean {
             const name = this.name.trim();
             return !this.saving && !this.deploying && !this.uncertain && this.$root.canManageStacks
                 && this.$root.agentStatusList[this.endpoint] === "online"
@@ -242,17 +245,17 @@ export default {
         },
 
         /** Предел длины имени: тот же, что проверяет сервер при создании каталога */
-        maxNameLength() {
+        maxNameLength() : number {
             return MAX_STACK_NAME_LENGTH;
         },
 
-        /** Первый флаг, из-за которого сервис может не заработать */
-        firstProblem() {
-            return this.report?.dropped[0] ?? null;
+        /** The first lost flag, or the first one that needs a look: either means not all was carried */
+        firstProblem() : FlagReportItem | null {
+            return this.report?.dropped[0] ?? this.report?.review[0] ?? null;
         },
 
         /** Сколько флагов остается под кнопкой "еще" */
-        restFlagCount() {
+        restFlagCount() : number {
             if (!this.report) {
                 return 0;
             }
@@ -262,7 +265,7 @@ export default {
         },
 
         /** Все флаги в одном списке: сначала потери, потом внимание, потом перенесенные */
-        allFlags() {
+        allFlags() : FlagReportItem[] {
             if (!this.report) {
                 return [];
             }
@@ -271,16 +274,17 @@ export default {
         },
 
         /** Куда попадет стек, одной строкой */
-        targetSummary() {
+        targetSummary() : string | undefined {
             const agent = this.$root.agentList?.[this.endpoint];
+            const url = typeof agent?.url === "string" ? agent.url : undefined;
             // Локальный агент приходит с пустым именем, поэтому подпись берется из перевода
-            const agentName = this.endpoint ? agent?.name || agent?.url : this.$t("thisServer");
+            const agentName = this.endpoint ? agent?.name || url : this.$t("thisServer");
 
             return this.name ? `${this.name} · ${agentName}` : agentName;
         },
 
         /** Сервисы, которые сейчас поднимаются */
-        progressServices() {
+        progressServices() : string[] {
             return this.serviceNames(this.source);
         },
     },
@@ -301,7 +305,7 @@ export default {
         name() {
             this.uncertain = false;
         },
-        initialEndpoint(value) {
+        initialEndpoint(value : string) {
             if (!this.deploying && !this.saving) {
                 this.endpoint = value;
             }
@@ -324,10 +328,9 @@ export default {
     methods: {
         /**
          * Открыть слой, при необходимости с уже вставленным текстом
-         * @param {string} prefill Текст, который пользователь вставил или перетащил
-         * @returns {void}
+         * @param prefill Текст, который пользователь вставил или перетащил
          */
-        open(prefill = "") {
+        open(prefill = "") : void {
             // Кнопка, с которой пришли: на нее возвращается фокус при закрытии
             this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
             this.visible = true;
@@ -349,15 +352,14 @@ export default {
             }
 
             this.$nextTick(() => {
-                /** @type {HTMLTextAreaElement | undefined} */ (this.$refs.paste)?.focus();
+                (this.$refs.paste as HTMLTextAreaElement | undefined)?.focus();
             });
         },
 
         /**
          * Закрыть слой. Во время развертывания закрывать нечего: задача идет.
-         * @returns {void}
          */
-        requestClose() {
+        requestClose() : void {
             if (this.deploying || this.saving || this.inline) {
                 return;
             }
@@ -367,9 +369,8 @@ export default {
 
         /**
          * Закрыть слой и вернуть фокус туда, откуда его открыли
-         * @returns {void}
          */
-        close() {
+        close() : void {
             this.visible = false;
             this.opener?.focus();
             this.opener = null;
@@ -379,20 +380,19 @@ export default {
          * Не выпускать фокус из слоя: Tab с последнего элемента идет на первый,
          * Shift+Tab с первого - на последний. Иначе клавиатура уходит в список
          * за притемнением, где ничего нажимать нельзя.
-         * @param {KeyboardEvent} event Нажатие Tab
-         * @returns {void}
+         * @param event Нажатие Tab
          */
-        keepFocusInside(event) {
+        keepFocusInside(event : KeyboardEvent) : void {
             if (this.inline) {
                 return;
             }
-            const sheet = /** @type {HTMLElement | undefined} */ (this.$refs.sheet);
+            const sheet = this.$refs.sheet as HTMLElement | undefined;
 
             if (!sheet) {
                 return;
             }
 
-            const reachable = /** @type {HTMLElement[]} */ ([ ...sheet.querySelectorAll("a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex=\"-1\"])") ])
+            const reachable = [ ...sheet.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex=\"-1\"])") ]
                 .filter((node) => node.offsetParent !== null);
             const first = reachable[0];
             const last = reachable[reachable.length - 1];
@@ -413,9 +413,8 @@ export default {
         /**
          * Отложенное распознавание формата: команда превращается в compose,
          * готовый compose не трогается вообще
-         * @returns {void}
          */
-        scheduleRecognition() {
+        scheduleRecognition() : void {
             clearTimeout(recogniseTimer);
 
             if (this.converted || !this.looksLikeDockerRun(this.source)) {
@@ -427,26 +426,27 @@ export default {
 
         /**
          * Похоже ли содержимое на команду docker run
-         * @param {string} text Содержимое поля
-         * @returns {boolean} Признак команды
+         * @param text Содержимое поля
+         * @returns Признак команды
          */
-        looksLikeDockerRun(text) {
-            return /^\s*(sudo\s+)?docker\s+run\b/.test(text);
+        looksLikeDockerRun(text : string) : boolean {
+            return /^\s*(sudo\s+)?docker\s+(container\s+)?run\b/.test(text);
         },
 
         /**
-         * Преобразовать команду в compose и составить отчет по флагам
-         * @returns {void}
+         * Have the server convert the command into compose, with its report on every flag
          */
-        convert() {
+        convert() : void {
             const command = this.source;
 
-            this.$root.getSocket().emit("composerize", command, (/** @type {{ ok : boolean, msg? : string, composeTemplate? : string }} */ res) => {
+            this.$root.getSocket().timeout(CONVERSION_TIMEOUT_MS).emit("convertDockerRun", command, (error : Error | null, answer? : ConversionResponse) => {
                 if (this.source !== command || this.converted) {
                     return;
                 }
+                // Nothing was written, so a lost answer is simply a failed conversion
+                const res = error ? undefined : answer;
                 if (!res?.ok) {
-                    this.failure = res?.msg ?? this.$t("conversionFailed");
+                    this.failure = this.$root.serverText(res?.msg, "conversionFailed");
                     return;
                 }
 
@@ -456,7 +456,7 @@ export default {
                 this.source = composeTemplate;
                 this.converted = true;
                 this.failure = "";
-                this.report = analyseConversion(command, composeTemplate);
+                this.report = res.report ?? null;
 
                 if (!this.nameTouched) {
                     this.name = this.suggestName(composeTemplate);
@@ -466,9 +466,8 @@ export default {
 
         /**
          * Вернуть исходную команду в поле
-         * @returns {void}
          */
-        returnCommand() {
+        returnCommand() : void {
             if (!this.originalCommand) {
                 return;
             }
@@ -485,14 +484,14 @@ export default {
 
         /**
          * Имена сервисов compose-файла.
-         * Читаем YAML, а не угадываем отступ: конвертер пишет с четырьмя пробелами,
-         * человек - с двумя, и оба варианта одинаково правильные.
-         * @param {string} composeYAML Содержимое compose-файла
-         * @returns {Array<string>} Имена сервисов
+         * Читаем YAML, а не угадываем отступ: конвертер пишет с двумя пробелами,
+         * человек - с любым, и все варианты одинаково правильные.
+         * @param composeYAML Содержимое compose-файла
+         * @returns Имена сервисов
          */
-        serviceNames(composeYAML) {
+        serviceNames(composeYAML : string) : string[] {
             try {
-                const parsed = parse(composeYAML);
+                const parsed = parse(composeYAML) as { services? : unknown } | null;
                 const services = parsed?.services;
 
                 if (!services || typeof services !== "object") {
@@ -510,10 +509,10 @@ export default {
          * Имя стека по compose-файлу.
          * Сначала берется имя контейнера: если человек написал `--name`, он уже
          * назвал эту вещь, и угадывать по образу поверх его выбора незачем.
-         * @param {string} composeYAML Содержимое compose-файла
-         * @returns {string} Предлагаемое имя
+         * @param composeYAML Содержимое compose-файла
+         * @returns Предлагаемое имя
          */
-        suggestName(composeYAML) {
+        suggestName(composeYAML : string) : string {
             return this.containerName(composeYAML) || this.stackNameFrom(this.serviceNames(composeYAML)[0] ?? "");
         },
 
@@ -522,12 +521,13 @@ export default {
          * Только `container_name`: если человек его написал, он уже назвал эту
          * вещь. Имени сервиса здесь нет намеренно - оно есть всегда, и подставлять
          * его значило бы называть стек за пользователя.
-         * @param {string} composeYAML Содержимое compose-файла
-         * @returns {string} Имя, пригодное для каталога, или пустая строка
+         * @param composeYAML Содержимое compose-файла
+         * @returns Имя, пригодное для каталога, или пустая строка
          */
-        containerName(composeYAML) {
+        containerName(composeYAML : string) : string {
             try {
-                const services = parse(composeYAML)?.services ?? {};
+                const parsed = parse(composeYAML) as { services? : Record<string, { container_name? : unknown } | null> } | null;
+                const services = parsed?.services ?? {};
 
                 for (const service of Object.values(services)) {
                     if (service?.container_name) {
@@ -543,10 +543,10 @@ export default {
 
         /**
          * Привести имя к тому, что допустимо для каталога стека
-         * @param {string} candidate Исходное имя
-         * @returns {string} Имя стека
+         * @param candidate Исходное имя
+         * @returns Имя стека
          */
-        stackNameFrom(candidate) {
+        stackNameFrom(candidate : string) : string {
             // Имя стека - это каталог, поэтому только то, что проходит барьер путей
             return candidate.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
         },
@@ -556,9 +556,8 @@ export default {
          * Пользователь может его сразу исправить: подстановка перестает работать
          * с первым же нажатием в поле имени. Если контейнер не назван, поле
          * остается пустым и продолжить нельзя - это прежнее поведение.
-         * @returns {void}
          */
-        inheritComposeName() {
+        inheritComposeName() : void {
             if (this.nameTouched || this.looksLikeDockerRun(this.source)) {
                 return;
             }
@@ -572,27 +571,24 @@ export default {
 
         /**
          * Записать файлы и поднять стек
-         * @returns {void}
          */
-        deploy() {
+        deploy() : void {
             this.send("deployStack", true);
         },
 
         /**
          * Только записать файлы, ничего не запуская
-         * @returns {void}
          */
-        saveOnly() {
+        saveOnly() : void {
             this.send("saveStack", false);
         },
 
         /**
          * Отправить стек агенту
-         * @param {"deployStack" | "saveStack"} event Событие сокета
-         * @param {boolean} withDeploy Нужно ли показывать прогресс развертывания
-         * @returns {void}
+         * @param event Событие сокета
+         * @param withDeploy Нужно ли показывать прогресс развертывания
          */
-        send(event, withDeploy) {
+        send(event : "deployStack" | "saveStack", withDeploy : boolean) : void {
             if (!this.canDeploy) {
                 return;
             }
@@ -649,9 +645,8 @@ export default {
 
         /**
          * Начать отсчет времени развертывания
-         * @returns {void}
          */
-        startClock() {
+        startClock() : void {
             this.stopClock();
             this.elapsedTimer = setInterval(() => {
                 this.elapsed += 1;
@@ -660,9 +655,8 @@ export default {
 
         /**
          * Остановить отсчет: часы принадлежат попытке, а не экрану
-         * @returns {void}
          */
-        stopClock() {
+        stopClock() : void {
             clearInterval(this.elapsedTimer);
             this.elapsedTimer = undefined;
         },
@@ -670,11 +664,10 @@ export default {
         /**
          * Прервать запущенное развертывание: команда останавливается, файлы остаются
          * на диске черновиком
-         * @returns {void}
          */
-        abort() {
-            this.$root.emitAgent(this.endpoint, "abortCompose", this.name.trim(), (res) => {
-                if (!res?.ok) {
+        abort() : void {
+            this.$root.emitAgentRequest(this.endpoint, "abortCompose", [ this.name.trim() ]).then((res) => {
+                if (!res.ok) {
                     this.$root.toastRes(res);
                 }
             });
@@ -682,9 +675,8 @@ export default {
 
         /**
          * Забыть содержимое, чтобы следующий стек начинался с чистого поля
-         * @returns {void}
          */
-        reset() {
+        reset() : void {
             this.source = "";
             this.composeENV = this.$root.envTemplate || ENV_DEFAULT;
             this.originalCommand = "";
@@ -695,7 +687,7 @@ export default {
             this.showAllFlags = false;
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

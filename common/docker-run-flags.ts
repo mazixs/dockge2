@@ -1,18 +1,29 @@
-import { parseDocument, isMap } from "yaml";
+/**
+ * Longest `docker run` command the server converts, in characters.
+ *
+ * A real command with dozens of variables, mounts and labels stays under 4 KiB.
+ * The limit bounds the work one request can ask of the server and the size of
+ * the answer, and a pasted megabyte is refused before it is read at all.
+ */
+export const MAX_DOCKER_RUN_COMMAND_LENGTH = 8 * 1024;
 
 /**
  * What happened to one flag of a `docker run` command during conversion.
  *
  * `carried` means the flag produced the compose key it should have produced,
  * `review` means it produced something the person has to look at, and `dropped`
- * means compose has no equivalent here and the line was not created. A dropped
+ * means what the flag asked for is not in the file: compose has no equivalent,
+ * the converter does not carry it, or docker itself would refuse it. A dropped
  * flag is the reason a converted service does not work, so it is never silent.
  */
 export type FlagOutcome = "carried" | "review" | "dropped";
 
 /** One line of the conversion report */
 export interface FlagReportItem {
-    /** Flag as it was written in the command, for example `--device` */
+    /**
+     * Flag as it was written in the command, for example `--device`, or
+     * `image` and `command` for the image and the arguments after it
+     */
     flag : string;
 
     /** Value the flag carried, when it had one */
@@ -32,157 +43,123 @@ export interface ConversionReport {
     dropped : FlagReportItem[];
 }
 
-/** A flag and the compose key it is supposed to turn into */
-interface FlagSpec {
-    /** Compose keys that prove the flag was carried over */
-    keys : string[];
+/** A flag as it appeared in the command */
+export interface ParsedFlag {
+    flag : string;
+    value? : string;
+}
 
-    /** True when the flag has a value of its own */
-    takesValue? : boolean;
+/** Flags of a `docker run` command, its image and the arguments after the image */
+export interface ParsedCommand {
+    flags : ParsedFlag[];
 
-    /** Set when the outcome is always the same, whatever the YAML says */
-    always? : FlagOutcome;
+    /** Image to run, missing when the command names none */
+    image? : string;
 
-    /** Translation key with the explanation */
-    reason? : string;
+    /** Command and arguments of the container, when any follow the image */
+    args : string[];
+}
+
+/** Short flags of `docker run` and the long flags they stand for */
+const SHORT_FLAGS : Record<string, string> = {
+    a: "--attach",
+    c: "--cpu-shares",
+    d: "--detach",
+    e: "--env",
+    h: "--hostname",
+    i: "--interactive",
+    l: "--label",
+    m: "--memory",
+    p: "--publish",
+    P: "--publish-all",
+    q: "--quiet",
+    t: "--tty",
+    u: "--user",
+    v: "--volume",
+    w: "--workdir",
+};
+
+/** Older spellings docker still accepts */
+const LONG_ALIASES : Record<string, string> = {
+    "--net": "--network",
+    "--net-alias": "--network-alias",
+    "--dns-opt": "--dns-option",
+};
+
+/** Long flags of `docker run` that never take a value, as `docker run --help` lists them */
+const BOOLEAN_FLAGS = new Set([
+    "--detach", "--disable-content-trust", "--help", "--init", "--interactive", "--no-healthcheck",
+    "--oom-kill-disable", "--privileged", "--publish-all", "--quiet", "--read-only", "--rm",
+    "--sig-proxy", "--tty", "--use-api-socket",
+]);
+
+/**
+ * Long flags of `docker run` that take a value, as `docker run --help` lists them,
+ * with the Windows-only and deprecated ones docker still accepts
+ */
+const VALUE_FLAGS = new Set([
+    "--add-host", "--annotation", "--attach", "--blkio-weight", "--blkio-weight-device", "--cap-add",
+    "--cap-drop", "--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-count", "--cpu-percent",
+    "--cpu-period", "--cpu-quota", "--cpu-rt-period", "--cpu-rt-runtime", "--cpu-shares", "--cpus",
+    "--cpuset-cpus", "--cpuset-mems", "--detach-keys", "--device", "--device-cgroup-rule",
+    "--device-read-bps", "--device-read-iops", "--device-write-bps", "--device-write-iops", "--dns",
+    "--dns-option", "--dns-search", "--domainname", "--entrypoint", "--env", "--env-file", "--expose",
+    "--gpus", "--group-add", "--health-cmd", "--health-interval", "--health-retries",
+    "--health-start-interval", "--health-start-period", "--health-timeout", "--hostname",
+    "--io-maxbandwidth", "--io-maxiops", "--ip", "--ip6", "--ipc", "--isolation", "--kernel-memory",
+    "--label", "--label-file", "--link", "--link-local-ip", "--log-driver", "--log-opt",
+    "--mac-address", "--memory", "--memory-reservation", "--memory-swap", "--memory-swappiness",
+    "--mount", "--name", "--network", "--network-alias", "--oom-score-adj", "--pid", "--pids-limit",
+    "--platform", "--publish", "--pull", "--restart", "--runtime", "--security-opt", "--shm-size",
+    "--stop-signal", "--stop-timeout", "--storage-opt", "--sysctl", "--tmpfs", "--ulimit", "--umask",
+    "--user", "--userns", "--uts", "--volume", "--volume-driver", "--volumes-from", "--workdir",
+]);
+
+/** Every long flag docker knows, in the spelling `canonicalFlag` returns */
+export const DOCKER_RUN_FLAGS : ReadonlySet<string> = new Set([ ...BOOLEAN_FLAGS, ...VALUE_FLAGS ]);
+
+/**
+ * The long spelling of a flag, so that `-e`, `--env` and `--net` are looked up once
+ * @param flag Flag as it was written
+ * @returns Long flag, or the flag unchanged when docker does not know it
+ */
+export function canonicalFlag(flag : string) : string {
+    if (flag.startsWith("--")) {
+        return LONG_ALIASES[flag] ?? flag;
+    }
+
+    return SHORT_FLAGS[flag.slice(1)] ?? flag;
 }
 
 /**
- * Flags of `docker run` that matter for a compose file.
- *
- * Only flags a person actually writes are listed: the goal is a truthful report,
- * not a complete manual. An unknown flag is reported as needing a look rather
- * than silently accepted, because silence is what hides a broken service.
+ * Whether a flag docker knows takes a value
+ * @param flag Flag in any spelling
+ * @returns True for a flag with a value of its own
  */
-const FLAG_SPECS : Record<string, FlagSpec> = {
-    "--name": { keys: [ "container_name" ],
-        takesValue: true },
-    "-p": { keys: [ "ports" ],
-        takesValue: true },
-    "--publish": { keys: [ "ports" ],
-        takesValue: true },
-    "-P": { keys: [ "ports" ],
-        reason: "flagPublishAllDropped" },
-    "-v": { keys: [ "volumes" ],
-        takesValue: true },
-    "--volume": { keys: [ "volumes" ],
-        takesValue: true },
-    "--mount": { keys: [ "volumes" ],
-        takesValue: true },
-    "--tmpfs": { keys: [ "tmpfs" ],
-        takesValue: true },
-    "-e": { keys: [ "environment" ],
-        takesValue: true },
-    "--env": { keys: [ "environment" ],
-        takesValue: true },
-    "--env-file": { keys: [ "env_file" ],
-        takesValue: true,
-        always: "review",
-        reason: "flagEnvFileRenamed" },
-    "--restart": { keys: [ "restart" ],
-        takesValue: true },
-    "--network": { keys: [ "networks", "network_mode" ],
-        takesValue: true,
-        always: "review",
-        reason: "flagNetworkExternal" },
-    "--net": { keys: [ "networks", "network_mode" ],
-        takesValue: true,
-        always: "review",
-        reason: "flagNetworkExternal" },
-    "--hostname": { keys: [ "hostname" ],
-        takesValue: true },
-    "-h": { keys: [ "hostname" ],
-        takesValue: true },
-    "--add-host": { keys: [ "extra_hosts" ],
-        takesValue: true },
-    "--dns": { keys: [ "dns" ],
-        takesValue: true },
-    "-u": { keys: [ "user" ],
-        takesValue: true },
-    "--user": { keys: [ "user" ],
-        takesValue: true },
-    "-w": { keys: [ "working_dir" ],
-        takesValue: true },
-    "--workdir": { keys: [ "working_dir" ],
-        takesValue: true },
-    "--entrypoint": { keys: [ "entrypoint" ],
-        takesValue: true },
-    "-l": { keys: [ "labels" ],
-        takesValue: true },
-    "--label": { keys: [ "labels" ],
-        takesValue: true },
-    "--label-file": { keys: [ "labels" ],
-        takesValue: true,
-        reason: "flagLabelFileDropped" },
-    "--cap-add": { keys: [ "cap_add" ],
-        takesValue: true },
-    "--cap-drop": { keys: [ "cap_drop" ],
-        takesValue: true },
-    "--device": { keys: [ "devices" ],
-        takesValue: true },
-    "--privileged": { keys: [ "privileged" ] },
-    "--init": { keys: [ "init" ] },
-    "--security-opt": { keys: [ "security_opt" ],
-        takesValue: true },
-    "--shm-size": { keys: [ "shm_size" ],
-        takesValue: true },
-    "--sysctl": { keys: [ "sysctls" ],
-        takesValue: true },
-    "--ulimit": { keys: [ "ulimits" ],
-        takesValue: true },
-    "--stop-signal": { keys: [ "stop_signal" ],
-        takesValue: true },
-    "--stop-timeout": { keys: [ "stop_grace_period" ],
-        takesValue: true },
-    "--log-driver": { keys: [ "logging" ],
-        takesValue: true },
-    "--log-opt": { keys: [ "logging" ],
-        takesValue: true },
-    "-m": { keys: [ "mem_limit", "deploy" ],
-        takesValue: true },
-    "--memory": { keys: [ "mem_limit", "deploy" ],
-        takesValue: true },
-    "--cpus": { keys: [ "cpus", "deploy" ],
-        takesValue: true },
-    "--gpus": { keys: [ "deploy", "devices" ],
-        takesValue: true,
-        reason: "flagGpusDropped" },
-    "--health-cmd": { keys: [ "healthcheck" ],
-        takesValue: true },
-    "--health-interval": { keys: [ "healthcheck" ],
-        takesValue: true },
-    "--runtime": { keys: [ "runtime" ],
-        takesValue: true },
-    "--pid": { keys: [ "pid" ],
-        takesValue: true },
-    "--ipc": { keys: [ "ipc" ],
-        takesValue: true },
-    "-t": { keys: [ "tty" ] },
-    "--tty": { keys: [ "tty" ] },
-    "-i": { keys: [ "stdin_open" ] },
-    "--interactive": { keys: [ "stdin_open" ] },
+export function takesValue(flag : string) : boolean {
+    return VALUE_FLAGS.has(canonicalFlag(flag));
+}
 
-    // Flags that describe how `docker run` itself behaves: a compose file has no
-    // place for them, and their absence is not a loss
-    "-d": { keys: [],
-        always: "carried",
-        reason: "flagNotNeeded" },
-    "--detach": { keys: [],
-        always: "carried",
-        reason: "flagNotNeeded" },
-    "--rm": { keys: [],
-        reason: "flagRmDropped" },
-    "--pull": { keys: [],
-        takesValue: true,
-        always: "carried",
-        reason: "flagNotNeeded" },
-    "-q": { keys: [],
-        always: "carried",
-        reason: "flagNotNeeded" },
-};
+/**
+ * Whether a long flag written without `=` takes the next token as its value.
+ *
+ * A flag docker does not know takes the next token unless that token is another
+ * flag. Reading it as a switch instead took the value for the image and hid every
+ * flag after it; when that guess takes the image, `parseDockerRun` reads the flag
+ * again as a switch.
+ * @param flag Flag without its value
+ * @param next Token after the flag
+ * @returns True when the next token is the value of the flag
+ */
+function longFlagTakesValue(flag : string, next : string | undefined) : boolean {
+    const canonical = canonicalFlag(flag);
 
-/** Combined short flags such as `-it` are split into these */
-const SHORT_BOOLEAN_FLAGS = new Set([ "d", "i", "t", "P", "q" ]);
+    if (DOCKER_RUN_FLAGS.has(canonical)) {
+        return VALUE_FLAGS.has(canonical);
+    }
+
+    return next !== undefined && (!next.startsWith("-") || /^-\d/.test(next));
+}
 
 /**
  * Split a command line the way a shell does, minus the clever parts.
@@ -241,12 +218,6 @@ export function tokeniseCommand(command : string) : string[] {
     return tokens;
 }
 
-/** A flag as it appeared in the command */
-interface ParsedFlag {
-    flag : string;
-    value? : string;
-}
-
 /**
  * Read the flags of a `docker run` command.
  *
@@ -256,56 +227,94 @@ interface ParsedFlag {
  * @returns Flags in the order they were written
  */
 export function parseDockerRunFlags(command : string) : ParsedFlag[] {
+    return parseDockerRun(command).flags;
+}
+
+/**
+ * Read a `docker run` command into its flags, its image and the arguments after it.
+ *
+ * Anything before `run` is skipped, so `sudo docker run` and `docker container run`
+ * read the same. An unknown flag that took the image as its value is read again as
+ * a switch, the latest such flag first.
+ * @param command Command as the person typed or pasted it
+ * @returns Flags in the order they were written, the image and the container arguments
+ */
+export function parseDockerRun(command : string) : ParsedCommand {
     const tokens = tokeniseCommand(command);
+    const switches = new Set<number>();
+
+    for (;;) {
+        const { parsed, guessed } = readTokens(tokens, switches);
+
+        if (parsed.image !== undefined || guessed === undefined) {
+            return parsed;
+        }
+
+        switches.add(guessed);
+    }
+}
+
+/**
+ * One reading of the tokens of a command
+ * @param tokens Tokens of the command
+ * @param switches Positions of unknown flags to read as switches
+ * @returns What was read, and the position of the last unknown flag that took the next token
+ */
+function readTokens(tokens : string[], switches : Set<number>) : { parsed : ParsedCommand, guessed? : number } {
     const flags : ParsedFlag[] = [];
     let started = false;
+    let guessed : number | undefined;
 
     for (let index = 0; index < tokens.length; index += 1) {
         const token = tokens[index] as string;
 
         if (!started) {
-            // Skip `docker`, `run`, and anything before them
-            if (token === "run") {
-                started = true;
-            }
+            started = token === "run";
             continue;
         }
 
         if (!token.startsWith("-")) {
             // The image name: the rest belongs to the container
-            break;
+            return { parsed: { flags,
+                image: token,
+                args: tokens.slice(index + 1) } };
         }
 
         if (token.startsWith("--")) {
             const [ name, inlineValue ] = splitOnce(token, "=");
-            const spec = FLAG_SPECS[name as string];
+            const next = tokens[index + 1];
 
-            if (spec?.takesValue) {
-                const value = inlineValue ?? tokens[index + 1];
-
-                if (inlineValue === undefined) {
-                    index += 1;
+            if (inlineValue !== undefined) {
+                flags.push({ flag: name,
+                    value: inlineValue });
+            } else if (!switches.has(index) && longFlagTakesValue(name, next)) {
+                if (!DOCKER_RUN_FLAGS.has(canonicalFlag(name))) {
+                    guessed = index;
                 }
-
-                flags.push({ flag: name as string,
-                    ...(value === undefined ? {} : { value }) });
+                index += 1;
+                flags.push({ flag: name,
+                    ...(next === undefined ? {} : { value: next }) });
             } else {
-                flags.push({ flag: name as string });
+                flags.push({ flag: name });
             }
 
             continue;
         }
 
-        // Short flags: `-p 80:80`, `-p80:80`, `-it`, `-dp 80:80`
+        // Short flags: `-p 80:80`, `-p80:80`, `-p=80:80`, `-it`, `-dp 80:80`, `-P=false`
         const letters = token.slice(1);
         let consumedValue = false;
 
         for (let position = 0; position < letters.length; position += 1) {
-            const letter = letters[position] as string;
-            const name = `-${letter}`;
-            const spec = FLAG_SPECS[name];
+            const name = `-${letters[position] as string}`;
 
-            if (spec?.takesValue) {
+            if (letters[position + 1] === "=" && letters.length > position + 2) {
+                flags.push({ flag: name,
+                    value: letters.slice(position + 2) });
+                break;
+            }
+
+            if (takesValue(name)) {
                 const rest = letters.slice(position + 1);
                 const value = rest !== "" ? rest : tokens[index + 1];
 
@@ -318,12 +327,7 @@ export function parseDockerRunFlags(command : string) : ParsedFlag[] {
                 break;
             }
 
-            if (SHORT_BOOLEAN_FLAGS.has(letter) || spec) {
-                flags.push({ flag: name });
-                continue;
-            }
-
-            // Unknown short flag: still reported, so it cannot vanish quietly
+            // A switch, known or not: an unknown one is still reported, so it cannot vanish quietly
             flags.push({ flag: name });
         }
 
@@ -332,7 +336,9 @@ export function parseDockerRunFlags(command : string) : ParsedFlag[] {
         }
     }
 
-    return flags;
+    return { parsed: { flags,
+        args: [] },
+    ...(guessed === undefined ? {} : { guessed }) };
 }
 
 /**
@@ -341,7 +347,7 @@ export function parseDockerRunFlags(command : string) : ParsedFlag[] {
  * @param separator Separator to split on
  * @returns Head and tail, where the tail is undefined when the separator is absent
  */
-function splitOnce(value : string, separator : string) : [string, string | undefined] {
+export function splitOnce(value : string, separator : string) : [string, string | undefined] {
     const at = value.indexOf(separator);
 
     if (at === -1) {
@@ -349,136 +355,4 @@ function splitOnce(value : string, separator : string) : [string, string | undef
     }
 
     return [ value.slice(0, at), value.slice(at + separator.length) ];
-}
-
-/**
- * Keys that the produced compose file gives to its services
- * @param composeYaml Compose file as the converter produced it
- * @returns Set of service level keys
- */
-function serviceKeys(composeYaml : string) : Set<string> {
-    const keys = new Set<string>();
-
-    try {
-        const document = parseDocument(composeYaml);
-        const services = document.get("services");
-
-        if (!isMap(services)) {
-            return keys;
-        }
-
-        for (const pair of services.items) {
-            const service = pair.value;
-
-            if (isMap(service)) {
-                for (const serviceEntry of service.items) {
-                    const key = String(serviceEntry.key);
-                    keys.add(key);
-                }
-            }
-        }
-    } catch {
-        // A file that does not parse tells us nothing about carried flags
-        return keys;
-    }
-
-    return keys;
-}
-
-/**
- * Flags the converter itself refused, as it reports them.
- *
- * composerize puts an unsupported flag into a comment at the top of its output,
- * and that is a more reliable signal than any guess of ours.
- * @param composeYaml Compose file the converter produced
- * @returns Set of flags the converter named as unsupported
- */
-function flagsRefusedByConverter(composeYaml : string) : Set<string> {
-    const refused = new Set<string>();
-
-    for (const line of composeYaml.split("\n")) {
-        const match = /^#\s*(-{1,2}[a-zA-Z0-9-]+)/.exec(line.trim());
-
-        if (match?.[1]) {
-            refused.add(match[1]);
-        }
-    }
-
-    return refused;
-}
-
-/**
- * Compare a `docker run` command with the compose file produced from it.
- *
- * The report says what survived the conversion, what needs a look and what was
- * dropped, because a converted service that silently lost `--device` looks fine
- * and does not work.
- * @param command Original command
- * @param composeYaml Compose file the converter produced
- * @returns Report grouped by outcome
- */
-export function analyseConversion(command : string, composeYaml : string) : ConversionReport {
-    const keys = serviceKeys(composeYaml);
-    const refused = flagsRefusedByConverter(composeYaml);
-    const report : ConversionReport = { carried: [],
-        review: [],
-        dropped: [] };
-
-    for (const parsed of parseDockerRunFlags(command)) {
-        const spec = FLAG_SPECS[parsed.flag];
-
-        // Конвертер сам назвал флаг неподдержанным: спорить с ним нечем
-        if (refused.has(parsed.flag)) {
-            report.dropped.push({
-                ...parsed,
-                outcome: "dropped",
-                reason: spec?.reason ?? (spec ? "flagNoComposeKey" : "flagUnknown"),
-            });
-            continue;
-        }
-
-        if (!spec) {
-            report.review.push({
-                ...parsed,
-                outcome: "review",
-                reason: "flagUnknown",
-            });
-            continue;
-        }
-
-        if (spec.always) {
-            const item : FlagReportItem = {
-                ...parsed,
-                outcome: spec.always,
-                ...(spec.reason ? { reason: spec.reason } : {}),
-            };
-
-            // A flag with a known target still counts as carried when the key is there
-            if (spec.always === "review" && spec.keys.some((key) => keys.has(key))) {
-                report.review.push(item);
-            } else if (spec.always === "dropped") {
-                report.dropped.push(item);
-            } else if (spec.always === "review") {
-                report.dropped.push({ ...item,
-                    outcome: "dropped" });
-            } else {
-                report.carried.push(item);
-            }
-
-            continue;
-        }
-
-        if (spec.keys.some((key) => keys.has(key))) {
-            report.carried.push({ ...parsed,
-                outcome: "carried" });
-        } else {
-            report.dropped.push({
-                ...parsed,
-                outcome: "dropped",
-                reason: spec.reason ?? "flagNoComposeKey",
-            });
-        }
-    }
-
-    return report;
 }

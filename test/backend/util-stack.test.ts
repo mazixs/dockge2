@@ -34,7 +34,7 @@ function makeSocket(userID : string): DockgeSocket {
 
 test("server utilities validate login and serialize callback results and errors", () => {
     assert.doesNotThrow(() => checkLogin(makeSocket("owner")));
-    assert.throws(() => checkLogin(makeSocket("")), /You are not logged in/);
+    assert.throws(() => checkLogin(makeSocket("")), /notLoggedIn/);
 
     const results: unknown[] = [];
     callbackResult({ ok: true }, (value: unknown) => results.push(value));
@@ -120,13 +120,14 @@ test("Stack validates, saves and reads compose files using the real filesystem",
             source: null,
             dir: "",
             availability: null,
+            panelService: "",
         });
 
         await stack.save(true);
         assert.equal(await fileExists(path.join(stacksDir, "demo-stack", "compose.yaml")), true);
         assert.equal(await readFile(path.join(stacksDir, "demo-stack", "compose.yaml"), "utf8"), stack.composeYAML);
         assert.equal(stack.isManagedByDockge, true);
-        await assert.rejects(stack.save(true), /Stack name already exists/);
+        await assert.rejects(stack.save(true), /stackNameExists/);
 
         const loaded = await Stack.getStack(server, "demo-stack");
         assert.equal(loaded.composeYAML, stack.composeYAML);
@@ -265,6 +266,39 @@ test("Stack validates names, YAML and environment files and converts statuses", 
     assert.equal(statusConvert("exited(1), running(1)"), EXITED);
     assert.equal(statusConvert("running(1)"), RUNNING);
     assert.equal(statusConvert("unknown"), UNKNOWN);
+});
+
+test("the texts of a stack are read once, before anyone asks for them", async () => {
+    const stacksDir = await mkdtemp(path.join(os.tmpdir(), "dockge-texts-test-"));
+    const server = { stacksDir,
+        config: { dataDir: stacksDir } } as never;
+
+    try {
+        await mkdir(path.join(stacksDir, "texts"));
+        await writeFile(path.join(stacksDir, "texts", "compose.yaml"), "services:\n  app:\n    image: nginx\n");
+        await writeFile(path.join(stacksDir, "texts", ".env"), "KEY=value\n");
+
+        // Nothing is read behind a getter: a stack that skipped reading says so
+        const bare = new Stack(server, "texts", undefined, undefined, true);
+        assert.throws(() => bare.composeYAML, /call loadTexts\(\) first/);
+        await bare.loadTexts();
+        assert.equal(bare.composeENV, "KEY=value\n");
+
+        const loaded = await Stack.getStack(server, "texts");
+        await writeFile(path.join(stacksDir, "texts", "compose.yaml"), "services: {}\n");
+
+        // The snapshot is what was on disk when the stack was loaded
+        assert.match(loaded.composeYAML, /nginx/);
+
+        // An edit passed in is kept rather than replaced by the file
+        const edited = new Stack(server, "texts", "services:\n  web:\n    image: caddy\n", "", true);
+        await edited.loadTexts();
+        assert.match(edited.composeYAML, /caddy/);
+        assert.equal(edited.composeENV, "");
+    } finally {
+        await rm(stacksDir, { recursive: true,
+            force: true });
+    }
 });
 
 test("a stack that builds its own image is deployed with a build", async () => {

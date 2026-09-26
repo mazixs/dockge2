@@ -92,7 +92,7 @@ test("stack file and secret events keep secret content behind a password", async
         // Writing a secret needs the current password
         const refusedWrite = await call(agentSocket, "saveSecret", "secret-stack", ".secret.db", "db-password", "wrong-password");
         assert.equal(refusedWrite.ok, false);
-        assert.match(String(refusedWrite.msg), /Incorrect current password/);
+        assert.match(String(refusedWrite.msg), /incorrectCurrentPassword/);
 
         const savedSecret = await call(agentSocket, "saveSecret", "secret-stack", ".secret.db", "db-password", password);
         assert.equal(savedSecret.ok, true);
@@ -168,7 +168,7 @@ test("stack file events reject wrong types with a type error, not by accident", 
             [ "setStackFiles", [ "typed-stack", { composeFileName: "compose.yaml",
                 envFileNames: "nope" }], /envFileNames must be a string array/ ],
             [ "setStackFiles", [ "typed-stack", { composeFileName: "compose.yaml",
-                envFileNames: Array.from({ length: 100 }, () => ".env") }], /Too many env files/ ],
+                envFileNames: Array.from({ length: 100 }, () => ".env") }], /envFilesTooMany/ ],
             [ "saveEnvFile", [ "typed-stack", ".env", 5 ], /Content must be a string/ ],
             [ "listSecrets", [ null ], /must be a string/ ],
             [ "bindSecret", [ "typed-stack", "name", ".secret", "not-an-array" ], /must be a string array/ ],
@@ -215,6 +215,8 @@ test("stack operations refuse a wrong argument and an unknown stack before Docke
         const socket = makeAuthenticatedSocket();
         const server = { stacksDir,
             config: { dataDir },
+            standaloneContainers: { observe: () => undefined,
+                lose: () => undefined },
             sendStackList: () => undefined } as unknown as DockgeServer;
         const agentSocket = new AgentSocket();
         new DockerSocketHandler().create(socket, server, agentSocket);

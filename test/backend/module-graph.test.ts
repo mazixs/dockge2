@@ -47,7 +47,7 @@ function compileServer() : Map<string, string[]> {
         noEmit: false,
         types: [ "node" ],
     });
-    const statement = /^\s*(?:import|export)\b[^;]*?from\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+    const statement = /^\s*(?:import|export)\b[^;]*?from\s*["']([^"'\n]+)["']|^\s*import\s*["']([^"']+)["']/gm;
     const imports = new Map<string, string[]>();
 
     for (const file of files) {

@@ -79,7 +79,7 @@ test("an answer arriving after the deadline does not replace the result already 
     // The server was slow rather than silent. Answering now must not resolve a promise
     // the caller already acted on
     answer(sent[0] as SentRequest, { ok: true,
-        msg: "Started" } as never);
+        msg: "started" } as never);
     assert.equal(requests.waiting, 0);
 });
 
@@ -137,4 +137,24 @@ test("a transport exception settles as unknown and releases the pending request"
     assert.equal(result.ok, false);
     assert.equal(!result.ok && result.unknown, true);
     assert.equal(requests.waiting, 0);
+});
+
+test("the answer is handed over in the task it arrived in, and only once", async () => {
+    const { requests, sent } = requester(20);
+    const seen : unknown[] = [];
+    const pending = requests.request("", "terminalJoin", [ "shell" ], { onAnswer: (response) => seen.push(response) });
+
+    answer(sent[0] as SentRequest, { ok: true,
+        buffer: "x" } as never);
+    // Before any promise continuation: the next packet of the same batch comes right now
+    assert.deepEqual(seen, [{ ok: true,
+        buffer: "x" }]);
+    answer(sent[0] as SentRequest, { ok: true,
+        buffer: "again" } as never);
+    await pending;
+    assert.equal(seen.length, 1);
+
+    const lost : unknown[] = [];
+    await requests.request("", "terminalJoin", [ "shell" ], { onAnswer: (response) => lost.push(response) });
+    assert.equal(lost.length, 1, "an answer that never came is handed over as unknown too");
 });

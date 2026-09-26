@@ -3,13 +3,16 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 
 /** Bound fixture input before creating temporary directories or processes. */
-export function fixtureSize(value : string | undefined, fallback : number) : number {
+export function fixtureSize(value : string | undefined, fallback : number, max = 1000) : number {
     const count = Number(value ?? fallback);
-    if (!Number.isInteger(count) || count < 1 || count > 1000) {
-        throw new Error("Performance fixture sizes must be integers between 1 and 1000");
+    if (!Number.isInteger(count) || count < 1 || count > max) {
+        throw new Error(`Performance fixture sizes must be integers between 1 and ${max}`);
     }
     return count;
 }
+
+/** Synthetic containers go further than stacks: the target is 2000 on one server */
+export const MAX_SYNTHETIC_CONTAINERS = 5000;
 
 interface RuntimeOptions {
     root : string;
@@ -28,7 +31,7 @@ export async function launchBackend(options : RuntimeOptions) {
     const fixture = process.env.DOCKGE_PERF_CONTAINERS;
     const bin = path.join(work, "bin");
     if (fixture) {
-        fixtureSize(fixture, 1);
+        fixtureSize(fixture, 1, MAX_SYNTHETIC_CONTAINERS);
         await mkdir(bin);
         await copyFile(path.join(root, "extra/performance-docker.cjs"), path.join(bin, "docker"));
         await chmod(path.join(bin, "docker"), 0o700);

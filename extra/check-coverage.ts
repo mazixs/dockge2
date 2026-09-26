@@ -48,6 +48,12 @@ const GROUPS : CoverageGroup[] = [
         floor: 70,
         holds: (file) => /^backend\/(agent-manager|agent-socket-handler)\.ts$/.test(file) || /^backend\/socket-handlers\//.test(file) || /^backend\/agent-socket-handlers\//.test(file) || /^common\/agent-(socket|events)\.ts$/.test(file),
     },
+    {
+        name: "Interface state",
+        reason: "holds the session, the stack list and the panel update the pages draw from",
+        floor: 90,
+        holds: (file) => /^frontend\/src\/mixins\/[^/]+\.ts$/.test(file) || /^frontend\/src\/(panel-update-machine|stack-list-model)\.ts$/.test(file),
+    },
 ];
 
 /** One file as the report describes it */

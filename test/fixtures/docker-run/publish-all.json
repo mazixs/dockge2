@@ -1,0 +1,32 @@
+{
+    "description": "Publishing every exposed port on a random host port has no compose equivalent. The report names it as dropped.",
+    "command": "docker run -d -P nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image"
+        ],
+        "values": {
+            "image": "nginx"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "-P",
+                "reason": "flagPublishAllDropped"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

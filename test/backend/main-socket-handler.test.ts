@@ -6,11 +6,13 @@ import test from "node:test";
 import type { DockgeServer } from "../../backend/dockge-server";
 import { releaseAssets } from "../helpers/releases";
 import checkVersion from "../../backend/check-version";
-import { MainSocketHandler, stripGeneratedProjectName } from "../../backend/socket-handlers/main-socket-handler";
+import { MainSocketHandler } from "../../backend/socket-handlers/main-socket-handler";
 import { Settings } from "../../backend/settings";
 import { MainTerminal, Terminal } from "../../backend/terminal";
 import { CONSOLE_OPERATORS_SETTING, listUsers } from "../../backend/auth-access";
+import { CONTAINER_CONTROL_SETTING, SET_CONTAINER_CONTROL_EVENT } from "../../common/types/container";
 import type { DockgeSocket } from "../../backend/util-server";
+import { MAX_DOCKER_RUN_COMMAND_LENGTH } from "../../common/docker-run-flags";
 import { createTestAccount, TEST_PASSWORD, withDatabase } from "../helpers/database";
 
 interface CallbackResponse {
@@ -112,7 +114,7 @@ test("settings are refused for a client without a session", async () => {
 
         const read = await emitWithCallback(socket, "getSettings");
         assert.equal(read.ok, false);
-        assert.match(String(read.msg), /not logged in/i);
+        assert.match(String(read.msg), /notLoggedIn/);
 
         const write = await emitWithCallback(socket, "setSettings", { primaryHostname: "evil.example.com" }, "");
         assert.equal(write.ok, false);
@@ -195,7 +197,31 @@ test("only an owner turns the console on, with the password, and turning it off 
         const off = await emitWithCallback(socket, "setConsoleEnabled", false, "");
         assert.equal(off.ok, true);
         assert.equal(Terminal.forClient(socket as unknown as DockgeSocket, MainTerminal.NAME), undefined);
-        await assert.rejects(MainTerminal.open(server, socket as unknown as DockgeSocket), /Console is not enabled/);
+        await assert.rejects(MainTerminal.open(server, socket as unknown as DockgeSocket), /consoleOff/);
+    });
+});
+
+test("only an owner lets operators control unmanaged containers, and only with the password", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        socket.userRole = "operator";
+        assert.equal((await emitWithCallback(socket, SET_CONTAINER_CONTROL_EVENT, true, TEST_PASSWORD)).ok, false);
+        socket.userRole = "admin";
+        assert.equal((await emitWithCallback(socket, SET_CONTAINER_CONTROL_EVENT, true, "wrong-password")).ok, false);
+        assert.equal((await emitWithCallback(socket, SET_CONTAINER_CONTROL_EVENT, "true", TEST_PASSWORD)).ok, false);
+        assert.equal(await Settings.get(CONTAINER_CONTROL_SETTING), undefined, "off until an owner confirms");
+
+        const on = await emitWithCallback(socket, SET_CONTAINER_CONTROL_EVENT, true, TEST_PASSWORD);
+        assert.equal(on.msg, "containerControlTurnedOn");
+        assert.equal(await Settings.get(CONTAINER_CONTROL_SETTING), true);
+
+        const off = await emitWithCallback(socket, SET_CONTAINER_CONTROL_EVENT, false, "");
+        assert.equal(off.msg, "containerControlTurnedOff");
+        assert.equal(await Settings.get(CONTAINER_CONTROL_SETTING), false);
     });
 });
 
@@ -261,53 +287,101 @@ test("the global env file is written and removed through the settings event", as
     });
 });
 
-test("composerize converts a docker run command for a signed in client", async () => {
+test("the conversion converts a docker run command for a signed in client", async () => {
     await withDatabase(async ({ stacksDir }) => {
         const cookie = await createTestAccount();
         const socket = new TestSocket(cookie);
         socket.userID = "owner";
         new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
 
-        const converted = await emitWithCallback(socket, "composerize", "docker run -p 8080:80 nginx");
+        const converted = await emitWithCallback(socket, "convertDockerRun", "docker run -p 8080:80 nginx");
         assert.equal(converted.ok, true);
-        assert.match(String(converted.composeTemplate), /nginx/);
-        assert.match(String(converted.composeTemplate), /8080:80/);
+        assert.equal(converted.composeTemplate, "services:\n  nginx:\n    image: nginx\n    ports:\n      - 8080:80\n");
+        assert.deepEqual(converted.report, { carried: [{ flag: "-p",
+            value: "8080:80",
+            outcome: "carried" }],
+        review: [],
+        dropped: [] });
 
-        const refused = await emitWithCallback(socket, "composerize", 42);
+        const refused = await emitWithCallback(socket, "convertDockerRun", 42);
         assert.equal(refused.ok, false);
     });
 });
 
-test("преобразование снимает только сгенерированное имя проекта", async () => {
-    // Конвертер сообщает о неподдержанном флаге комментарием над строкой name,
-    // и прежняя обрезка первой строки убирала сообщение, оставляя в файле
-    // пользователя "name: <your project name>"
-    const withComment = "# -P\nname: <your project name>\nservices:\n    nginx:\n        image: nginx\n";
-    const stripped = stripGeneratedProjectName(withComment);
-
-    assert.equal(stripped.includes("name: <your project name>"), false);
-    assert.ok(stripped.startsWith("# -P"), "сообщение конвертера должно остаться");
-    assert.ok(stripped.includes("services:"));
-
-    // Файл без сгенерированного имени не меняется вообще
-    const plain = "services:\n    nginx:\n        image: nginx\n";
-    assert.equal(stripGeneratedProjectName(plain), plain);
-});
-
-test("composerize отдает компоуз без служебного имени проекта", async () => {
+test("the conversion refuses a command that names no image, with a reason", async () => {
     await withDatabase(async ({ stacksDir }) => {
         const cookie = await createTestAccount();
         const socket = new TestSocket(cookie);
         socket.userID = "owner";
         new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
 
-        const converted = await emitWithCallback(socket, "composerize", "docker run -d -P nginx");
+        const refused = await emitWithCallback(socket, "convertDockerRun", "docker run -d -p 8080:80");
+        assert.equal(refused.ok, false);
+        assert.equal(refused.msg, "dockerRunNoImage");
+        assert.equal(refused.msgi18n, true);
+    });
+});
+
+test("the conversion names a lost flag in the report and writes no project name", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const converted = await emitWithCallback(socket, "convertDockerRun", "docker run -d -P nginx");
         assert.equal(converted.ok, true);
 
         const template = String(converted.composeTemplate);
-        assert.equal(template.includes("<your project name>"), false, template);
-        assert.match(template, /services:/);
-        assert.match(template, /# -P/);
+        assert.equal(template, "services:\n  nginx:\n    image: nginx\n");
+        assert.deepEqual(converted.report, { carried: [{ flag: "-d",
+            outcome: "carried",
+            reason: "flagNotNeeded" }],
+        review: [],
+        dropped: [{ flag: "-P",
+            outcome: "dropped",
+            reason: "flagPublishAllDropped" }] });
+    });
+});
+
+test("the conversion refuses a command over the length limit before converting it", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const prefix = "docker run -e X=";
+        const suffix = " nginx";
+        const fill = MAX_DOCKER_RUN_COMMAND_LENGTH - prefix.length - suffix.length;
+
+        const atLimit = await emitWithCallback(socket, "convertDockerRun", `${prefix}${"a".repeat(fill)}${suffix}`);
+        assert.equal(atLimit.ok, true, JSON.stringify(atLimit));
+
+        // The converter would accept this one too: only the limit can refuse it
+        const overLimit = await emitWithCallback(socket, "convertDockerRun", `${prefix}${"a".repeat(fill + 1)}${suffix}`);
+        assert.equal(overLimit.ok, false);
+        assert.deepEqual(overLimit.msg, { key: "dockerRunCommandTooLong",
+            values: { max: String(MAX_DOCKER_RUN_COMMAND_LENGTH) } });
+
+        // A pasted megabyte is refused at once instead of blocking the server for minutes
+        const started = performance.now();
+        const huge = await emitWithCallback(socket, "convertDockerRun", `docker run ${"-e A=B ".repeat(150_000)}nginx`);
+        assert.equal(huge.ok, false);
+        assert.ok(performance.now() - started < 1000);
+    });
+});
+
+test("the conversion converts a command copied with sudo", async () => {
+    await withDatabase(async ({ stacksDir }) => {
+        const cookie = await createTestAccount();
+        const socket = new TestSocket(cookie);
+        socket.userID = "owner";
+        new MainSocketHandler().create(socket as unknown as DockgeSocket, createServer(stacksDir));
+
+        const converted = await emitWithCallback(socket, "convertDockerRun", "sudo docker run -d -p 8080:80 nginx");
+        assert.equal(converted.ok, true, JSON.stringify(converted));
+        assert.match(String(converted.composeTemplate), /8080:80/);
     });
 });
 

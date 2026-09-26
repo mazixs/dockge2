@@ -15,7 +15,7 @@
                         id="primaryBaseURL"
                         v-model="settings.primaryHostname"
                         class="form-control"
-                        :placeholder="$t(`CurrentHostname`)"
+                        :placeholder="$t(`currentHostname`)"
                     />
                     <button class="btn btn-normal" type="button" @click="autoGetPrimaryHostname">
                         {{ $t("autoGet") }}
@@ -26,30 +26,45 @@
             </div>
 
             <div class="actions">
-                <button class="btn btn-primary" type="submit">{{ $t("Save") }}</button>
+                <button class="btn btn-primary" type="submit">{{ $t("save") }}</button>
             </div>
         </form>
     </section>
 </template>
 
-<script>
-
+<script lang="ts">
+import { defineComponent, type ComponentPublicInstance } from "vue";
 import InterfaceIcon from "../InterfaceIcon.vue";
+import type { GeneralSettings, SettingsPageApi } from "../../pages/Settings.vue";
 
-export default {
+/**
+ * The settings page this section is rendered in: the router view and its transition
+ * stand between them
+ * @param parent Parent of the section
+ * @returns The page
+ */
+function settingsPage(parent : ComponentPublicInstance | null) : SettingsPageApi {
+    const page = parent?.$parent?.$parent;
+    if (!page || !("settings" in page)) {
+        throw new Error("A settings section is rendered outside the settings page");
+    }
+    return page as ComponentPublicInstance & SettingsPageApi;
+}
+
+export default defineComponent({
     components: {
         InterfaceIcon,
     },
 
     computed: {
-        settings() {
-            return this.$parent.$parent.$parent.settings;
+        settings() : GeneralSettings {
+            return settingsPage(this.$parent).settings;
         },
-        saveSettings() {
-            return this.$parent.$parent.$parent.saveSettings;
+        saveSettings() : SettingsPageApi["saveSettings"] {
+            return settingsPage(this.$parent).saveSettings;
         },
-        settingsLoaded() {
-            return this.$parent.$parent.$parent.settingsLoaded;
+        settingsLoaded() : boolean {
+            return settingsPage(this.$parent).settingsLoaded;
         },
     },
 
@@ -63,6 +78,6 @@ export default {
             this.settings.primaryHostname = location.hostname;
         },
     },
-};
+});
 </script>
 

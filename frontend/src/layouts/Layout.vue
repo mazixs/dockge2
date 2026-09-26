@@ -1,9 +1,11 @@
 <template>
     <div class="app-shell" :class="classes">
-        <div v-if="!$root.socketIO.connected && !$root.socketIO.firstConnect" class="lost-connection" role="alert">
+        <!-- While the panel updates, losing the connection is expected and the update says so -->
+        <div v-if="!$root.socketIO.connected && !$root.socketIO.firstConnect && !panelUpdateSuppressing" class="lost-connection" role="alert">
             {{ $root.socketIO.connectionErrorMsg }}
         </div>
-        <header class="app-header">
+        <PanelUpdateOverlay v-if="panelUpdateMode" :mode="panelUpdateMode" />
+        <header class="app-header" :inert="panelUpdateMode === 'overlay'">
             <router-link to="/" class="brand" aria-label="Dockge2">
                 <InterfaceIcon name="box" class="brand-icon" />
                 <BrandMark />
@@ -45,19 +47,19 @@
                         <li v-if="$root.info.updateAvailable">
                             <router-link to="/settings/about" class="dropdown-item update-item">{{ $t("newUpdate") }}: {{ $root.info.latestVersion }}</router-link>
                         </li>
-                        <li><router-link to="/settings/appearance" class="dropdown-item">{{ $t("Settings") }}</router-link></li>
+                        <li><router-link to="/settings/appearance" class="dropdown-item">{{ $t("settings") }}</router-link></li>
                         <li v-if="$root.isAdmin"><router-link to="/settings/users" class="dropdown-item">{{ $t("familiarUsers") }}</router-link></li>
                         <li v-if="$root.isAdmin"><router-link to="/settings/agents" class="dropdown-item">{{ $t("dockgeAgent", 2) }}</router-link></li>
-                        <li><router-link to="/settings/security" class="dropdown-item">{{ $t("Security") }}</router-link></li>
+                        <li><router-link to="/settings/security" class="dropdown-item">{{ $t("security") }}</router-link></li>
                         <li><hr class="dropdown-divider" /></li>
                         <li class="dropdown-item-text"><ThemePicker compact /></li>
-                        <li v-if="!$root.authDisabled"><button class="dropdown-item" @click="$root.logout">{{ $t("Logout") }}</button></li>
+                        <li v-if="!$root.authDisabled"><button class="dropdown-item" @click="$root.logout">{{ $t("logout") }}</button></li>
                     </ul>
                 </div>
             </div>
         </header>
-        <main class="application-content">
-            <div v-if="$root.sessionBootstrapping && !$root.appReady" class="connection-pending" role="status">{{ $t("connecting...") }}</div>
+        <main class="application-content" :inert="panelUpdateMode === 'overlay'">
+            <div v-if="$root.sessionBootstrapping && !$root.appReady" class="connection-pending" role="status">{{ $t("socketConnecting") }}</div>
             <div v-if="$root.sessionBootstrapError && !$root.appReady" class="connection-pending" role="alert">
                 <p>{{ $t($root.sessionBootstrapError) }}</p>
                 <button class="btn btn-primary" @click="$root.reconnectSocket()">{{ $t("retry") }}</button>
@@ -68,19 +70,21 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import BrandMark from "../components/BrandMark.vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import LanguagePicker from "../components/LanguagePicker.vue";
 import ThemePicker from "../components/ThemePicker.vue";
 import Login from "../components/Login.vue";
 import ServerSwitcher from "../components/ServerSwitcher.vue";
+import PanelUpdateOverlay from "../components/PanelUpdateOverlay.vue";
 import { ALL_ENDPOINTS } from "../../../common/util-common";
 
 /** Имена файлов, которые имеет смысл принимать перетаскиванием */
 const DROPPABLE = /^(compose|docker-compose)\.(ya?ml)$|^\.env/i;
 
-export default {
+export default defineComponent({
 
     components: {
         BrandMark,
@@ -89,6 +93,7 @@ export default {
         ThemePicker,
         ServerSwitcher,
         Login,
+        PanelUpdateOverlay,
     },
 
     data() {
@@ -101,15 +106,32 @@ export default {
     computed: {
 
         // Theme or Mobile
-        classes() {
-            const classes = {};
+        classes() : Record<string, boolean> {
+            const classes : Record<string, boolean> = {};
             classes[this.$root.theme] = true;
             classes["mobile"] = this.$root.isMobile;
             return classes;
         },
 
+        /**
+         * How the update of the panel is shown, or nothing. The banner waits until the
+         * session is known, so a reload does not flash it before the overlay
+         * @returns Presentation
+         */
+        panelUpdateMode() : "overlay" | "banner" | "" {
+            const view = this.$root.panelUpdateView ?? "none";
+            if (view === "banner" && this.$root.sessionBootstrapping) {
+                return "";
+            }
+            return view === "none" ? "" : view;
+        },
+
+        panelUpdateSuppressing() : boolean {
+            return this.$root.panelUpdateSuppressing === true;
+        },
+
         /** Находимся ли мы на стеках: список, инспектор и редактор - одна вкладка */
-        onStacks() {
+        onStacks() : boolean {
             const path = this.$route.path;
             return path === "/" || path === "/new" || path.startsWith("/stack") || path.startsWith("/compose") || path.startsWith("/terminal");
         },
@@ -136,10 +158,9 @@ export default {
     methods: {
         /**
          * Открыть слой создания стека
-         * @param {string} prefill Вставленный текст, если он уже есть
-         * @returns {void}
+         * @param prefill Вставленный текст, если он уже есть
          */
-        openCreateSheet(prefill = "") {
+        openCreateSheet(prefill : unknown = "") {
             if (this.$root.canManageStacks) {
                 this.$root.createStackSeed = typeof prefill === "string" ? prefill : "";
                 this.$router.push("/new");
@@ -149,10 +170,9 @@ export default {
         /**
          * Вставка вне поля ввода: пользователь принес compose или команду.
          * Пока фокус в поле, вставка принадлежит полю, а не слою.
-         * @param {ClipboardEvent} event Событие вставки
-         * @returns {void}
+         * @param event Событие вставки
          */
-        onPaste(event) {
+        onPaste(event : ClipboardEvent) {
             // A read-only editor cancels the paste itself; it is not a paste "anywhere in the list"
             if (!this.$root.canManageStacks || event.defaultPrevented || this.isEditableTarget(event.target)) {
                 return;
@@ -170,10 +190,9 @@ export default {
 
         /**
          * Разрешить бросить файл в окно
-         * @param {DragEvent} event Событие перетаскивания
-         * @returns {void}
+         * @param event Событие перетаскивания
          */
-        onDragOver(event) {
+        onDragOver(event : DragEvent) {
             if (this.$root.canManageStacks && event.dataTransfer?.types?.includes("Files")) {
                 event.preventDefault();
             }
@@ -181,10 +200,9 @@ export default {
 
         /**
          * Файл compose, брошенный в окно, открывает слой с его содержимым
-         * @param {DragEvent} event Событие сброса
-         * @returns {Promise<void>}
+         * @param event Событие сброса
          */
-        async onDrop(event) {
+        async onDrop(event : DragEvent) {
             if (!this.$root.canManageStacks) {
                 return;
             }
@@ -201,10 +219,10 @@ export default {
 
         /**
          * Находится ли фокус в поле, которому вставка нужнее
-         * @param {EventTarget} target Цель события
-         * @returns {boolean} Признак поля ввода
+         * @param target Цель события
+         * @returns Признак поля ввода
          */
-        isEditableTarget(target) {
+        isEditableTarget(target : EventTarget | null) {
             const element = target instanceof HTMLElement ? target : null;
 
             if (!element) {
@@ -217,10 +235,10 @@ export default {
 
         /**
          * Похоже ли вставленное на стек: только тогда стоит перехватывать вставку
-         * @param {string} text Вставленный текст
-         * @returns {boolean} Признак compose или команды docker run
+         * @param text Вставленный текст
+         * @returns Признак compose или команды docker run
          */
-        looksLikeStack(text) {
+        looksLikeStack(text : string) {
             return /^\s*(sudo\s+)?docker\s+run\b/.test(text) || /^\s*services\s*:/m.test(text);
         },
 
@@ -234,7 +252,6 @@ export default {
          * item now stays put and spins while it works, and the result names the number
          * of stacks the scan ended up with, which is the one thing the reader pressed
          * it to find out.
-         * @returns {void}
          */
         scanFolder() {
             if (this.scanning) {
@@ -243,7 +260,7 @@ export default {
 
             this.scanning = true;
 
-            this.$root.emitAgent(ALL_ENDPOINTS, "requestStackList", (res) => {
+            this.$root.emitAgentRequest(ALL_ENDPOINTS, "requestStackList", []).then((res) => {
                 this.scanning = false;
 
                 if (!res?.ok) {
@@ -260,7 +277,7 @@ export default {
         },
     },
 
-};
+});
 </script>
 
 <style lang="scss" scoped>

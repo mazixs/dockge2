@@ -1,0 +1,30 @@
+{
+    "description": "A network mode is carried as network_mode, and no network is declared.",
+    "command": "docker run -d --network host nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "network_mode"
+        ],
+        "values": {
+            "image": "nginx",
+            "network_mode": "host"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--network"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

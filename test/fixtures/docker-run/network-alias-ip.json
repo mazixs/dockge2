@@ -1,0 +1,52 @@
+{
+    "description": "An alias and a fixed address land under the named network they belong to.",
+    "command": "docker run -d --network proxy --network-alias web --ip 172.20.0.5 nginx",
+    "verdict": "warned",
+    "compose": {
+        "topLevel": [
+            "services",
+            "networks"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "networks"
+        ],
+        "values": {
+            "image": "nginx",
+            "networks": {
+                "proxy": {
+                    "aliases": [
+                        "web"
+                    ],
+                    "ipv4_address": "172.20.0.5"
+                }
+            }
+        },
+        "topLevelValues": {
+            "networks": {
+                "proxy": {
+                    "external": true,
+                    "name": "proxy"
+                }
+            }
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--network-alias",
+            "--ip"
+        ],
+        "review": [
+            {
+                "flag": "--network",
+                "reason": "flagNetworkExternal"
+            }
+        ],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

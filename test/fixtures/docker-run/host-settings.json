@@ -1,0 +1,121 @@
+{
+    "description": "Host, name resolution, namespace and runtime flags each land in the compose key of the same meaning, which docker compose config knows.",
+    "command": "docker run -d --add-host host.docker.internal:host-gateway --dns 1.1.1.1 --dns-search example.test --dns-opt ndots:2 --hostname web --domainname example.test --mac-address 02:42:ac:11:00:02 --sysctl net.core.somaxconn=1024 --security-opt no-new-privileges:true --cgroupns private --cgroup-parent /docker --ipc private --pid host --userns host --uts host --group-add 999 --device-cgroup-rule 'c 188:* rmw' --platform linux/amd64 --runtime runc --isolation default --storage-opt size=10G --pull missing --expose 9090 --entrypoint /docker-entrypoint.sh nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "extra_hosts",
+            "dns",
+            "dns_search",
+            "dns_opt",
+            "hostname",
+            "domainname",
+            "mac_address",
+            "sysctls",
+            "security_opt",
+            "cgroup",
+            "cgroup_parent",
+            "ipc",
+            "pid",
+            "userns_mode",
+            "uts",
+            "group_add",
+            "device_cgroup_rules",
+            "platform",
+            "runtime",
+            "isolation",
+            "storage_opt",
+            "pull_policy",
+            "expose",
+            "entrypoint"
+        ],
+        "values": {
+            "image": "nginx",
+            "extra_hosts": [
+                "host.docker.internal:host-gateway"
+            ],
+            "dns": [
+                "1.1.1.1"
+            ],
+            "dns_search": [
+                "example.test"
+            ],
+            "dns_opt": [
+                "ndots:2"
+            ],
+            "hostname": "web",
+            "domainname": "example.test",
+            "mac_address": "02:42:ac:11:00:02",
+            "sysctls": [
+                "net.core.somaxconn=1024"
+            ],
+            "security_opt": [
+                "no-new-privileges:true"
+            ],
+            "cgroup": "private",
+            "cgroup_parent": "/docker",
+            "ipc": "private",
+            "pid": "host",
+            "userns_mode": "host",
+            "uts": "host",
+            "group_add": [
+                "999"
+            ],
+            "device_cgroup_rules": [
+                "c 188:* rmw"
+            ],
+            "platform": "linux/amd64",
+            "runtime": "runc",
+            "isolation": "default",
+            "storage_opt": {
+                "size": "10G"
+            },
+            "pull_policy": "missing",
+            "expose": [
+                "9090"
+            ],
+            "entrypoint": [
+                "/docker-entrypoint.sh"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--add-host",
+            "--dns",
+            "--dns-search",
+            "--dns-opt",
+            "--hostname",
+            "--domainname",
+            "--mac-address",
+            "--sysctl",
+            "--security-opt",
+            "--cgroupns",
+            "--cgroup-parent",
+            "--ipc",
+            "--pid",
+            "--userns",
+            "--uts",
+            "--group-add",
+            "--device-cgroup-rule",
+            "--platform",
+            "--runtime",
+            "--isolation",
+            "--storage-opt",
+            "--pull",
+            "--expose",
+            "--entrypoint"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

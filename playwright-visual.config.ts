@@ -35,6 +35,9 @@ export default defineConfig({
 
     use: {
         baseURL: "http://localhost:5090",
+        // Время проверки на сцене выводится в поясе браузера: без явного пояса снимок
+        // зависел бы от машины, на которой его сняли
+        timezoneId: "UTC",
         trace: "retain-on-failure",
     },
 

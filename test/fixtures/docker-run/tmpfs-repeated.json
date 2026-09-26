@@ -1,0 +1,34 @@
+{
+    "description": "A repeated --tmpfs becomes a list, one tmpfs per path, as docker mounts them.",
+    "command": "docker run -d --tmpfs /run --tmpfs /tmp:size=64m nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "tmpfs"
+        ],
+        "values": {
+            "image": "nginx",
+            "tmpfs": [
+                "/run",
+                "/tmp:size=64m"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--tmpfs",
+            "--tmpfs"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

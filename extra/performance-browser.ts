@@ -110,3 +110,57 @@ export async function filterPaints(page : Page) : Promise<number[]> {
     }
     return samples.sort((a, b) => a - b);
 }
+
+interface Churn {
+    region : string;
+    rows : number;
+    addedNodes : number;
+    removedNodes : number;
+    attributes : number;
+    text : number;
+}
+
+/**
+ * Count what the stack list and the overview rebuild while fresh snapshots of an unchanged
+ * host arrive: 32 seconds cover three stack list rounds and one overview reload. A keyed
+ * render touches the few cells whose age moved; rows added and removed mean it rebuilt them.
+ */
+export async function snapshotChurn(page : Page) : Promise<Churn[]> {
+    await page.evaluate(() => {
+        const regions : Record<string, string> = { stackList: ".list-box",
+            overview: ".stability-dashboard" };
+        const counts : Record<string, { addedNodes : number, removedNodes : number, attributes : number, text : number }> = {};
+        for (const [ name, selector ] of Object.entries(regions)) {
+            const element = document.querySelector(selector);
+            if (!element) {
+                continue;
+            }
+            const count = { addedNodes: 0,
+                removedNodes: 0,
+                attributes: 0,
+                text: 0 };
+            counts[name] = count;
+            new MutationObserver(records => {
+                for (const record of records) {
+                    count.addedNodes += record.addedNodes.length;
+                    count.removedNodes += record.removedNodes.length;
+                    count.attributes += record.type === "attributes" ? 1 : 0;
+                    count.text += record.type === "characterData" ? 1 : 0;
+                }
+            }).observe(element, { subtree: true,
+                childList: true,
+                attributes: true,
+                characterData: true });
+        }
+        Object.assign(window, { dockgeChurn: counts });
+    });
+    await page.waitForTimeout(32_000);
+    return page.evaluate(() => {
+        const counts = (window as unknown as { dockgeChurn : Record<string, Omit<Churn, "region" | "rows">> }).dockgeChurn;
+        const rows : Record<string, number> = { stackList: document.querySelectorAll(".list-box .item").length,
+            overview: document.querySelectorAll(".stability-dashboard tbody tr").length };
+        return Object.entries(counts).map(([ region, count ]) => ({ region,
+            rows: rows[region] ?? 0,
+            ...count }));
+    });
+}

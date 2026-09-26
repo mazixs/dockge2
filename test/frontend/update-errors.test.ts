@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { UPDATE_CHECK_MESSAGES } from "../../common/update-check";
 import en from "../../frontend/src/lang/en.json" with { type: "json" };
 import ru from "../../frontend/src/lang/ru.json" with { type: "json" };
+import { componentOptions } from "../helpers/sfc";
 
 /** Evaluate the component's real methods with only its browser imports replaced.
  * @param file Component path relative to this test
@@ -12,16 +11,13 @@ import ru from "../../frontend/src/lang/ru.json" with { type: "json" };
  * @returns Vue options
  */
 function component(file : string, globals : Record<string, unknown>) {
-    const source = readFileSync(new URL(file, import.meta.url), "utf8").split("<script>")[1]!.split("</script>")[0]!;
-    const context = { result: null,
-        ...globals };
-    runInNewContext(source.replace(/^import .*;$/gm, "").replace("export default", "result ="), context);
-    return context.result as unknown as { methods : Record<string, (this: Record<string, unknown>) => Promise<void>>; computed : Record<string, (this: Record<string, unknown>) => unknown> };
+    return componentOptions<{ methods : Record<string, (this: Record<string, unknown>) => Promise<void>>; computed : Record<string, (this: Record<string, unknown>) => unknown> }>(new URL(file, import.meta.url), globals);
 }
 
 test("manual update checks retain server error categories and distinguish a lost acknowledgement", async () => {
     const about = component("../../frontend/src/components/settings/About.vue", { BrandMark: {},
         InterfaceIcon: {},
+        PanelContainerCard: {},
         UPDATE_CHECK_MESSAGES });
     for (const [ code, key ] of Object.entries(UPDATE_CHECK_MESSAGES)) {
         const ctx = { $root: { getSocket: () => ({ timeout: () => ({ emitWithAck: async () => ({ ok: false,

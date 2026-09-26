@@ -11,8 +11,10 @@
     </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent } from "vue";
+
+export default defineComponent({
     props: {
         /** Что здесь будет, когда появится: короткое имя пустоты */
         title: {
@@ -25,7 +27,7 @@ export default {
             default: "",
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

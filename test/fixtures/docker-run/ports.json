@@ -1,0 +1,45 @@
+{
+    "description": "Every form of -p and --publish survives in the order of the command. Each port is a string, so a YAML 1.1 reader cannot take one for a number in base 60.",
+    "command": "docker run -d -p 8080:80 -p 127.0.0.1:8443:443/tcp -p 53:53/udp --publish 9000-9002:9000-9002 -p 3000 --expose 9090 nginx:1.27",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "ports",
+            "expose"
+        ],
+        "values": {
+            "image": "nginx:1.27",
+            "ports": [
+                "8080:80",
+                "127.0.0.1:8443:443/tcp",
+                "53:53/udp",
+                "9000-9002:9000-9002",
+                "3000"
+            ],
+            "expose": [
+                "9090"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "-p",
+            "-p",
+            "-p",
+            "--publish",
+            "-p",
+            "--expose"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

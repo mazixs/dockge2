@@ -1,0 +1,38 @@
+{
+    "description": "Absolute and relative bind mounts keep their mode and SELinux suffix, an anonymous volume stays anonymous, the order of the command is kept, and no top level volume is declared.",
+    "command": "docker run -d -v /srv/web/html:/usr/share/nginx/html -v ./conf:/etc/nginx/conf.d:ro --volume /srv/web/logs:/var/log/nginx:rw,z -v /var/cache/nginx nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "volumes"
+        ],
+        "values": {
+            "image": "nginx",
+            "volumes": [
+                "/srv/web/html:/usr/share/nginx/html",
+                "./conf:/etc/nginx/conf.d:ro",
+                "/srv/web/logs:/var/log/nginx:rw,z",
+                "/var/cache/nginx"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "-v",
+            "-v",
+            "--volume",
+            "-v"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

@@ -1,0 +1,44 @@
+{
+    "description": "Flags compose has no key for, or that the converter does not carry, are named in the report and leave no trace in the file.",
+    "command": "docker run -d --cidfile /tmp/app.cid --link db:db --blkio-weight 300 --umask 0027 nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image"
+        ],
+        "values": {
+            "image": "nginx"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--cidfile",
+                "reason": "flagNoComposeKey"
+            },
+            {
+                "flag": "--link",
+                "reason": "flagNotConverted"
+            },
+            {
+                "flag": "--blkio-weight",
+                "reason": "flagNotConverted"
+            },
+            {
+                "flag": "--umask",
+                "reason": "flagNoComposeKey"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

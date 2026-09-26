@@ -20,7 +20,7 @@
                             <input id="user-username" v-model="form.username" class="form-control" autocomplete="off" pattern="[a-zA-Z0-9_.]{3,30}" required :disabled="busy">
                         </div>
                         <div class="field">
-                            <label for="user-email" class="form-label">{{ $t("Email") }}</label>
+                            <label for="user-email" class="form-label">{{ $t("email") }}</label>
                             <input id="user-email" v-model="form.email" class="form-control" type="email" autocomplete="off" required :disabled="busy">
                         </div>
                         <div class="field">
@@ -28,7 +28,7 @@
                             <input id="user-name" v-model="form.name" class="form-control" maxlength="100" :disabled="busy">
                         </div>
                         <div class="field">
-                            <label for="user-password" class="form-label">{{ $t("Password") }}</label>
+                            <label for="user-password" class="form-label">{{ $t("password") }}</label>
                             <input id="user-password" v-model="form.password" class="form-control" type="password" autocomplete="new-password" minlength="10" maxlength="128" required :disabled="busy">
                         </div>
                         <div class="field">
@@ -45,7 +45,7 @@
                 </template>
 
                 <div v-else-if="mode === 'password'" class="field">
-                    <label for="user-new-password" class="form-label">{{ $t("New Password") }}</label>
+                    <label for="user-new-password" class="form-label">{{ $t("newPassword") }}</label>
                     <input id="user-new-password" v-model="form.password" class="form-control" type="password" autocomplete="new-password" minlength="10" maxlength="128" required :disabled="busy">
                     <p class="form-text">{{ $t("usersResetHint") }}</p>
                 </div>
@@ -126,53 +126,96 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import StateChip from "../StateChip.vue";
 import InterfaceIcon from "../InterfaceIcon.vue";
 
-export default {
+type UserRole = "viewer" | "operator" | "admin";
+
+/** What the open editor does */
+type EditorMode = "" | "create" | "password" | "access" | "delete";
+
+/** An account as the list shows it; SQLite answers the switch as 0 or 1 */
+interface UserRow {
+    id : string;
+    name : string;
+    email : string;
+    username : string | null;
+    role : UserRole;
+    suspended : boolean | number;
+    twoFactorEnabled? : boolean | number;
+}
+
+/** What the editor changes */
+interface UserForm {
+    username : string | null;
+    name : string;
+    email : string;
+    password : string;
+    role : UserRole;
+    suspended : boolean;
+}
+
+/** The answer of a users request */
+interface UsersAnswer {
+    ok? : boolean;
+    msg? : string;
+}
+
+/**
+ * Catalogue key of a failed request
+ * @param error What the request was rejected with
+ * @returns The key to show
+ */
+function errorKey(error : unknown) : string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+export default defineComponent({
     components: { StateChip,
         InterfaceIcon },
     data() {
         return {
-            users: [],
+            users: [] as UserRow[],
             loading: true,
             busy: false,
             error: "",
             message: "",
-            mode: "",
-            selected: null,
+            mode: "" as EditorMode,
+            selected: null as UserRow | null,
             confirmPassword: "",
-            roles: [ "viewer", "operator", "admin" ],
+            roles: [ "viewer", "operator", "admin" ] as UserRole[],
             form: { username: "",
                 name: "",
                 email: "",
                 password: "",
                 role: "viewer",
-                suspended: false },
+                suspended: false } as UserForm,
         };
     },
     computed: {
         /**
          * Единственный действующий владелец: его удалить нельзя, и сервер это
          * проверяет сам. Пока он один, кнопка удаления у его строки выключена
-         * @returns {string} Идентификатор такого владельца или пустая строка
+         * @returns Идентификатор такого владельца или пустая строка
          */
-        lastOwnerId() {
+        lastOwnerId() : string {
             const owners = this.users.filter((user) => user.role === "admin" && !user.suspended);
-            return owners.length === 1 ? owners[0].id : "";
+            return owners.length === 1 ? owners[0]?.id ?? "" : "";
         },
 
         /** Label of the button that applies the open editor */
-        submitLabel() {
-            return { create: "Create",
+        submitLabel() : string {
+            const labels : Record<string, string> = { create: "create",
                 password: "usersResetPassword",
-                access: "Save",
-                delete: "usersDelete" }[this.mode] ?? "Save";
+                access: "save",
+                delete: "usersDelete" };
+            return labels[this.mode] ?? "save";
         },
 
         /** Подпись панели: откуда берутся учетные записи и почему одна из них несносима */
-        hint() {
+        hint() : string {
             const parts = [ this.$t("usersHint") ];
 
             if (this.lastOwnerId) {
@@ -188,18 +231,18 @@ export default {
     methods: {
         /**
          * Bound socket requests so a lost connection cannot leave an endless spinner.
-         * @param {string} event Event name
-         * @param {object} [data] Payload
-         * @param {string} [currentPassword] Password of the owner, for a change
-         * @returns {Promise<object>} The answer
+         * @param event Event name
+         * @param data Payload
+         * @param currentPassword Password of the owner, for a change
+         * @returns The answer
          */
-        request(event, data, currentPassword) {
+        request<R extends object = UsersAnswer>(event : string, data? : object, currentPassword? : string) : Promise<R> {
             return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
+                const callback = (error : Error | null, result? : UsersAnswer) => {
                     if (error || !result?.ok) {
                         reject(new Error(error ? "authConnectionFailed" : result?.msg || "authUnknownError"));
                     } else {
-                        resolve(result);
+                        resolve(result as R);
                     }
                 };
                 const socket = this.$root.getSocket().timeout(10000);
@@ -214,10 +257,10 @@ export default {
             this.loading = true;
             this.error = "";
             try {
-                const result = await this.request("usersList");
+                const result = await this.request<{ users : UserRow[] }>("usersList");
                 this.users = result.users;
             } catch (error) {
-                this.error = error.message;
+                this.error = errorKey(error);
             } finally {
                 this.loading = false;
             }
@@ -239,7 +282,7 @@ export default {
             this.mode = "create";
             this.message = "";
         },
-        edit(user, mode) {
+        edit(user : UserRow, mode : EditorMode) {
             this.selected = user;
             this.form = { ...user,
                 password: "",
@@ -247,7 +290,7 @@ export default {
             this.mode = mode;
             this.message = "";
         },
-        async apply(event, data) {
+        async apply(event : string, data : object) {
             this.busy = true;
             this.error = "";
             this.message = "";
@@ -257,35 +300,45 @@ export default {
                 this.message = "usersSaved";
                 await this.load();
             } catch (error) {
-                this.error = error.message;
+                this.error = errorKey(error);
                 this.confirmPassword = "";
             } finally {
                 this.busy = false;
             }
         },
         submit() {
-            return { create: this.create,
+            const actions : Record<string, () => Promise<void> | undefined> = { create: this.create,
                 password: this.resetPassword,
                 access: this.saveAccess,
-                delete: this.remove }[this.mode]?.();
+                delete: this.remove };
+            return actions[this.mode]?.();
         },
         create() {
             return this.apply("usersCreate", this.form);
         },
         saveAccess() {
+            if (!this.selected) {
+                return;
+            }
             return this.apply("usersUpdate", { id: this.selected.id,
                 role: this.form.role,
                 suspended: this.form.suspended });
         },
         resetPassword() {
+            if (!this.selected) {
+                return;
+            }
             return this.apply("usersResetPassword", { id: this.selected.id,
                 password: this.form.password });
         },
         remove() {
+            if (!this.selected) {
+                return;
+            }
             return this.apply("usersDelete", { id: this.selected.id });
         },
     },
-};
+});
 </script>
 
 <style scoped lang="scss">

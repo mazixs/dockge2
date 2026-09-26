@@ -33,13 +33,14 @@
     </section>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import Terminal from "./Terminal.vue";
 import StateChip from "./StateChip.vue";
 import InterfaceIcon from "./InterfaceIcon.vue";
 import { getCombinedTerminalName } from "../../../common/util-common";
 
-export default {
+export default defineComponent({
     components: {
         Terminal,
         StateChip,
@@ -61,14 +62,15 @@ export default {
         },
     },
     data() {
-        return { disposed: false };
+        return { disposed: false,
+            observer: null as ResizeObserver | null };
     },
     computed: {
-        stackStatus() {
+        stackStatus() : number | undefined {
             return this.$root.completeStackList[this.stackName + "_" + this.endpoint]?.status;
         },
         /** Имя общего терминала стека: по нему сервер шлет вывод всех сервисов */
-        terminalName() {
+        terminalName() : string {
             return getCombinedTerminalName(this.endpoint, this.stackName);
         },
 
@@ -76,7 +78,7 @@ export default {
          * Есть ли канал, по которому идет вывод. Локальный стек слушает наш сокет,
          * стек агента - соединение с этим агентом
          */
-        connected() {
+        connected() : boolean {
             if (this.endpoint === "") {
                 return this.$root.socketIO.connected;
             }
@@ -85,12 +87,12 @@ export default {
         },
     },
     watch: {
-        runOutcome(value) {
+        runOutcome(value : string) {
             if (value && this.connected) {
                 this.join();
             }
         },
-        connected(value) {
+        connected(value : boolean) {
             if (value) {
                 this.join();
             }
@@ -112,7 +114,7 @@ export default {
                 this.refit();
             });
         });
-        this.observer.observe(this.$refs.body);
+        this.observer.observe(this.$refs.body as HTMLElement);
     },
     beforeUnmount() {
         this.disposed = true;
@@ -130,7 +132,7 @@ export default {
         },
         /** Подогнать вывод под область: скрытый xterm не знает своего размера */
         refit() {
-            this.$refs.terminal?.updateTerminalSize?.();
+            (this.$refs.terminal as InstanceType<typeof Terminal> | undefined)?.updateTerminalSize?.();
         },
 
         /**
@@ -142,7 +144,7 @@ export default {
             this.refit();
         },
     },
-};
+});
 </script>
 
 <style lang="scss" scoped>

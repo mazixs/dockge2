@@ -45,7 +45,7 @@ export interface Config extends Arguments {
 
 export function checkLogin(socket : DockgeSocket) {
     if (!socket.userID) {
-        throw new Error("You are not logged in.");
+        throw new Error("notLoggedIn");
     }
 }
 
@@ -211,7 +211,7 @@ export async function doubleCheckPassword(socket : DockgeSocket, currentPassword
             log.warn("auth", `Too many wrong password confirmations from ${key}, locked for ${PASSWORD_LOCK_MS / 1000} seconds`);
         }
 
-        throw new ValidationError("Incorrect current password");
+        throw new ValidationError("incorrectCurrentPassword");
     }
 
     passwordAttempts.delete(key);

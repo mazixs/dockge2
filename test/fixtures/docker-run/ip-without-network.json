@@ -1,0 +1,32 @@
+{
+    "description": "docker assigns a fixed address only on a network with a configured subnet, and the default network of a stack has none, so the address is reported rather than written.",
+    "command": "docker run -d --ip 172.17.0.5 nginx",
+    "verdict": "lost",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image"
+        ],
+        "values": {
+            "image": "nginx"
+        }
+    },
+    "report": {
+        "carried": [
+            "-d"
+        ],
+        "review": [],
+        "dropped": [
+            {
+                "flag": "--ip",
+                "reason": "flagIpNeedsNetwork"
+            }
+        ]
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

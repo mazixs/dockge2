@@ -1,0 +1,35 @@
+{
+    "description": "A read-only root file system survives together with the writable tmpfs it needs.",
+    "command": "docker run -d --read-only --tmpfs /var/cache/nginx nginx",
+    "verdict": "kept",
+    "compose": {
+        "topLevel": [
+            "services"
+        ],
+        "service": "nginx",
+        "keys": [
+            "image",
+            "read_only",
+            "tmpfs"
+        ],
+        "values": {
+            "image": "nginx",
+            "read_only": true,
+            "tmpfs": [
+                "/var/cache/nginx"
+            ]
+        }
+    },
+    "report": {
+        "carried": [
+            "-d",
+            "--read-only",
+            "--tmpfs"
+        ],
+        "review": [],
+        "dropped": []
+    },
+    "composeConfig": {
+        "valid": true
+    }
+}

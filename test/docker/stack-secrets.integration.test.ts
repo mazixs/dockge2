@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { spawn } from "../../backend/child-process";
 import { Stack } from "../../backend/stack";
+import { ValidationError } from "../../backend/util-server";
 import { withDatabase } from "../helpers/database";
 
 const enabled = process.env.DOCKGE_DOCKER_INTEGRATION === "1";
@@ -147,8 +148,8 @@ test("a compose file that Docker refuses is never deployed", { skip }, async () 
         try {
             await assert.rejects(stack.validateComposeConfig(), (error : unknown) => {
                 assert.ok(error instanceof Error);
-                assert.match(error.message, /Invalid compose configuration/);
-                assert.match(error.message, /neither an image nor a build context/);
+                assert.equal(error.message, "composeConfigInvalid");
+                assert.match((error as ValidationError).values?.reason ?? "", /neither an image nor a build context/);
                 return true;
             });
 

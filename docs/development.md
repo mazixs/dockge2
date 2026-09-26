@@ -59,6 +59,7 @@ npm run test:unit                 # unit tests only
 npm run test:docker-integration   # needs a working Docker Compose
 npm run test:install              # updater, release and bootstrap contracts, no containers
 npm run test:updater              # Go tests of the host updater
+npm run lint:sh                   # shellcheck over every tracked shell script, in its pinned image
 ```
 
 `npm run check` is what a change has to pass before it is submitted. `npm run test` enforces the c8
@@ -68,9 +69,11 @@ coverage floor of 70%. Build the frontend first: one of the tests starts a whole
 `DOCKGE_DOCKER_INTEGRATION=1` is set; CI runs them in a separate Linux job.
 
 `npm run test` then runs `npm run coverage:floors`, line floors per subsystem on top of the global
-70%: access and sessions 80, stack files 80, container state 85, agent transport 70. The groups are
-listed by hand in `extra/check-coverage.ts`, and an empty group fails. `npm run check:bundle` limits
-the first load of a built frontend to 780 KiB raw and 250 KiB gzip. c8 and
+70%: access and sessions 80, stack files 80, container state 85, agent transport 70, interface state
+(the mixins, the stack list model and the panel update machine) 90. The groups are listed by hand in
+`extra/check-coverage.ts`, and an empty group fails. `npm run check:bundle` limits the first load of
+a built frontend to 780 KiB raw and 250 KiB gzip, and any one chunk loaded on demand to 480 KiB raw
+and 160 KiB gzip. c8 and
 `node --test --experimental-test-coverage` measure the same code differently (81.09% against 90.01%
 of lines once), so a threshold does not carry over from one to the other.
 
@@ -96,8 +99,10 @@ npm run test:visual               # compare the interface with the approved base
 npm run test:visual:approve       # re-approve it, only when the change of look is intended
 ```
 
-The visual run needs no Docker and no backend: it renders the production components against the
-fixed scene in `test/visual/scene.ts`, so the same revision always gives the same frame. Baselines
+The visual run needs no backend: it renders the production components against the fixed scene in
+`test/visual/scene.ts`, so the same revision always gives the same frame. It runs inside the pinned
+Playwright image that CI uses (`test/visual/run.sh`), because a browser on the host rasterises text
+a few pixels apart; so it needs Docker, and nothing else installed. Baselines
 are committed under `test/visual/baseline/`. A difference fails the run and is reviewed one by one;
 re-approving is a decision, not a step of the run.
 
@@ -118,8 +123,13 @@ never deploys the fixture stacks. Results and private runtime logs stay under th
 For deterministic row counts without contacting the host Docker daemon:
 
 ```bash
-DOCKGE_PERF_CONTAINERS=500 DOCKGE_PERF_STACKS=50 DOCKGE_PERF_CYCLES=5 DOCKGE_PERF_CPU_RATE=4 npm run test:performance
+DOCKGE_PERF_CONTAINERS=2000 DOCKGE_PERF_STACKS=300 DOCKGE_PERF_CYCLES=40 DOCKGE_PERF_CPU_RATE=4 npm run test:performance
 ```
+
+Containers go up to 5000, stacks and cycles up to 1000. Besides heap, DOM nodes and event listeners
+at each checkpoint, the result records `snapshotChurn`: the nodes added and removed and the
+attributes changed in the stack list and the overview while 32 seconds of fresh snapshots of an
+unchanged host arrive. Added or removed rows there mean a list is rebuilt instead of patched.
 
 | Variable | Effect |
 | --- | --- |

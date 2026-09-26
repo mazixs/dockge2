@@ -103,7 +103,8 @@ for the login rate limit. Extra browser origins, if any, are listed comma separa
 `DOCKGE_TRUSTED_ORIGINS`.
 
 Logging in by email or username allows up to 10 attempts a minute per client address, and the
-initial setup up to 3. Origin and CSRF checks and the rate limit stay on. Do not disable the origin
+initial setup up to 3. Reading one's own session is not limited: every page load does it, and the
+cookie it presents is the secret. Origin and CSRF checks and the rate limit stay on. Do not disable the origin
 check with `DOCKGE_WS_ORIGIN_CHECK=bypass` on a public instance.
 
 The "disable authentication" mode exists for an installation where all access is already protected by

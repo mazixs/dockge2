@@ -1,8 +1,8 @@
-import { currentLocale, i18n } from "../i18n";
+import { currentLocale, i18n, type Catalogue } from "../i18n";
 import { setI18nLocale } from "../i18n-locale";
 import { setPageLocale } from "../util-frontend";
 import { defineComponent } from "vue";
-const langModules = import.meta.glob<Record<string, string>>("../lang/*.json");
+const langModules = import.meta.glob<{ default? : Catalogue }>("../lang/*.json");
 
 export default defineComponent({
     data() {

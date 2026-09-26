@@ -15,9 +15,9 @@
             <div class="panel-body" role="alert">
                 <EmptyState
                     :title="$t(loadDenied ? 'mcpLoadDeniedTitle' : 'mcpLoadFailedTitle')"
-                    :hint="$t(loadDenied ? 'mcpLoadDenied' : 'mcpLoadFailed')"
+                    :hint="$t(loadDeniedHint)"
                 >
-                    <button v-if="!loadDenied" type="button" class="btn btn-sm btn-normal" @click="load">{{ $t("retry") }}</button>
+                    <button v-if="!loadDenied" type="button" class="btn btn-sm btn-normal" @click="load()">{{ $t("retry") }}</button>
                 </EmptyState>
             </div>
         </section>
@@ -82,13 +82,13 @@
                     </template>
 
                     <div class="field">
-                        <label for="mcp-password" class="form-label">{{ $t("Password") }}</label>
+                        <label for="mcp-password" class="form-label">{{ $t("password") }}</label>
                         <input id="mcp-password" v-model="password" class="form-control" type="password" autocomplete="current-password" required>
                         <p class="form-text">{{ $t("mcpPasswordHint") }}</p>
                     </div>
 
                     <div class="actions">
-                        <button class="btn btn-primary" :disabled="busy">{{ $t("Save") }}</button>
+                        <button class="btn btn-primary" :disabled="busy">{{ $t("save") }}</button>
                     </div>
                     <p v-if="notice.config" :class="noticeClass(notice.config)" :role="notice.config.ok ? 'status' : 'alert'">{{ notice.config.text }}</p>
                 </form>
@@ -101,7 +101,7 @@
                 <p class="mcp-secret-note">{{ $t("mcpSecretEnv") }}</p>
                 <div class="actions">
                     <button type="button" class="btn btn-sm btn-primary" @click="copy(secret)">{{ $t("mcpCopy") }}</button>
-                    <button type="button" class="btn btn-sm btn-normal" @click="secret = ''">{{ $t("Close") }}</button>
+                    <button type="button" class="btn btn-sm btn-normal" @click="secret = ''">{{ $t("close") }}</button>
                 </div>
             </div>
 
@@ -212,6 +212,7 @@
                             </template>
                             <template v-else>
                                 <button class="btn btn-sm btn-normal" :disabled="busy" @click="edit(key)">{{ $t("mcpReduce") }}</button>
+                                <button class="btn btn-sm btn-normal" :disabled="busy || !password" @click="reissue(key)">{{ $t("mcpReissue") }}</button>
                                 <button class="btn btn-sm btn-normal btn-danger-text" :disabled="busy || !password" @click="revoke(key.id)">{{ $t("mcpRevoke") }}</button>
                             </template>
                         </div>
@@ -363,15 +364,19 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from "vue";
 import { MCP_ACTIONS } from "../../../../common/mcp";
+import EmptyState from "../EmptyState.vue";
+import InterfaceIcon from "../InterfaceIcon.vue";
 import StateChip from "../StateChip.vue";
 import { errorText } from "../../util-frontend";
+import { formatMoment } from "../../format";
 
 const LOOPBACK = [ "localhost", "127.0.0.1", "[::1]" ];
 const CONNECTIONS = [ "initialize", "server/discover" ];
 const TOOLS = [ "servers_list", "stacks_list", "containers_list", "container_status", "stability_get", "container_logs", "stack_files_read", "git_preview_result", "operation_prepare", "operation_apply", "operation_status" ];
-const OWNER_EVENTS = [ "key_issue", "key_reduce", "key_revoke", "stack_reserve", "stack_unreserve", "operation_approve" ];
+const OWNER_EVENTS = [ "key_issue", "key_reduce", "key_reissue", "key_revoke", "stack_reserve", "stack_unreserve", "operation_approve" ];
 const KEY_VARIABLE = "DOCKGE_MCP_KEY";
 const PROTOCOL = "2026-07-28";
 const DISCOVER = { jsonrpc: "2.0",
@@ -386,11 +391,135 @@ const VSCODE_KEY_INPUT = { type: "promptString",
     description: "Dockge2 MCP key",
     password: true };
 
+/** Panels that report the result of an action in place */
+type McpPanel = "config" | "form" | "keys" | "pending" | "reservations";
+
+/** What an action left in its panel */
+interface McpNotice {
+    ok : boolean;
+    text : string;
+}
+
+/** The settings form, and the settings as they were saved */
+interface McpConfigForm {
+    enabled : boolean;
+    url : string;
+    allowInsecureHttp : boolean;
+}
+
+/** One key as the section lists it; the scope and permissions arrive as JSON text */
+interface McpKeyRow {
+    id : string;
+    name : string;
+    user_id : string;
+    role : string;
+    /** "server|stack" pairs, as a JSON array */
+    stacks : string;
+    /** Stack IDs by server, as a JSON object */
+    resources : string;
+    /** Permissions, as a JSON array */
+    actions : string;
+    mode : string;
+    expires_at : number | string;
+    revoked_at : number | string | null;
+    last_used_at : number | string | null;
+}
+
+interface McpStackRow {
+    id : string;
+    name : string;
+    reserved? : boolean;
+}
+
+/** Another server this one may delegate to, with the stacks it allows */
+interface McpPeer {
+    id : string;
+    name : string;
+    stacks : string[];
+}
+
+interface McpUser {
+    id : string;
+    name : string;
+}
+
+/** An operation waiting for the owner's approval */
+interface McpPendingOperation {
+    operation_id : string;
+    action : string;
+    server_id : string;
+    stack_id : string;
+}
+
+/** One row of the MCP log */
+interface McpAuditEntry {
+    id : number;
+    at : number;
+    key_id : string | null;
+    tool : string;
+    outcome : string;
+    client_name? : string | null;
+    client_version? : string | null;
+    protocol_version? : string | null;
+    address? : string | null;
+    reason? : string | null;
+    detail? : string | null;
+    attempts : number;
+    server_id? : string | null;
+    stack_id? : string | null;
+    action? : string | null;
+}
+
+interface McpStatus {
+    lastConnection : McpAuditEntry | null;
+    lastRefusal : McpAuditEntry | null;
+}
+
+/** What the section reads in one request */
+interface McpOverview {
+    peers : McpPeer[];
+    pending : McpPendingOperation[];
+    config : McpConfigForm & { configured : boolean };
+    keys : McpKeyRow[];
+    stacks : McpStackRow[];
+    users : McpUser[];
+    status : McpStatus;
+    audit : McpAuditEntry[];
+}
+
+/** The form that issues or reduces a key */
+interface McpKeyForm {
+    name : string;
+    userId : string;
+    days : number;
+    role : string;
+    actions : string[];
+    mode : string;
+}
+
+/** A file of an operation under review, before and after */
+interface McpReviewFile {
+    name : string;
+    choice? : string;
+    hidden? : boolean;
+    before? : string;
+    after? : string;
+}
+
+/** What the server shows the owner about an operation before approval */
+interface McpReviewValue {
+    files? : McpReviewFile[];
+    [key : string] : unknown;
+}
+
+/** A failed request, with the status the server answered */
+type McpRequestError = Error & { status : number };
+
 /**
  * Whether the page talks to the backend on the development port
- * @returns {boolean} True for `npm run dev`
+ * @returns True for `npm run dev`
  */
-function developmentBackend() {
+function developmentBackend() : boolean {
     let dev = process.env.NODE_ENV === "development";
     try {
         dev ||= localStorage.dev === "dev";
@@ -398,21 +527,24 @@ function developmentBackend() {
     return dev;
 }
 
-export default {
-    components: { StateChip },
+export default defineComponent({
+    components: { EmptyState,
+        InterfaceIcon,
+        StateChip },
     data() {
         return { creating: false,
             permissions: MCP_ACTIONS,
-            peers: [],
-            pending: [],
-            reviewed: null,
+            peers: [] as McpPeer[],
+            pending: [] as McpPendingOperation[],
+            reviewed: null as { operation : McpPendingOperation; value : McpReviewValue } | null,
             editing: "",
-            selected: [],
+            selected: [] as string[],
             reserveName: "",
             loading: true,
             busy: false,
             loadFailed: false,
-            loadDenied: false,
+            /** The server's reason for a refused read, empty when the read was not refused */
+            loadDenied: "",
             password: "",
             secret: "",
             client: "claude-code",
@@ -420,38 +552,47 @@ export default {
                 form: null,
                 keys: null,
                 pending: null,
-                reservations: null },
+                reservations: null } as Record<McpPanel, McpNotice | null>,
             config: { enabled: false,
                 url: "",
-                allowInsecureHttp: false },
+                allowInsecureHttp: false } as McpConfigForm,
             saved: { enabled: false,
                 url: "",
-                allowInsecureHttp: false },
+                allowInsecureHttp: false } as McpConfigForm,
             status: { lastConnection: null,
-                lastRefusal: null },
+                lastRefusal: null } as McpStatus,
             form: { name: "",
                 userId: "",
                 days: 30,
                 role: "viewer",
                 actions: [],
-                mode: "readonly" },
-            users: [],
-            stacks: [],
-            keys: [],
-            audit: [] };
+                mode: "readonly" } as McpKeyForm,
+            users: [] as McpUser[],
+            stacks: [] as McpStackRow[],
+            keys: [] as McpKeyRow[],
+            audit: [] as McpAuditEntry[] };
     },
     computed: {
         /** Where the backend answers: the development port under `npm run dev`, otherwise this page */
-        apiBase() {
+        apiBase() : string {
             return developmentBackend() ? `${location.protocol}//${location.hostname}:5001` : location.origin;
         },
-        pageHost() {
+        pageHost() : string {
             return new URL(this.apiBase).host;
         },
-        suggestedURL() {
+        suggestedURL() : string {
             return `${this.apiBase}/mcp`;
         },
-        urlInfo() {
+        /** What to fix, as the server named it; an unnamed refusal keeps the general text */
+        loadDeniedHint() : string {
+            if (!this.loadDenied) {
+                return "mcpLoadFailed";
+            }
+            const hints : Record<string, string> = { mcpOriginDenied: "mcpLoadDeniedOrigin",
+                mcpOwnerRequired: "mcpLoadDeniedOwner" };
+            return hints[this.loadDenied] ?? "mcpLoadDenied";
+        },
+        urlInfo() : { host : string; insecure : boolean } {
             try {
                 const url = new URL(this.config.url);
                 return { host: url.host,
@@ -462,10 +603,10 @@ export default {
             }
         },
         /** The server accepts a request only for the host of the configured address */
-        hostMismatch() {
+        hostMismatch() : boolean {
             return Boolean(this.urlInfo.host) && this.urlInfo.host !== this.pageHost;
         },
-        encryption() {
+        encryption() : "https" | "loopback" | "insecure" | "" {
             try {
                 const url = new URL(this.saved.url);
                 if (url.protocol === "https:") {
@@ -476,7 +617,7 @@ export default {
                 return "";
             }
         },
-        stateChip() {
+        stateChip() : { state : string; label : string; attention : boolean } {
             if (!this.saved.enabled) {
                 return { state: "stopped",
                     label: this.$t("mcpStateOff"),
@@ -487,13 +628,13 @@ export default {
                 label: this.$t("mcpStateOn"),
                 attention: insecure };
         },
-        activeKeys() {
+        activeKeys() : number {
             return this.keys.filter((key) => !key.revoked_at && Number(key.expires_at) > Date.now()).length;
         },
-        reservations() {
+        reservations() : McpStackRow[] {
             return this.stacks.filter((stack) => stack.reserved);
         },
-        clients() {
+        clients() : { id : string; label : string }[] {
             return [
                 { id: "claude-code",
                     label: this.$t("mcpClientClaudeCommand") },
@@ -512,10 +653,10 @@ export default {
             ];
         },
         /** Ready-made configuration for the chosen client; the key stays in an environment variable */
-        snippet() {
+        snippet() : { where : string; text : string; hint? : string } {
             const url = this.saved.url;
-            const json = (value) => JSON.stringify(value, null, 2);
-            const file = (name) => this.$t("mcpSnippetFile", { file: name });
+            const json = (value : unknown) => JSON.stringify(value, null, 2);
+            const file = (name : string) => this.$t("mcpSnippetFile", { file: name });
             switch (this.client) {
                 case "claude-project":
                     return { where: file(".mcp.json"),
@@ -560,33 +701,31 @@ export default {
         this.load();
     },
     methods: {
-        async request(path = "", data) {
+        async request<T>(path = "", data? : unknown) : Promise<T> {
             const response = await fetch(`${this.apiBase}/api/mcp${path}`, { credentials: "include",
                 method: data ? "POST" : "GET",
                 headers: data ? { "Content-Type": "application/json" } : {},
                 body: data ? JSON.stringify({ password: this.password,
-                    data }) : undefined });
+                    data }) : null });
             if (!response.ok) {
                 let code = "mcpRequestFailed";
                 try {
-                    code = (await response.json())?.error || code;
+                    code = (await response.json() as { error? : string } | null)?.error || code;
                 } catch { /* Not every failure has a JSON body. */ }
-                const failure = new Error(code);
-                failure.status = response.status;
+                const failure : McpRequestError = Object.assign(new Error(code), { status: response.status });
                 throw failure;
             }
-            return response.json();
+            return await response.json() as T;
         },
         /**
          * Read the section. The settings form is refilled only on the first read and after
          * saving it, so refreshing the list does not discard what the owner is typing.
-         * @param {boolean} resetForm Replace the settings form with the saved values
-         * @returns {Promise<void>}
+         * @param resetForm Replace the settings form with the saved values
          */
-        async load(resetForm = true) {
+        async load(resetForm = true) : Promise<void> {
             this.loading = this.loadFailed || !this.users.length;
             try {
-                const data = await this.request();
+                const data = await this.request<McpOverview>();
                 this.peers = data.peers;
                 this.pending = data.pending;
                 this.keys = data.keys;
@@ -604,31 +743,31 @@ export default {
                 }
                 this.form.userId ||= this.users[0]?.id || "";
                 this.loadFailed = false;
-                this.loadDenied = false;
+                this.loadDenied = "";
             } catch (failure) {
                 // A failed read is not a refused action; a denial is named separately, because
                 // keys belong to an account the server cannot see without a session
                 this.loadFailed = true;
-                this.loadDenied = failure?.status === 403;
+                this.loadDenied = failure instanceof Error && "status" in failure && failure.status === 403 ? failure.message : "";
             } finally {
                 this.loading = false;
             }
         },
         /**
          * Send one owner action and report its result in the panel it came from
-         * @param {string} action Endpoint action
-         * @param {object} data Payload
-         * @param {string} panel Where the result is shown
-         * @param {string} [success] Text shown on success
-         * @returns {Promise<object | null>} The answer, or null on failure
+         * @param action Endpoint action
+         * @param data Payload
+         * @param panel Where the result is shown
+         * @param success Text shown on success
+         * @returns The answer, or null on failure
          */
-        async mutate(action, data, panel, success = "") {
+        async mutate<T = unknown>(action : string, data : unknown, panel : McpPanel, success = "") : Promise<T | null> {
             this.busy = true;
-            for (const name of Object.keys(this.notice)) {
+            for (const name of Object.keys(this.notice) as McpPanel[]) {
                 this.notice[name] = null;
             }
             try {
-                const result = await this.request(`/${action}`, data);
+                const result = await this.request<T>(`/${action}`, data);
                 await this.load(action === "config");
                 if (success) {
                     this.notice[panel] = { ok: true,
@@ -644,19 +783,22 @@ export default {
                 this.busy = false;
             }
         },
-        noticeClass(notice) {
+        noticeClass(notice : McpNotice) : string {
             return notice.ok ? "mcp-notice mcp-notice-ok" : "alert alert-danger";
         },
-        async saveConfig() {
+        async saveConfig() : Promise<void> {
             const value = { ...this.config,
                 allowInsecureHttp: this.urlInfo.insecure && this.config.allowInsecureHttp };
             await this.mutate("config", value, "config", value.enabled ? this.$t("mcpSavedOn", { url: value.url }) : this.$t("mcpSavedOff"));
         },
-        async issue() {
+        async issue() : Promise<void> {
             this.secret = "";
-            const resources = {};
+            const resources : Record<string, string[]> = {};
             for (const entry of this.selected) {
                 const [ server, id ] = entry.split("|");
+                if (server === undefined || id === undefined) {
+                    continue;
+                }
                 (resources[server] ||= []).push(id);
             }
             const value = { ...this.form,
@@ -664,7 +806,7 @@ export default {
                 servers: Object.keys(resources),
                 stacks: [ ...new Set(Object.values(resources).flat()) ] };
             const reducing = Boolean(this.editing);
-            const result = await this.mutate(reducing ? "reduce" : "issue", reducing ? { id: this.editing,
+            const result = await this.mutate<{ secret? : string }>(reducing ? "reduce" : "issue", reducing ? { id: this.editing,
                 value } : value, "form");
             if (result) {
                 this.secret = result.secret || "";
@@ -675,27 +817,27 @@ export default {
                 }
             }
         },
-        roleChanged() {
+        roleChanged() : void {
             if (this.form.role === "viewer") {
                 this.form.actions = [];
                 this.form.mode = "readonly";
             }
         },
-        edit(key) {
+        edit(key : McpKeyRow) : void {
             this.creating = true;
             this.editing = key.id;
             this.form = { name: key.name,
                 userId: key.user_id,
                 role: key.role,
-                actions: JSON.parse(key.actions),
+                actions: JSON.parse(key.actions) as string[],
                 mode: key.mode,
                 days: Math.max(1, Math.ceil((Number(key.expires_at) - Date.now()) / 86400000)) };
-            this.selected = Object.entries(JSON.parse(key.resources)).flatMap(([ server, ids ]) => ids.map(id => `${server}|${id}`));
+            this.selected = Object.entries(JSON.parse(key.resources) as Record<string, string[]>).flatMap(([ server, ids ]) => ids.map(id => `${server}|${id}`));
         },
-        actionName(action) {
+        actionName(action : string | null | undefined) : string {
             return this.$te(`mcpAction_${action}`) ? this.$t(`mcpAction_${action}`) : String(action ?? "");
         },
-        cancelEdit() {
+        cancelEdit() : void {
             this.creating = false;
             this.editing = "";
             this.form = { name: "",
@@ -706,34 +848,52 @@ export default {
                 days: 30 };
             this.selected = [];
         },
-        async reserve() {
+        async reserve() : Promise<void> {
             const name = this.reserveName;
             if (await this.mutate("reserve", { name }, "reservations", this.$t("mcpReservedDone", { name }))) {
                 this.reserveName = "";
             }
         },
-        unreserve(stack) {
+        unreserve(stack : McpStackRow) : Promise<unknown> {
             return this.mutate("unreserve", { id: stack.id }, "reservations", this.$t("mcpUnreservedDone", { name: stack.name }));
         },
-        async review(operation) {
-            const value = await this.mutate("review", { id: operation.operation_id }, "pending");
+        async review(operation : McpPendingOperation) : Promise<void> {
+            const value = await this.mutate<McpReviewValue>("review", { id: operation.operation_id }, "pending");
             if (value) {
                 this.reviewed = { operation,
                     value };
             }
         },
-        async approve() {
-            if (await this.mutate("approve", { id: this.reviewed.operation.operation_id }, "pending", this.$t("mcpApprovedDone"))) {
+        async approve() : Promise<void> {
+            const reviewed = this.reviewed;
+            if (!reviewed) {
+                return;
+            }
+            if (await this.mutate("approve", { id: reviewed.operation.operation_id }, "pending", this.$t("mcpApprovedDone"))) {
                 this.reviewed = null;
             }
         },
-        revoke(id) {
+        /**
+         * Give a key a new secret; the old one keeps working for the overlap the server sets
+         * @param key Key to reissue
+         */
+        async reissue(key : McpKeyRow) : Promise<void> {
+            this.secret = "";
+            const result = await this.mutate<{ secret? : string, previousExpiresAt? : number }>("reissue", { id: key.id }, "keys");
+            if (result) {
+                this.secret = result.secret || "";
+                this.notice.keys = { ok: true,
+                    text: this.$t("mcpReissuedDone", { name: key.name,
+                        time: this.formatDate(result.previousExpiresAt) }) };
+            }
+        },
+        revoke(id : string) : Promise<unknown> {
             return this.mutate("revoke", { id }, "keys", this.$t("mcpRevokedDone"));
         },
-        async copy(text) {
+        async copy(text : string) : Promise<void> {
             try {
                 await navigator.clipboard.writeText(text);
-                this.$root.toastSuccess(this.$t("copiedToClipboard"));
+                this.$root.toastSuccess("copiedToClipboard");
             } catch (error) {
                 this.$root.toastError(errorText(error));
             }
@@ -741,11 +901,11 @@ export default {
         /**
          * A readable resource name: the stack name on this server, prefixed with the
          * server name elsewhere, so equal names can be told apart
-         * @param {string} server Server ID
-         * @param {string} id Stack ID
-         * @returns {string} Readable name
+         * @param server Server ID
+         * @param id Stack ID
+         * @returns Readable name
          */
-        resourceName(server, id) {
+        resourceName(server : string | null | undefined, id : string) : string {
             const stack = this.stacks.find((item) => item.id === id)?.name || id;
 
             if (!server || server === "local") {
@@ -754,16 +914,16 @@ export default {
 
             return `${this.peers.find((peer) => peer.id === server)?.name || server}: ${stack}`;
         },
-        formatDate(value) {
-            return value ? new Date(Number(value)).toLocaleString() : "-";
+        formatDate(value : number | string | null | undefined) : string {
+            return formatMoment(value ? Number(value) : null, this.$i18n.locale) || "-";
         },
         /**
          * A key's scope is stored as "server|stack" pairs; readers need names
-         * @param {string} value Scope list as JSON
-         * @returns {string} Stack names, comma separated
+         * @param value Scope list as JSON
+         * @returns Stack names, comma separated
          */
-        scopeNames(value) {
-            const scopes = JSON.parse(value);
+        scopeNames(value : string) : string {
+            const scopes = JSON.parse(value) as unknown[];
 
             return scopes
                 .map((scope) => {
@@ -775,16 +935,16 @@ export default {
                 })
                 .join(", ");
         },
-        reservationKeys(id) {
+        reservationKeys(id : string) : string {
             const names = this.keys
-                .filter((key) => !key.revoked_at && (JSON.parse(key.resources).local || []).includes(id))
+                .filter((key) => !key.revoked_at && ((JSON.parse(key.resources) as Record<string, string[]>).local || []).includes(id))
                 .map((key) => key.name);
             return names.length ? this.$t("mcpReservationKeys", { keys: names.join(", ") }) : this.$t("mcpReservationUnused");
         },
-        keyName(id) {
+        keyName(id : string | null) : string {
             return id ? this.keys.find((key) => key.id === id)?.name || id.slice(0, 8) : "";
         },
-        eventName(entry) {
+        eventName(entry : McpAuditEntry) : string {
             const tool = entry.tool;
             if (CONNECTIONS.includes(tool)) {
                 return this.$t("mcpEvent_connect");
@@ -806,10 +966,10 @@ export default {
         },
         /**
          * Time, key, client, stack, address and repeats of one log row, whichever it has
-         * @param {object} entry Log row
-         * @returns {string} One line
+         * @param entry Log row
+         * @returns One line
          */
-        entryLine(entry) {
+        entryLine(entry : McpAuditEntry) : string {
             const client = entry.client_name ? [ entry.client_name, entry.client_version, entry.protocol_version && `(${entry.protocol_version})` ].filter(Boolean).join(" ") : "";
             const stack = entry.stack_id && ![ "stack_reserve", "stack_unreserve" ].includes(entry.tool) ? this.resourceName(entry.server_id, entry.stack_id) : "";
             return [
@@ -822,18 +982,19 @@ export default {
                 entry.detail === "delegated" ? this.$t("mcpDelegated") : "",
             ].filter(Boolean).join(" · ");
         },
-        reasonText(entry) {
+        reasonText(entry : McpAuditEntry) : string {
             const key = `mcpReason_${entry.reason}`;
             return this.$te(key) ? this.$t(key, { detail: entry.detail || "?" }) : String(entry.reason ?? "");
         },
-        outcomeState(outcome) {
-            return { allowed: "running",
+        outcomeState(outcome : string) : string {
+            const states : Record<string, string> = { allowed: "running",
                 invalid: "attention",
                 denied: "failed",
-                refused: "failed" }[outcome] || "unknown";
+                refused: "failed" };
+            return states[outcome] || "unknown";
         },
     },
-};
+});
 </script>
 
 <style scoped lang="scss">

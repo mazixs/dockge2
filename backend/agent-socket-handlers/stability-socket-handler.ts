@@ -13,7 +13,7 @@ export class StabilitySocketHandler extends AgentSocketHandler {
             try {
                 checkLogin(socket);
                 if (typeof windowHours !== "number" || !STABILITY_WINDOWS.includes(windowHours as StabilityWindow)) {
-                    throw new ValidationError("Invalid stability window");
+                    throw new ValidationError("requestNotUnderstood");
                 }
                 callbackResult({ ok: true,
                     overview: await stabilityCollector.read(windowHours as StabilityWindow) }, callback);

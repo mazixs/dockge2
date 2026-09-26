@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { AgentSocket } from "../../common/agent-socket";
-import { ComposeEnvironmentError, GitSocketHandler, missingVariables } from "../../backend/agent-socket-handlers/git-socket-handler";
+import { ComposeEnvironmentError, GitSocketHandler, logSafeReason, missingVariables } from "../../backend/agent-socket-handlers/git-socket-handler";
 import { StackGitWorkflow } from "../../backend/stack-git";
 import { StackConfig } from "../../backend/stack-config";
 import { Stack } from "../../backend/stack";
@@ -157,6 +157,13 @@ test("only variable names are read out of Compose output, never the rest of it",
     const many = Array.from({ length: 30 }, (_, i) => `required variable VAR_${i} is missing a value`).join("\n");
     assert.equal(missingVariables({ stderr: many }).length, 12);
     assert.deepEqual(missingVariables({ stderr: [ "required variable SAME is missing a value", "required variable SAME is missing a value" ].join("\n") }), [ "SAME" ]);
+});
+
+test("the reason of a refusal reaches the server log without what an address carries", () => {
+    const reason = logSafeReason({ stderr: "failed to resolve https://deploy:ghp_token@git.example.com/app.git and ssh://key@host/x\n" });
+    assert.equal(reason, "failed to resolve https://***@git.example.com/app.git and ssh://***@host/x");
+    assert.equal(logSafeReason(new Error("pull access denied for app")), "pull access denied for app");
+    assert.equal(logSafeReason({ stderr: "x".repeat(5000) }).length, 2000);
 });
 
 test("invalid requests and unauthenticated sockets cannot start Git operations", async (t) => {

@@ -167,7 +167,7 @@ test("every change to an account asks for the password of the owner making it", 
             role: "admin",
             password: TEST_PASSWORD }, "wrong-password");
         assert.equal(create.ok, false);
-        assert.equal(create.msg, "Incorrect current password", "the refusal is not masked as an existing account");
+        assert.equal(create.msg, "incorrectCurrentPassword", "the refusal is not masked as an existing account");
 
         for (const [ event, data ] of [
             [ "usersUpdate", { id: other.id,
