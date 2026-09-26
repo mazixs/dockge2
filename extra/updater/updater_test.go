@@ -224,6 +224,39 @@ func TestResolvedConfigurationPreservesDollarsAndUsesExplicitFile(t *testing.T) 
 		}
 	}
 }
+
+// The renderings of Compose 2.38 and 5.5 of one file: a short bind, and a long one with
+// create_host_path: false.
+func TestBindsMeanTheSameToEveryCompose(t *testing.T) {
+	rendered := func(binds string) composeConfig {
+		c, err := parseConfig([]byte(`{"name":"panel","services":{"dockge":{"volumes":[` + binds + `]}}}`))
+		must(t, err)
+		return c
+	}
+	compose2 := rendered(`{"type":"bind","source":"/srv/a","target":"/a","bind":{"create_host_path":true}},{"type":"bind","source":"/srv/b","target":"/b","bind":{}},{"type":"bind","source":"/srv/c","target":"/c"}`)
+	compose5 := rendered(`{"type":"bind","source":"/srv/a","target":"/a","bind":{}},{"type":"bind","source":"/srv/b","target":"/b","bind":{"create_host_path":false}},{"type":"bind","source":"/srv/c","target":"/c"}`)
+	compose2.explicitBinds(false)
+	compose5.explicitBinds(true)
+	a, err := configSnapshot(compose2, "panel")
+	must(t, err)
+	b, err := configSnapshot(compose5, "panel")
+	must(t, err)
+	if string(a) != string(b) || strings.Count(string(a), `"create_host_path": true`) != 1 || strings.Count(string(a), `"create_host_path": false`) != 1 {
+		t.Fatal(string(a), string(b))
+	}
+	for probe, want := range map[string]any{
+		`{"services":{"probe":{"volumes":[{"type":"bind","bind":{"create_host_path":true}}]}}}`:  false,
+		`{"services":{"probe":{"volumes":[{"type":"bind","bind":{}}]}}}`:                         true,
+		`{"services":{"probe":{"volumes":[{"type":"bind"}]}}}`:                                   nil,
+		`{"services":{"probe":{"volumes":[{"type":"bind","bind":{"create_host_path":false}}]}}}`: nil,
+	} {
+		run := &fakeRunner{call: func(string, []string) ([]byte, error) { return []byte(probe), nil }}
+		omitted, err := docker{run: run}.omittedCreateHostPath(context.Background(), t.TempDir())
+		if (want == nil) != (err != nil) || (err == nil && omitted != want) {
+			t.Fatal(probe, omitted, err)
+		}
+	}
+}
 func TestSchemaChangeRequiresExplicitRestoreBeforeMutation(t *testing.T) {
 	dir := t.TempDir()
 	state := filepath.Join(dir, ".dockge2")

@@ -130,7 +130,10 @@ Managed state is under `<installation>/.dockge2`, outside the panel data directo
 
 The state directory is private; managed files containing configuration are `0600`. Do not put state
 under the database or stack directory. Already resolved dollar signs are escaped when serializing
-Compose snapshots so passwords are not interpolated a second time. The previous snapshot comes
+Compose snapshots so passwords are not interpolated a second time. Every bind in a snapshot states
+`create_host_path` explicitly: Compose 2 writes it only when true and Compose 5 only when false,
+and an update from the web interface compares the snapshot the host's Compose recorded with one
+rendered by the Compose of the panel's image, which may later deploy it. The previous snapshot comes
 from the previously deployed configuration, even if `.env` was edited before the next update.
 
 A nonblocking file lock in `/tmp` is keyed by daemon ID and project, shared by both entry points and

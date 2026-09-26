@@ -26,7 +26,9 @@ type deploymentFixture struct {
 	pullFailure, startFailure, snapshotFailure, crashAt, crashPhase string
 	restoreFailure, previousFailure, stopFailure                    string
 	// restoreLeft is a restore container that outlived its killed client.
-	restoreLeft             bool
+	restoreLeft bool
+	// compose5 renders binds like Compose 5, which omits create_host_path when true.
+	compose5                bool
 	removed                 []string
 	stops, starts, restores int
 	runner                  *fakeRunner
@@ -64,7 +66,11 @@ func newDeployment(t *testing.T) *deploymentFixture {
 	return w
 }
 func (w *deploymentFixture) config() composeConfig {
-	value := map[string]any{"name": "panel", "services": map[string]any{"dockge": map[string]any{"image": "ghcr.io/mazixs/dockge2:latest", "environment": map[string]any{"SECRET": "cost$5"}, "volumes": []any{map[string]any{"type": "bind", "source": w.data, "target": "/app/data"}}}}}
+	bind := map[string]any{"create_host_path": true}
+	if w.compose5 {
+		bind = map[string]any{}
+	}
+	value := map[string]any{"name": "panel", "services": map[string]any{"dockge": map[string]any{"image": "ghcr.io/mazixs/dockge2:latest", "environment": map[string]any{"SECRET": "cost$5"}, "volumes": []any{map[string]any{"type": "bind", "source": w.data, "target": "/app/data", "bind": bind}}}}}
 	b, _ := json.Marshal(value)
 	c, err := parseConfig(b)
 	must(w.t, err)
@@ -170,6 +176,12 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 			return []byte("2.40.0"), nil
 		}
 		joined := " " + strings.Join(a, " ") + " "
+		if strings.Contains(joined, " -p dockge2-probe ") {
+			if w.compose5 {
+				return []byte(`{"services":{"probe":{"volumes":[{"type":"bind","bind":{}}]}}}`), nil
+			}
+			return []byte(`{"services":{"probe":{"volumes":[{"type":"bind","bind":{"create_host_path":true}}]}}}`), nil
+		}
 		if strings.Contains(joined, " config ") {
 			c := w.config()
 			return encoded(c.Extra)

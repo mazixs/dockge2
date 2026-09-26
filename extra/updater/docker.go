@@ -210,9 +210,73 @@ func pinSnapshot(data []byte, image string) ([]byte, error) {
 	return json.MarshalIndent(c.Extra, "", "  ")
 }
 
+// explicitBinds writes create_host_path into every bind of the panel. Compose 2 renders it
+// only when true and Compose 5 only when false, so "bind": {} has opposite meanings, and a
+// snapshot rendered by the host's Compose is compared with and deployed by the image's.
+func (c composeConfig) explicitBinds(omitted bool) {
+	mounts, _ := c.Services["dockge"]["volumes"].([]any)
+	for _, v := range mounts {
+		m, _ := v.(map[string]any)
+		if bind, ok := m["bind"].(map[string]any); ok {
+			if _, set := bind["create_host_path"]; !set {
+				bind["create_host_path"] = omitted
+			}
+		}
+	}
+}
+
+// explicitSnapshot reads a recorded snapshot, which may predate explicitBinds, as this
+// Compose would render it, without escaping its values again.
+func explicitSnapshot(data []byte, omitted bool) ([]byte, error) {
+	c, err := parseConfig(data)
+	if err != nil {
+		return nil, err
+	}
+	c.explicitBinds(omitted)
+	c.Extra["services"] = c.Services
+	return json.MarshalIndent(c.Extra, "", "  ")
+}
+
+const bindProbe = "services:\n  probe:\n    image: probe\n    volumes:\n      - /dockge2-probe:/probe\n"
+
+// omittedCreateHostPath asks this Compose what a bind without create_host_path means. The
+// short syntax always creates the path, and Compose writes the value only when it differs
+// from its own default.
+func (d docker) omittedCreateHostPath(ctx context.Context, dir string) (bool, error) {
+	file := filepath.Join(dir, "bind-probe.yml")
+	if err := atomicWrite(file, []byte(bindProbe), 0600); err != nil {
+		return false, err
+	}
+	data, err := d.command(ctx, "compose", "--project-directory", dir, "-p", "dockge2-probe", "-f", file, "config", "--format", "json")
+	if err != nil {
+		return false, err
+	}
+	var probe struct {
+		Services map[string]struct {
+			Volumes []struct {
+				Bind map[string]any `json:"bind"`
+			} `json:"volumes"`
+		} `json:"services"`
+	}
+	if err = json.Unmarshal(data, &probe); err != nil {
+		return false, err
+	}
+	if volumes := probe.Services["probe"].Volumes; len(volumes) == 1 && volumes[0].Bind != nil {
+		switch value, set := volumes[0].Bind["create_host_path"]; {
+		case !set:
+			return true, nil
+		case value == true:
+			return false, nil
+		}
+	}
+	return false, errors.New("docker compose renders bind mounts in an unknown form")
+}
+
 type docker struct {
 	run          runner
 	dir, project string
+	// createHostPath is what this Compose means by a bind without create_host_path.
+	createHostPath bool
 }
 
 func (d docker) command(ctx context.Context, args ...string) ([]byte, error) {
@@ -234,7 +298,12 @@ func (d docker) config(ctx context.Context, base, env string, overrides []string
 	if err != nil {
 		return composeConfig{}, err
 	}
-	return parseConfig(data)
+	c, err := parseConfig(data)
+	if err != nil {
+		return c, err
+	}
+	c.explicitBinds(d.createHostPath)
+	return c, nil
 }
 func (d docker) compose(ctx context.Context, config string, args ...string) error {
 	base := []string{"compose", "--project-directory", d.dir, "-p", d.project, "-f", config}

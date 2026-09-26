@@ -305,6 +305,9 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	if err != nil {
 		return err
 	}
+	if d.createHostPath, err = d.omittedCreateHostPath(ctx, tmp); err != nil {
+		return err
+	}
 	var current composeConfig
 	base := o.composeFile
 	if !filepath.IsAbs(base) {
@@ -504,6 +507,9 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	fields := []string{}
 	if fresh != nil {
 		old, readErr := readRegular(fresh.Config, 4<<20)
+		if readErr == nil {
+			old, readErr = explicitSnapshot(old, d.createHostPath)
+		}
 		if readErr != nil {
 			return readErr
 		}
@@ -624,6 +630,9 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	op.Target.ImageID = targetImage.ID
 	if fresh != nil && active != nil && targetImage.ID == active.ImageID && active.Digest == release.Digest {
 		old, readErr := readRegular(fresh.Config, 4<<20)
+		if readErr == nil {
+			old, readErr = explicitSnapshot(old, d.createHostPath)
+		}
 		if readErr != nil {
 			return fail(readErr)
 		}

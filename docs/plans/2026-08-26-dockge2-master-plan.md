@@ -314,7 +314,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [x] Консоль, статусы, Compose-файлы и Git-деплой: вставка в терминал, отдельная shell-сессия `sh`/`bash`, статус `ATTENTION` с worker/init-правилами, основной Compose-файл, env-файлы, `.secret` и Compose secrets, сохранение исходного YAML с явным `-f` и `config --quiet`, браузерные и Docker-тесты в CI.
 - [x] UX baseline, блокирующая ошибка Vue I18n, выбор направления "Знакомый Dockge".
 - [x] Контракт общего обзора, dashboard без выбранного агента, история доступности и стабильности с retention 30 дней.
-- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14-rc.1`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
+- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14-rc.2`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
 - [x] Масштабируемый список и связи сервисов: поиск по образу и серверу, `?q=` в адресе, постраничный вывод, связи только для чтения. Массовые действия не согласованы и остаются в пункте 1.
 - [x] Контейнеры вне `stacksDir`: классификация по меткам, standalone-контейнеры в списке, страница контейнера, управление по настройке владельца. Пункт 2.
 - [x] Собственный контейнер панели: опознание по ID, запрет down/delete/recreate, карточка в "О программе". Пункт 3.
@@ -1822,11 +1822,13 @@ is here, so it is not reopened without a new one.
 
 ## 2026-09-26: 0.0.14 goes out as a release candidate first
 
-`v0.0.14-rc.1` is a GitHub prerelease. Every tag so far was stable, so the prerelease branch of
+`v0.0.14-rc.2` is a GitHub prerelease. Every tag so far was stable, so the prerelease branch of
 `release.yml` has never run, and the update from the web interface needs a starting point that
-already carries the new updater. The review VPS reaches rc.1 with the host command, then updates
-from About with **Include beta releases** on, to rc.2 or 0.0.14. `latest` stays on 0.0.13 until
-the stable tag; its notes are `docs/releases/0.0.14.md`, the candidate's `0.0.14-rc.1.md`.
+already carries the new updater. The review VPS reaches rc.2 with the host command, then updates
+from About with **Include beta releases** on, to rc.3 or 0.0.14. `latest` stays on 0.0.13 until
+the stable tag; its notes are `docs/releases/0.0.14.md`, the candidate's `0.0.14-rc.2.md`. The tag
+`v0.0.14-rc.1` stopped at the release gate and has no release; a failed candidate's number is
+skipped rather than the pushed tag moved.
 
 The first CI run of the candidate caught two things the local runs could not. Compose 2.38 on
 the runner refuses `memswap_limit: "-1"` as a size while 5.5 accepts it; the converter writes the
@@ -1834,3 +1836,12 @@ number -1, which both take, and all 51 commands of the corpus pass `config` on b
 reference screenshot job, new in this release, ran `npm ci` in the Playwright image, where npm's
 default node-gyp build of better-sqlite3 has no `make`; the scene loads no native module, so the
 job installs with `--ignore-scripts`, reproduced in the same image with 71 passed.
+
+The release gate of rc.1 then caught the third: the helper of the web interface runs the updater
+with the Compose of the panel's image (5.5), while the host recorded the deployment with its own
+(2.38 on the runner). Compose 2 writes a bind's `create_host_path` only when true and Compose 5
+only when false, so `"bind": {}` means opposite things, the preview reported `volumes` as changing
+and a run of the same version recreated the panel instead of ending in no change. The updater now
+asks its Compose with a one-line probe what an omitted value means and writes the value into every
+bind of a snapshot, so both versions render the release file to the same bytes and read a snapshot
+the same way; a recorded snapshot from before is read as the current Compose would render it.

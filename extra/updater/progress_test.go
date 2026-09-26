@@ -188,6 +188,46 @@ func TestProgressNoChangeIsSuccessfulWithoutRestart(t *testing.T) {
 	}
 }
 
+// The web interface runs the updater with the Compose of the panel's image, while the
+// deployment was recorded by the Compose of the host.
+func TestProgressNoChangeAcrossComposeVersions(t *testing.T) {
+	for name, c := range map[string]struct{ recorded, reads bool }{
+		"recorded by Compose 2, read by Compose 5":         {false, true},
+		"recorded by Compose 5, read by Compose 2":         {true, false},
+		"recorded by Compose 5 before binds were explicit": {true, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newDeployment(t)
+			w.compose5 = c.recorded
+			if r := w.cli("--version", "0.0.9", "--yes"); r.code != 0 {
+				t.Fatal(r.stderr)
+			}
+			if c.recorded && c.reads {
+				data, err := os.ReadFile(filepath.Join(w.state, "active.json"))
+				must(t, err)
+				var active installed
+				must(t, json.Unmarshal(data, &active))
+				recorded, err := os.ReadFile(active.Config)
+				must(t, err)
+				legacy := strings.ReplaceAll(string(recorded), `"create_host_path": true`, "")
+				if legacy == string(recorded) {
+					t.Fatal(string(recorded))
+				}
+				must(t, os.WriteFile(active.Config, []byte(legacy), 0600))
+			}
+			w.compose5 = c.reads
+			preview := w.cli("--version", "0.0.9", "--dry-run")
+			if !strings.Contains(preview.stdout, `"fields":[]`) {
+				t.Fatal(preview.stdout)
+			}
+			r := w.cli("--version", "0.0.9", "--yes")
+			if r.code != 0 || r.result(t)["outcome"] != "no-change" || w.starts != 1 {
+				t.Fatal(r.code, r.stdout, w.starts)
+			}
+		})
+	}
+}
+
 func TestProgressRefusesWithAResultLine(t *testing.T) {
 	w := newDeployment(t)
 	changeSchema(t, w)
