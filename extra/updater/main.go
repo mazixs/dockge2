@@ -613,7 +613,9 @@ func (e *engine) execute(ctx context.Context, o options) error {
 			return fail(err)
 		}
 	} else {
-		if _, err = d.command(ctx, "pull", imageRef); err != nil {
+		// Without a platform the daemon picks its own variant of the index, which under
+		// emulation is not this updater's, and the classic image store refuses the digest.
+		if _, err = d.command(ctx, "pull", "--platform", "linux/"+runtime.GOARCH, imageRef); err != nil {
 			return fail(err)
 		}
 	}

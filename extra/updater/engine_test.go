@@ -320,6 +320,14 @@ func unmanagedRelease(t *testing.T) *deploymentFixture {
 	return w
 }
 
+func TestPullAsksForTheUpdaterPlatform(t *testing.T) {
+	w := newDeployment(t)
+	must(t, w.execute(nil))
+	want := "docker pull --platform linux/" + runtime.GOARCH + " "
+	if !slices.ContainsFunc(w.runner.calls, func(call string) bool { return strings.HasPrefix(call, want) }) {
+		t.Fatal(w.runner.calls)
+	}
+}
 func TestUnmanagedPublishedReleaseCanBeImported(t *testing.T) {
 	w := unmanagedRelease(t)
 	must(t, w.execute(func(o *options) { o.dryRun = true }))

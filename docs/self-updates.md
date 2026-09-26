@@ -12,7 +12,10 @@ A release contains `release.json`, its Sigstore bundle, `docker-compose.yml`, `i
 Linux amd64/arm64 updater binaries with their own bundles. The signed descriptor binds version,
 source commit, image index/platform digests, file sizes/hashes and compatibility requirements.
 The application image is always pulled by the selected descriptor's digest, including at a mirror.
-The downloaded image's platform, version and revision labels are checked before cutover.
+The image is pulled for the updater's own platform, never the daemon's default: a helper under
+emulation would otherwise receive another variant of the same index digest, which the classic
+image store refuses to record. The downloaded image's platform, version and revision labels are
+checked before cutover.
 
 The bootstrap's initial trust root is the operator-reviewed released script over GitHub HTTPS.
 It pins Cosign 3.1.3 and the architecture-specific binary checksum from the
