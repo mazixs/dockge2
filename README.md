@@ -84,25 +84,23 @@ Version numbers are this fork's own and started again at 0.0.1.
 
 ## Install
 
-On a Linux host (amd64 or arm64) with Docker Engine 24+ and Docker Compose 2.20+, download the
-installer of the latest release, read it, preview and install:
+On a Linux host (amd64 or arm64) with Docker Engine 24+ and Docker Compose 2.20+:
 
 ```bash
-curl --proto '=https' --proto-redir '=https' -fsSL \
-  https://github.com/mazixs/dockge2/releases/latest/download/install.sh -o /tmp/dockge2-install.sh
-less /tmp/dockge2-install.sh
-sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --dry-run
-sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --yes
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | sudo bash
 ```
 
-Open `http://SERVER:5001` and create the owner account with the setup code:
+The installer checks the host, verifies the signed release, shows what it is about to install and
+asks before it changes anything. Then open `http://SERVER:5001` and create the owner account with
+the setup code:
 
 ```bash
 sudo cat /opt/dockge2/data/bootstrap-token
 ```
 
-Stacks live in `/opt/stacks`. Ports, paths, SSH keys for private repositories and HTTPS are in
-[installation](docs/installation.md) and [configuration](docs/configuration.md).
+Stacks live in `/opt/stacks`. Reading the installer before it runs, ports, paths, SSH keys for
+private repositories and HTTPS are in [installation](docs/installation.md) and
+[configuration](docs/configuration.md).
 
 ## Several servers, one panel
 

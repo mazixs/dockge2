@@ -58,11 +58,16 @@ if [[ "\${WAIT_FOR_SIGNAL:-}" == 1 ]]; then
 fi
 exit "\${UPDATER_EXIT:-0}"
 `, { mode: 0o700 });
-    const start = (args = []) => {
-        const child = spawn(bash, [installer, "--dir", path.join(root, "installation"), ...args], {
+    // With a script, bash reads it from stdin, as in curl ... | sudo bash.
+    const start = (args = [], { script } = {}) => {
+        const source = script === undefined ? [ installer ] : [ "-s", "--" ];
+        const child = spawn(bash, [...source, "--dir", path.join(root, "installation"), ...args], {
             env: { ...process.env, PATH, FIXTURE: root, TRACE: path.join(root, "trace"), ...extra },
-            stdio: ["ignore", "pipe", "pipe"],
+            stdio: [script === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         });
+        if (script !== undefined) {
+            child.stdin.end(script);
+        }
         // The streams are separate pipes, so only text within one of them keeps its order.
         let output = "", stdout = "", stderr = "";
         child.stdout.on("data", chunk => { output += chunk; stdout += chunk; });
@@ -90,6 +95,27 @@ test("bootstrap verifies the exact tagged workflow before forwarding updater arg
         "", "Updater", "  ok       Cosign 3.1.3 matches its pinned checksum", "  ok       updater 1.2.3 is signed by the v1.2.3 release workflow", "",
     ].join("\n")), result.stdout);
     assert.doesNotMatch(result.output, /\x1b/);
+});
+
+test("the installer piped into bash forwards its options like a downloaded one", async t => {
+    const f = await fixture(t, { UPDATER_EXIT: "23" });
+    const script = await readFile(installer, "utf8");
+    const result = await f.start(["--version", "1.2.3", "--dry-run"], { script }).done;
+    assert.equal(result.code, 23, result.output);
+    assert.ok((await readFile(path.join(f.root, "update-args"), "utf8")).includes("--dry-run\n"));
+    assert.ok(result.stdout.startsWith("Dockge2 installer\n"), result.stdout);
+});
+
+test("a piped download cut short runs nothing", async t => {
+    const script = await readFile(installer, "utf8");
+    for (const share of [ 0.1, 0.5, 0.98 ]) {
+        const f = await fixture(t);
+        const result = await f.start(["--version", "1.2.3"], { script: script.slice(0, Math.floor(script.length * share)) }).done;
+        assert.notEqual(result.code, 0, `${share}: ${result.output}`);
+        assert.equal(result.stdout, "", `${share}: ${result.stdout}`);
+        await assert.rejects(access(path.join(f.root, "trace")));
+        await assert.rejects(access(path.join(f.root, "update-args")));
+    }
 });
 
 test("bootstrap names every unmet requirement with its fix before it downloads anything", async t => {

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Released bootstrap: authenticate the host updater before executing it.
 # Trust root: this reviewed bootstrap, GitHub HTTPS, and the pinned Cosign binary.
+# Piped into bash, a download cut short must run nothing: bash reads the whole block below
+# before it runs any of it.
+{
 set -euo pipefail
 umask 077
 
@@ -8,6 +11,7 @@ usage() {
     cat <<'HELP'
 Dockge2 verified release installer (Linux amd64/arm64)
 
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | sudo bash
 bash install.sh [--dir /opt/dockge2] [--version X.Y.Z] [--yes]
 bash install.sh --update --dir /existing/installation [--dry-run]
 /existing/installation/.dockge2/update --rollback [--restore-data]
@@ -195,3 +199,4 @@ while true; do
     kill -0 "$child" 2>/dev/null || break
 done
 exit "$status"
+}

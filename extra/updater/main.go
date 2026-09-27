@@ -186,22 +186,25 @@ func imageRepository(source string) (string, error) {
 	}
 	return value, nil
 }
+
+// errDeclined is a "no" to the question. Nothing has been written by then, so it is not
+// reported as a failure.
+var errDeclined = errors.New("cancelled before any change")
+
+// approved asks on the terminal, not stdin and stderr: under curl | bash stdin is the script.
 func approved(yes bool, question string) error {
 	if yes {
 		return nil
 	}
-	fmt.Fprint(os.Stderr, "\n"+question+" [y/N]: ")
 	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		return errors.New("no terminal; review --dry-run and use --yes to apply")
+		return withHint(errors.New("no terminal to ask for confirmation"), "Review the plan with --dry-run, then run the same command with --yes.")
 	}
 	defer f.Close()
+	fmt.Fprint(f, "\n"+question+" [y/N]: ")
 	var answer string
-	if _, err = fmt.Fscanln(f, &answer); err != nil {
-		return errors.New("update cancelled before cutover")
-	}
-	if answer != "y" && answer != "Y" {
-		return errors.New("update cancelled before cutover")
+	if _, err = fmt.Fscanln(f, &answer); err != nil || (answer != "y" && answer != "Y") {
+		return errDeclined
 	}
 	return nil
 }

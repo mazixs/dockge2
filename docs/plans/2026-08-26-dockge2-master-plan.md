@@ -2688,3 +2688,29 @@ the panel starts cannot be repeated. The installer refuses an existing `.env`, `
 installed state and looks for a vendor Compose file that is not there, and `--rollback` and
 `--resume` do not accept `failed-before-cutover` without a previous deployment. The only way out is
 to remove `.env` and `.dockge2` by hand. It is in the implementation plan.
+
+### 2026-09-27: one line to install
+
+The README block downloaded the installer to `/tmp`, opened it in `less`, ran a dry run and then
+installed with `--yes`. Pasted whole, it installed right after the preview without a chance to
+stop, and on a shell without bracketed paste `less` took the rest of the paste as keystrokes. The
+owner asked for the simplest way in the README, since that is where people install from.
+
+- **The README shows** `curl -fsSL .../install.sh | sudo bash`. The updater already prints the
+  plan and asks before any change, so the dry run and `--yes` left the README. Reading the script
+  first stays in `docs/installation.md`, as its own path.
+- **The question comes from `/dev/tty`**, not stdin, which under the pipe is the script. Checked on
+  Debian 13 with sudo's `use_pty`: a script piped into `sudo bash` reads the answer from the
+  terminal. The question is now written to the terminal as well, so it is seen when stderr is
+  redirected. Without a terminal the run stops before any change, with a hint to use `--dry-run`
+  and `--yes`.
+- **A download cut short runs nothing**: the body of `install.sh` is one `{ ... }` group, which bash
+  reads in full before it runs any of it. Without it, half of the 0.0.14 script printed the Host
+  section before the syntax error. `bootstrap.test.mjs` pipes cut versions of the script into bash
+  and checks that nothing is downloaded or started.
+- **`n` is a cancellation, not a failure**: it used to print `update cancelled before cutover` as a
+  failed step, also for a fresh install. Now it ends with "Cancelled: nothing was installed or
+  changed."
+
+The group and the new texts reach installations with the next release. The 0.0.14 installer
+already works through the pipe and asks its own question.

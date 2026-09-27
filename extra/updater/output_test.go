@@ -108,3 +108,12 @@ func TestFreshInstallationSaysWhereToSignIn(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func TestADeclinedQuestionIsACancellationNotAFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	e := &engine{out: &stdout, errOut: &stderr}
+	e.failed(options{}, errDeclined)
+	if stdout.String() != "\nCancelled: nothing was installed or changed.\n" || stderr.Len() != 0 {
+		t.Fatalf("%q %q", stdout.String(), stderr.String())
+	}
+}

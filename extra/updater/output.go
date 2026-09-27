@@ -141,6 +141,10 @@ func (e *engine) failed(o options, err error) {
 		fmt.Fprintln(e.failures(), redact(err.Error()))
 		return
 	}
+	if errors.Is(err, errDeclined) {
+		e.closing("Cancelled: nothing was installed or changed.")
+		return
+	}
 	if !e.reported {
 		if e.sections == 0 {
 			switch {

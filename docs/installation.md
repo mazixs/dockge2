@@ -16,27 +16,40 @@ server.
 
 ## Install
 
-1. Download the installer attached to the latest release and read it:
+```bash
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | sudo bash
+```
 
-   ```bash
-   curl --proto '=https' --proto-redir '=https' -fsSL \
-     https://github.com/mazixs/dockge2/releases/latest/download/install.sh -o /tmp/dockge2-install.sh
-   less /tmp/dockge2-install.sh
-   ```
+The installer checks the host and verifies the release, then shows the plan and asks whether to
+install it. Nothing is written and no image is pulled before you answer `y`. Then open
+`http://SERVER:5001` and create the owner account, see [first sign-in](#first-sign-in).
 
-2. Preview the installation. Nothing is written and no image is pulled:
+Options go after `bash -s --`, for example another port:
 
-   ```bash
-   sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --dry-run
-   ```
+```bash
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | sudo bash -s -- --port 8080
+```
 
-3. Install:
+Bash reads the whole script before it runs any of it, so a download cut short runs nothing. The
+question is asked on the terminal, not read from the pipe. Without a terminal, as in a provisioning
+script, the installer stops before any change: review the plan with `--dry-run`, then run the same
+command with `--yes`.
 
-   ```bash
-   sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --yes
-   ```
+### Reading the installer first
 
-4. Open `http://SERVER:5001` and create the owner account, see [first sign-in](#first-sign-in).
+To read the script before it runs, save it, read it, then run the saved copy with the same options:
+
+```bash
+curl --proto '=https' --proto-redir '=https' -fsSL \
+  https://github.com/mazixs/dockge2/releases/latest/download/install.sh -o /tmp/dockge2-install.sh
+less /tmp/dockge2-install.sh
+```
+
+```bash
+sudo bash /tmp/dockge2-install.sh
+```
+
+### What is verified
 
 The installer downloads a pinned Cosign binary, checks its SHA-256, and verifies that the host
 updater was signed by this repository's release workflow for the selected tag. The updater then
@@ -62,9 +75,10 @@ off.
    updater is verified; until then the installer only checks that the command exists.
 4. **Release**: the signed descriptor and the files it lists, then the Docker versions this release
    needs.
-5. **Plan**: what will be installed, where, and on which port. `--dry-run` stops here.
-6. With `--yes`, each step of the installation, then **Done** with the address, the command that
-   shows the setup code and the command for later updates.
+5. **Plan**: what will be installed, where, and on which port, then the question. `--dry-run`
+   stops before it, and `n` cancels with nothing changed.
+6. Each step of the installation, then **Done** with the address, the command that shows the setup
+   code and the command for later updates.
 
 A host without Docker stops in the first section:
 
@@ -98,17 +112,20 @@ previous version back.
 | `--stacks-dir DIR` | `/opt/stacks` | Directory of the stacks; an absolute path |
 | `--compose-override FILE` | none | Extra Compose file for the panel service; absolute path, repeatable |
 | `--dry-run` | | Show the plan and stop |
-| `--yes` | | Accept the plan |
+| `--yes` | | Accept the plan without asking |
 
 For example, with explicit paths and port:
 
 ```bash
-sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 --port 8080 \
-  --data-dir /var/lib/dockge2/data --stacks-dir /srv/stacks --yes
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | sudo bash -s -- \
+  --port 8080 --data-dir /var/lib/dockge2/data --stacks-dir /srv/stacks
 ```
 
-`bash /tmp/dockge2-install.sh --help` lists every option, including the ones used for updates and
-recovery.
+`--help` lists every option, including the ones used for updates and recovery:
+
+```bash
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | bash -s -- --help
+```
 
 ## What gets installed
 
@@ -175,8 +192,8 @@ services:
 and name it on installation:
 
 ```bash
-sudo bash /tmp/dockge2-install.sh --dir /opt/dockge2 \
-  --compose-override /opt/dockge2/overrides/mounts.yml --dry-run
+curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh | sudo bash -s -- \
+  --compose-override /opt/dockge2/overrides/mounts.yml
 ```
 
 The updater records the override and reads it again on every update, so leave the file where it is.

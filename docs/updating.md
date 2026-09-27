@@ -160,7 +160,7 @@ set the latest journal refers to, and never run a global `docker image prune` as
 
 Releases before `0.0.10` had no signed updater. Do not run the old checkout's installer or npm
 updater for the migration. Download and review the installer of the new release as in
-[installation](installation.md#install), then:
+[reading the installer first](installation.md#reading-the-installer-first), then:
 
 ```bash
 sudo bash /tmp/dockge2-install.sh --update --dir /opt/dockge2 --version X.Y.Z --dry-run
