@@ -2714,3 +2714,23 @@ owner asked for the simplest way in the README, since that is where people insta
 
 The group and the new texts reach installations with the next release. The 0.0.14 installer
 already works through the pipe and asks its own question.
+
+### 2026-09-27: the address and the setup code at the end
+
+The owner installed 0.0.14 on a fresh host with the one line and got "Update succeeded" and nothing
+about where to go next. The Done section of the unreleased updater was not enough either: it
+printed `http://SERVER:5001` and the command that shows the setup code, not the code.
+
+- **Addresses**: Done lists the IPv4 addresses of the host's interfaces, or its IPv6 ones when it
+  has no IPv4, three at most, without loopback, link-local and Docker's bridges. When every one is
+  private, a line says to use the public address from outside. With none found it keeps `SERVER`.
+  The public address is not asked from an outside service.
+- **The setup code itself** is shown when stdout is a terminal (`/proc/self/fd` points at a
+  `/dev/pts` or `/dev/tty` device; `/dev/null` is a character device too, so that test is not
+  used). Captured output, such as a cloud-init log that outlives the setup, gets the `cat` command.
+  This replaces "never the code itself" from the entry on the installer output: the person who ran
+  the installer as root can read the file anyway, and the log was the only real exposure.
+- The code is read with `O_NOFOLLOW`; when it cannot be read, as for a user without root, the
+  command is shown.
+
+Checked on local Docker with an isolated project: the printed address opened the panel.

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +27,16 @@ func terminal(w io.Writer) bool {
 	}
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// tty is true for a terminal only, unlike the character device test: /dev/null is one too.
+func tty(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	target, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(int(f.Fd())))
+	return err == nil && (strings.HasPrefix(target, "/dev/pts/") || strings.HasPrefix(target, "/dev/tty"))
 }
 func paint(w io.Writer, code, s string) string {
 	if !terminal(w) {
@@ -304,10 +316,10 @@ func (e *engine) finish(o options, r Release, previous *installed, data string, 
 	if previous == nil {
 		e.note("Dockge2 " + r.Version + " is running.")
 		if port := c.env("DOCKGE_PORT"); port != "" {
-			e.field("Open", "http://SERVER:"+port)
+			e.open(port)
 		}
 		if token := filepath.Join(data, "bootstrap-token"); exists(token) {
-			e.field("Setup code", asRoot()+"cat "+token)
+			e.setupCode(token)
 		}
 		e.field("Updates", launcher(o.dir)+" --dry-run")
 		e.note("The installer does not open firewall ports or set up HTTPS.")
@@ -319,4 +331,89 @@ func (e *engine) finish(o options, r Release, previous *installed, data string, 
 		rollback += " --restore-data"
 	}
 	e.field("Rollback", rollback)
+}
+
+// open lists the addresses the panel should answer on. They are the host's own, so behind NAT
+// the public one is elsewhere.
+func (e *engine) open(port string) {
+	find := hostAddresses
+	if e.addresses != nil {
+		find = e.addresses
+	}
+	addresses, private := find(), true
+	if len(addresses) == 0 {
+		addresses, private = []string{"SERVER"}, false
+	}
+	for i, address := range addresses {
+		name := "Open"
+		if i > 0 {
+			name = ""
+		}
+		e.field(name, "http://"+address+":"+port)
+		if ip := net.ParseIP(strings.Trim(address, "[]")); ip == nil || !ip.IsPrivate() {
+			private = false
+		}
+	}
+	if private {
+		e.field("", "from outside this network, use the host's public address")
+	}
+}
+
+// setupCode shows the code itself to a person at a terminal only: captured output, such as a
+// provisioning log, gets the command that reads it.
+func (e *engine) setupCode(token string) {
+	onTTY := tty
+	if e.onTTY != nil {
+		onTTY = e.onTTY
+	}
+	if onTTY(e.human()) {
+		if code, err := readRegular(token, 4096); err == nil && strings.TrimSpace(string(code)) != "" {
+			e.field("Setup code", strings.TrimSpace(string(code)))
+			e.field("", "for the owner account, once; also in "+token)
+			return
+		}
+	}
+	e.field("Setup code", asRoot()+"cat "+token)
+}
+
+// hostAddresses returns the IPv4 addresses of the host's interfaces, or its IPv6 ones when it
+// has no IPv4, without loopback, link-local and Docker's bridges, three at most.
+func hostAddresses() []string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var v4, v6 []string
+	for _, i := range interfaces {
+		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 || bridge(i.Name) {
+			continue
+		}
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			n, ok := a.(*net.IPNet)
+			if !ok || !n.IP.IsGlobalUnicast() {
+				continue
+			}
+			if ip := n.IP.To4(); ip != nil {
+				v4 = append(v4, ip.String())
+			} else {
+				v6 = append(v6, "["+n.IP.String()+"]")
+			}
+		}
+	}
+	if len(v4) == 0 {
+		v4 = v6
+	}
+	return v4[:min(len(v4), 3)]
+}
+func bridge(name string) bool {
+	for _, prefix := range []string{"docker", "br-", "veth", "virbr"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }

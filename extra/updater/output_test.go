@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +30,12 @@ func TestHumanTextIsPlainOffATerminal(t *testing.T) {
 	defer pipe.Close()
 	if paint(pipe, "1", "title") != "title" {
 		t.Fatal("a pipe got colour")
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	must(t, err)
+	defer null.Close()
+	if tty(pipe) || tty(null) {
+		t.Fatal("a pipe or /dev/null taken for a terminal")
 	}
 }
 
@@ -82,30 +90,68 @@ func TestRecoveredUpdatePrintsTheFailureOnce(t *testing.T) {
 }
 
 func TestFreshInstallationSaysWhereToSignIn(t *testing.T) {
-	w := newDeployment(t)
-	for _, p := range []string{filepath.Join(w.state, "active.json"), filepath.Join(w.dir, ".env"), filepath.Join(w.data, "dockge.db")} {
-		must(t, os.Remove(p))
+	for _, c := range []struct {
+		name      string
+		addresses []string
+		tty       bool
+		want, not []string
+	}{
+		{"captured output", []string{"198.51.100.7", "[2001:db8::7]"}, false,
+			[]string{"  Open       http://198.51.100.7:5001\n             http://[2001:db8::7]:5001\n  Setup code " + asRoot() + "cat "},
+			[]string{"invented-setup-code", "public address"}},
+		{"a terminal", []string{"192.168.1.20"}, true,
+			[]string{"  Open       http://192.168.1.20:5001\n             from outside this network, use the host's public address\n", "  Setup code invented-setup-code\n             for the owner account, once; also in "},
+			nil},
+		{"no address found", nil, false, []string{"  Open       http://SERVER:5001\n"}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newDeployment(t)
+			for _, p := range []string{filepath.Join(w.state, "active.json"), filepath.Join(w.dir, ".env"), filepath.Join(w.data, "dockge.db")} {
+				must(t, os.Remove(p))
+			}
+			w.containerID, w.running, w.port = "", false, "5001"
+			token := filepath.Join(w.data, "bootstrap-token")
+			w.hook = func(command string, a []string) {
+				if command == "docker" && strings.Contains(" "+strings.Join(a, " ")+" ", " up ") {
+					must(t, os.WriteFile(token, []byte("invented-setup-code\n"), 0600))
+				}
+			}
+			e := w.engine(nil)
+			e.addresses = func() []string { return c.addresses }
+			e.onTTY = func(io.Writer) bool { return c.tty }
+			var stdout, stderr bytes.Buffer
+			args := []string{"--dir", w.dir, "--verifier", w.verifier, "--release-dir", w.assets, "--version", "0.0.9", "--stacks-dir", filepath.Join(w.dir, "stacks"), "--yes"}
+			if code := cli(context.Background(), args, &stdout, &stderr, e); code != 0 {
+				t.Fatal(code, stderr.String())
+			}
+			out := stdout.String()
+			for _, want := range append(c.want, "  Action     install 0.0.9 (stable)\n", "\nInstalling 0.0.9\n", "  ok       configuration written to ", "\nDone\n  Dockge2 0.0.9 is running.\n", "  Updates    "+launcher(w.dir)+" --dry-run\n") {
+				if !strings.Contains(out, want) {
+					t.Fatalf("missing %q in:\n%s", want, out)
+				}
+			}
+			for _, not := range append(c.not, "Rollback") {
+				if strings.Contains(out, not) {
+					t.Fatalf("unexpected %q in:\n%s", not, out)
+				}
+			}
+		})
 	}
-	w.containerID, w.running, w.port = "", false, "5001"
-	token := filepath.Join(w.data, "bootstrap-token")
-	w.hook = func(command string, a []string) {
-		if command == "docker" && strings.Contains(" "+strings.Join(a, " ")+" ", " up ") {
-			must(t, os.WriteFile(token, []byte("invented-setup-code"), 0600))
+}
+
+func TestHostAddressesLeaveOutWhatIsNotReachable(t *testing.T) {
+	addresses := hostAddresses()
+	if len(addresses) > 3 {
+		t.Fatal(addresses)
+	}
+	for _, a := range addresses {
+		ip := net.ParseIP(strings.Trim(a, "[]"))
+		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			t.Fatal(a)
 		}
 	}
-	var stdout, stderr bytes.Buffer
-	args := []string{"--dir", w.dir, "--verifier", w.verifier, "--release-dir", w.assets, "--version", "0.0.9", "--stacks-dir", filepath.Join(w.dir, "stacks"), "--yes"}
-	if code := cli(context.Background(), args, &stdout, &stderr, w.engine(nil)); code != 0 {
-		t.Fatal(code, stderr.String())
-	}
-	out := stdout.String()
-	for _, want := range []string{"  Action     install 0.0.9 (stable)\n", "\nInstalling 0.0.9\n", "  ok       configuration written to ", "\nDone\n  Dockge2 0.0.9 is running.\n", "  Open       http://SERVER:5001\n", "  Setup code " + asRoot() + "cat " + token + "\n", "  Updates    " + launcher(w.dir) + " --dry-run\n"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("missing %q in:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "invented-setup-code") || strings.Contains(out, "Rollback") {
-		t.Fatal(out)
+	if !bridge("docker0") || !bridge("br-1a2b3c") || !bridge("veth9f8e") || bridge("eth0") || bridge("ens3") {
+		t.Fatal("bridge names")
 	}
 }
 

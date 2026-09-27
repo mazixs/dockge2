@@ -21,8 +21,8 @@ curl -fsSL https://github.com/mazixs/dockge2/releases/latest/download/install.sh
 ```
 
 The installer checks the host and verifies the release, then shows the plan and asks whether to
-install it. Nothing is written and no image is pulled before you answer `y`. Then open
-`http://SERVER:5001` and create the owner account, see [first sign-in](#first-sign-in).
+install it. Nothing is written and no image is pulled before you answer `y`. At the end it prints
+the address of the panel and the setup code for the owner account, see [first sign-in](#first-sign-in).
 
 Options go after `bash -s --`, for example another port:
 
@@ -77,8 +77,9 @@ off.
    needs.
 5. **Plan**: what will be installed, where, and on which port, then the question. `--dry-run`
    stops before it, and `n` cancels with nothing changed.
-6. Each step of the installation, then **Done** with the address, the command that shows the setup
-   code and the command for later updates.
+6. Each step of the installation, then **Done** with the addresses of the host, the setup code and
+   the command for later updates. The addresses are the host's own: behind NAT, use its public
+   one.
 
 A host without Docker stops in the first section:
 
@@ -144,8 +145,9 @@ The installer does not open firewall ports and does not set up HTTPS.
 
 ## First sign-in
 
-The first visit asks for a setup code, a username, an email and a password. The code is in the data
-directory, and the **Done** section of the installer prints the command that shows it:
+The first visit asks for a setup code, a username, an email and a password. The **Done** section of
+the installer shows the code when it runs in a terminal. Captured output, such as a provisioning
+log, gets the command that reads it from the data directory instead:
 
 ```bash
 sudo cat /opt/dockge2/data/bootstrap-token

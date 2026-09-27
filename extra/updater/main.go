@@ -122,6 +122,8 @@ type engine struct {
 	progress  io.Writer // JSON lines; nil without --progress json
 	devSource string
 	binary    func() (string, error) // the updater executable; tests replace it
+	addresses func() []string        // the host's addresses for the panel; tests replace it
+	onTTY     func(io.Writer) bool   // a person reads this stream; tests replace it
 	report    report
 	// running is the step under way, sections counts the printed ones, and reported
 	// says that recovery has already printed the failure.
