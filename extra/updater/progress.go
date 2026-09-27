@@ -75,7 +75,7 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer, e *engine
 	if errors.Is(err, flag.ErrHelp) {
 		return 0
 	}
-	e.out = stdout
+	e.out, e.errOut = stdout, stderr
 	if o.progress == "json" {
 		e.out, e.progress = stderr, stdout
 	}
@@ -92,7 +92,7 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer, e *engine
 	}
 	err = e.executeReported(ctx, o)
 	if err != nil {
-		fmt.Fprintln(stderr, redact(err.Error()))
+		e.failed(o, err)
 	}
 	if !o.status {
 		e.emit(e.result(o, err, ctx.Err() != nil))

@@ -48,6 +48,45 @@ source. The reviewed installer and GitHub HTTPS are the initial trust root, see
 The verified installer exists from release `0.0.10`. To move an older installation to it, see
 [upgrading an older installation](updating.md#upgrading-an-older-installation).
 
+## What the installer prints
+
+The output comes in sections, one line per check with its result in a column: `ok`, `missing`,
+`failed` or `warning`. A problem goes to stderr with its cause and a hint under it, and the last
+line says where the installation stands. Colour is used in a terminal only; `NO_COLOR` turns it
+off.
+
+1. **Host**: Linux on amd64 or arm64 and the `curl`, `sha256sum` and `docker` commands. Every unmet
+   requirement is listed at once, before anything is downloaded.
+2. **Updater**: the pinned Cosign binary and its checksum, then the signature of the updater.
+3. **Docker**: a local daemon and the Engine and Compose versions. Docker is not run before the
+   updater is verified; until then the installer only checks that the command exists.
+4. **Release**: the signed descriptor and the files it lists, then the Docker versions this release
+   needs.
+5. **Plan**: what will be installed, where, and on which port. `--dry-run` stops here.
+6. With `--yes`, each step of the installation, then **Done** with the address, the command that
+   shows the setup code and the command for later updates.
+
+A host without Docker stops in the first section:
+
+```text
+Dockge2 installer
+
+Host
+  ok       Linux amd64
+  ok       curl
+  ok       sha256sum
+  missing  docker
+           Install Docker Engine 24 or newer with the Compose plugin, then run this again:
+           https://docs.docker.com/engine/install/
+
+Stopped: 1 requirement is not met.
+Nothing was downloaded or changed.
+```
+
+Updates, rollbacks and `--resume` print the same sections. When an update fails after the panel
+was stopped, the failed step comes first, then a **Recovery** section with the steps that brought the
+previous version back.
+
 ## Options
 
 | Option | Default | Meaning |
@@ -89,7 +128,7 @@ The installer does not open firewall ports and does not set up HTTPS.
 ## First sign-in
 
 The first visit asks for a setup code, a username, an email and a password. The code is in the data
-directory:
+directory, and the **Done** section of the installer prints the command that shows it:
 
 ```bash
 sudo cat /opt/dockge2/data/bootstrap-token

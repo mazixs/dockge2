@@ -118,10 +118,17 @@ type operation struct {
 type engine struct {
 	run       runner
 	out       io.Writer // human text
+	errOut    io.Writer // failures; out when unset
 	progress  io.Writer // JSON lines; nil without --progress json
 	devSource string
 	binary    func() (string, error) // the updater executable; tests replace it
 	report    report
+	// running is the step under way, sections counts the printed ones, and reported
+	// says that recovery has already printed the failure.
+	running                       string
+	sections                      int
+	reported                      bool
+	engineVersion, composeVersion string
 }
 
 func main() {
@@ -179,11 +186,11 @@ func imageRepository(source string) (string, error) {
 	}
 	return value, nil
 }
-func approved(yes bool) error {
+func approved(yes bool, question string) error {
 	if yes {
 		return nil
 	}
-	fmt.Fprint(os.Stderr, "Continue with this release and a panel maintenance outage? [y/N]: ")
+	fmt.Fprint(os.Stderr, "\n"+question+" [y/N]: ")
 	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return errors.New("no terminal; review --dry-run and use --yes to apply")
@@ -301,11 +308,8 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		}
 	}
 	d := docker{run: e.run, dir: o.dir, project: o.project}
-	daemon, err := d.localDaemon(ctx)
+	daemon, err := e.checkDocker(ctx, &d, tmp)
 	if err != nil {
-		return err
-	}
-	if d.createHostPath, err = d.omittedCreateHostPath(ctx, tmp); err != nil {
 		return err
 	}
 	var current composeConfig
@@ -369,21 +373,34 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	stage := filepath.Join(tmp, "release")
 	var release Release
 	if o.development {
-		release, err = e.development(ctx, o, stage)
+		e.section("Development build " + o.ref)
+		e.begin("fetching and describing " + o.ref)
+		if release, err = e.development(ctx, o, stage); err == nil {
+			e.ok(release.Version + " at commit " + shortID(release.Commit))
+		}
 	} else {
 		if version == "" {
-			version, err = client.latest(ctx)
-			if err != nil {
+			if version, err = client.latest(ctx); err != nil {
+				e.section("Release")
 				return err
 			}
 		}
-		e.message("Verifying release " + version + " and deployment files (no branch checkout).")
-		release, err = client.stage(ctx, version, o.releaseDir, stage)
+		e.section("Release " + version)
+		e.begin("checking the signature and the files")
+		if release, err = client.stage(ctx, version, o.releaseDir, stage); err == nil {
+			e.ok("release.json is signed by the v" + version + " release workflow")
+			e.ok("the compose file, installer and updater match it")
+		}
 	}
 	if err != nil {
 		return err
 	}
 	e.report.to = release.Version
+	if err = e.checkVersions(release); err != nil {
+		return err
+	}
+	e.section("Plan")
+	e.begin("checking the configuration and the data directory")
 	candidate, err := d.config(ctx, filepath.Join(stage, "docker-compose.yml"), env, o.overrides)
 	if err != nil {
 		return err
@@ -486,9 +503,6 @@ func (e *engine) execute(ctx context.Context, o options) error {
 			return errors.New("unsupported upgrade path; use recorded rollback for downgrades")
 		}
 	}
-	if err = e.checkVersions(ctx, d, release); err != nil {
-		return err
-	}
 	imageRef := "dockge2-development:" + release.Commit
 	if !o.development {
 		repo, parseErr := imageRepository(source)
@@ -518,25 +532,26 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		if compareErr != nil {
 			return compareErr
 		}
-		if len(fields) > 0 {
-			e.message("Configuration fields changing (values hidden): " + strings.Join(fields, ", "))
-		}
 	}
-	e.message(fmt.Sprintf("Target: %s (%s), project %s. Data: %s. Stack containers are not restarted.", release.Version, release.Channel, d.project, dataDir))
-	if active != nil && active.Schema != release.Schema {
-		e.message("Schema contract changes; rollback after startup will require explicit --restore-data.")
-	}
-	if active != nil {
-		e.message("Current: " + active.Version + " (" + active.ImageID + "). A stopped-data backup precedes migration.")
-	}
+	e.plan(o, release, active, d.project, dataDir, candidate, fields)
 	if o.dryRun {
-		e.message("Preview only: no image pull, configuration write or container recreation.")
+		e.closing("Preview only: no image was pulled and nothing was written or restarted.",
+			"To apply it, run the same command with --yes instead of --dry-run.")
 		e.emit(previewLine{Kind: "preview", V: 1, From: e.report.from, To: release.Version, Channel: source, Fields: fields, SchemaChanges: active != nil && active.Schema != release.Schema})
 		return nil
 	}
-	if err = approved(o.yes); err != nil {
+	question := "Update to " + release.Version + "? The panel is unavailable while it restarts."
+	title := "Updating to " + release.Version
+	switch {
+	case active == nil:
+		question, title = "Install "+release.Version+"?", "Installing "+release.Version
+	case active.Version == release.Version:
+		title = "Applying " + release.Version
+	}
+	if err = approved(o.yes, question); err != nil {
 		return err
 	}
+	e.section(title)
 	// A signal before the operation is recorded refuses it; nothing has been written yet.
 	if err = ctx.Err(); err != nil {
 		return err
@@ -592,7 +607,6 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	op := operation{ID: id, Phase: "prepared", Previous: active, Target: installed{Version: release.Version, Schema: release.Schema, Digest: release.Digest, Source: source, Project: d.project, DataDir: dataDir, Config: targetConfig, ReleaseDir: releaseDir, Overrides: o.overrides, Mode: mode}}
 	save := func(phase string) error {
 		op.Phase = phase
-		e.message("Update phase: " + phase)
 		return e.writeJournal(state, op)
 	}
 	if err = save("prepared"); err != nil {
@@ -604,17 +618,22 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		return cause
 	}
 	if active != nil {
-		if _, err = d.command(ctx, "image", "tag", active.ImageID, "dockge2-recovery:"+strings.ToLower(strings.ReplaceAll(id, ".", "-"))); err != nil {
+		recovery := "dockge2-recovery:" + strings.ToLower(strings.ReplaceAll(id, ".", "-"))
+		e.begin("keeping the current image for a rollback")
+		if _, err = d.command(ctx, "image", "tag", active.ImageID, recovery); err != nil {
 			return fail(err)
 		}
+		e.ok("current image kept as " + recovery)
 	}
 	if o.development {
+		e.begin("building the image")
 		if _, err = d.command(ctx, "build", "--file", filepath.Join(e.devSource, "docker/Dockerfile"), "--target", "release", "--tag", imageRef, "--label", "org.opencontainers.image.version="+release.Version, "--label", "org.opencontainers.image.revision="+release.Commit, e.devSource); err != nil {
 			return fail(err)
 		}
 	} else {
 		// Without a platform the daemon picks its own variant of the index, which under
 		// emulation is not this updater's, and the classic image store refuses the digest.
+		e.begin("pulling the image")
 		if _, err = d.command(ctx, "pull", "--platform", "linux/"+runtime.GOARCH, imageRef); err != nil {
 			return fail(err)
 		}
@@ -630,6 +649,11 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		return fail(errors.New("image platform differs from this updater platform"))
 	}
 	op.Target.ImageID = targetImage.ID
+	if o.development {
+		e.ok("image " + shortID(targetImage.ID) + " built")
+	} else {
+		e.ok("image " + shortID(targetImage.ID) + " pulled; its labels match the release")
+	}
 	if fresh != nil && active != nil && targetImage.ID == active.ImageID && active.Digest == release.Digest {
 		old, readErr := readRegular(fresh.Config, 4<<20)
 		if readErr == nil {
@@ -651,7 +675,8 @@ func (e *engine) execute(ctx context.Context, o options) error {
 				return err
 			}
 			e.report.noChange = true
-			e.message("No change; previous distinct deployment retained.")
+			e.section("Done")
+			e.note("Nothing changed: Dockge2 " + release.Version + " keeps running with this configuration.")
 			return nil
 		}
 	}
@@ -675,10 +700,12 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		if err = atomicWrite(filepath.Join(o.dir, ".env"), initial, 0600); err != nil {
 			return fail(err)
 		}
+		e.ok("configuration written to " + filepath.Join(o.dir, ".env"))
 	}
 	if err = e.installLauncher(state, binary, o.verifier, o.dir, o.development); err != nil {
 		return fail(err)
 	}
+	e.ok("updater installed as " + filepath.Join(state, "update"))
 	// Re-evaluate operator configuration after download and before touching the panel.
 	rechecked, recheckErr := d.config(ctx, filepath.Join(releaseDir, "docker-compose.yml"), env, o.overrides)
 	if recheckErr != nil {
@@ -705,9 +732,11 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		return err
 	}
 	if active != nil {
+		e.begin("stopping " + active.Version)
 		if err = d.compose(ctx, active.Config, "stop", "--timeout", "30", "dockge"); err != nil {
 			return e.recoverFailure(o, state, op, d, err)
 		}
+		e.ok(active.Version + " stopped")
 		if err = checkBackupSpace(dataDir, state); err != nil {
 			return e.recoverFailure(o, state, op, d, err)
 		}
@@ -715,6 +744,7 @@ func (e *engine) execute(ctx context.Context, o options) error {
 			return e.recoverFailure(o, state, op, d, err)
 		}
 		op.Backup = filepath.Join(opDir, "data-backup")
+		e.begin("copying the panel data")
 		if err = copyTreeContext(ctx, dataDir, op.Backup); err != nil {
 			return e.recoverFailure(o, state, op, d, err)
 		}
@@ -725,19 +755,24 @@ func (e *engine) execute(ctx context.Context, o options) error {
 			return e.recoverFailure(o, state, op, d, err)
 		}
 		op.BackupVerified = true
+		e.ok("data copied to " + op.Backup + " and checked")
 	}
 	if err = save("starting-target"); err != nil {
 		return e.recoverFailure(o, state, op, d, err)
 	}
+	e.begin("starting " + release.Version)
 	if err = d.up(ctx, targetConfig); err != nil {
 		return e.recoverFailure(o, state, op, d, err)
 	}
+	e.ok(release.Version + " started")
 	if err = save("checking-target"); err != nil {
 		return e.recoverFailure(o, state, op, d, err)
 	}
+	e.begin("checking that " + release.Version + " stays healthy")
 	if err = d.verifyRuntime(ctx, targetImage.ID, release.Version, false); err != nil {
 		return e.recoverFailure(o, state, op, d, err)
 	}
+	e.ok(release.Version + " is healthy")
 	if active != nil {
 		if err = writeJSON(filepath.Join(state, "previous.json"), op); err != nil {
 			return err
@@ -749,6 +784,6 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	if err = save("success"); err != nil {
 		return err
 	}
-	e.message("Update succeeded: the selected image remained healthy. Use .dockge2/update for future updates or --rollback.")
+	e.finish(o, release, active, dataDir, candidate)
 	return nil
 }

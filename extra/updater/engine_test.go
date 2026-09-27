@@ -28,11 +28,15 @@ type deploymentFixture struct {
 	// restoreLeft is a restore container that outlived its killed client.
 	restoreLeft bool
 	// compose5 renders binds like Compose 5, which omits create_host_path when true.
-	compose5                bool
-	removed                 []string
-	stops, starts, restores int
-	runner                  *fakeRunner
-	hook                    func(string, []string)
+	compose5 bool
+	// engineVersion, composeVersion and port replace what the fixture's Docker reports;
+	// noCompose is Docker without the Compose plugin.
+	engineVersion, composeVersion, port string
+	noCompose                           bool
+	removed                             []string
+	stops, starts, restores             int
+	runner                              *fakeRunner
+	hook                                func(string, []string)
 }
 
 // fakeUpdater is the updater executable the fixture's restore container runs.
@@ -70,7 +74,11 @@ func (w *deploymentFixture) config() composeConfig {
 	if w.compose5 {
 		bind = map[string]any{}
 	}
-	value := map[string]any{"name": "panel", "services": map[string]any{"dockge": map[string]any{"image": "ghcr.io/mazixs/dockge2:latest", "environment": map[string]any{"SECRET": "cost$5"}, "volumes": []any{map[string]any{"type": "bind", "source": w.data, "target": "/app/data", "bind": bind}}}}}
+	environment := map[string]any{"SECRET": "cost$5"}
+	if w.port != "" {
+		environment["DOCKGE_PORT"] = w.port
+	}
+	value := map[string]any{"name": "panel", "services": map[string]any{"dockge": map[string]any{"image": "ghcr.io/mazixs/dockge2:latest", "environment": environment, "volumes": []any{map[string]any{"type": "bind", "source": w.data, "target": "/app/data", "bind": bind}}}}}
 	b, _ := json.Marshal(value)
 	c, err := parseConfig(b)
 	must(w.t, err)
@@ -114,6 +122,9 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 	case "info":
 		return []byte("daemon-" + w.dir), nil
 	case "version":
+		if w.engineVersion != "" {
+			return []byte(w.engineVersion), nil
+		}
 		return []byte("28.0.0"), nil
 	case "ps":
 		return []byte(w.containerID), nil
@@ -173,6 +184,12 @@ func (w *deploymentFixture) command(command string, a []string) ([]byte, error) 
 		return encoded([]imageInfo{i})
 	case "compose":
 		if a[1] == "version" {
+			if w.noCompose {
+				return nil, daemonError("docker: 'compose' is not a docker command.")
+			}
+			if w.composeVersion != "" {
+				return []byte(w.composeVersion), nil
+			}
 			return []byte("2.40.0"), nil
 		}
 		joined := " " + strings.Join(a, " ") + " "

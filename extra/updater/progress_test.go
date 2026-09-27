@@ -136,7 +136,7 @@ func TestProgressReportsEveryJournalWriteAndOneResult(t *testing.T) {
 			t.Fatal(line)
 		}
 	}
-	if !strings.Contains(r.stderr, "Update phase: prepared") || !strings.Contains(r.stderr, "Update succeeded") {
+	if !strings.Contains(r.stderr, "\nUpdating to 0.0.9\n") || !strings.Contains(r.stderr, "  ok       0.0.9 is healthy\n") || !strings.Contains(r.stderr, "\nDone\n") {
 		t.Fatal("human text left stderr:", r.stderr)
 	}
 	// Cosign keeps its trust root in the installation's state across helper containers.

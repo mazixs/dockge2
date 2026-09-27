@@ -13,25 +13,6 @@ import (
 	"time"
 )
 
-func (e *engine) checkVersions(ctx context.Context, d docker, r Release) error {
-	for _, item := range []struct {
-		args    []string
-		minimum string
-	}{{[]string{"compose", "version", "--short"}, r.MinCompose}, {[]string{"version", "--format", "{{.Server.Version}}"}, r.MinEngine}} {
-		output, err := d.command(ctx, item.args...)
-		if err != nil {
-			return err
-		}
-		value := strings.TrimPrefix(strings.TrimSpace(string(output)), "v")
-		// Vendor suffixes do not change the underlying Engine/Compose feature level.
-		value = strings.Split(strings.Split(value, "+")[0], "-")[0]
-		if !versionPattern.MatchString(value) || compareVersion(value, item.minimum) < 0 {
-			return fmt.Errorf("Docker prerequisite is older than %s", item.minimum)
-		}
-	}
-	return nil
-}
-
 func (e *engine) validatePrevious(ctx context.Context, d docker, c *containerInfo, current composeConfig, active *installed, r Release, base string) (*installed, error) {
 	if c == nil || !digestPattern.MatchString(c.Image) {
 		return nil, errors.New("missing previous image identity")
@@ -187,18 +168,27 @@ func (e *engine) recoverFailure(o options, state string, op operation, d docker,
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	op.Error = redact(cause.Error())
+	e.fail(cause)
+	e.reported = true
+	e.section("Recovery")
+	required := func(err, result error) error {
+		e.fail(err)
+		op.Phase = "recovery-required"
+		_ = e.writeJournal(state, op)
+		return result
+	}
 	if !op.BackupVerified && op.Backup != "" && within(filepath.Join(state, "operations", op.ID), op.Backup) {
 		if err := os.RemoveAll(op.Backup); err != nil {
-			e.message("Could not remove the incomplete snapshot; inspect disk space before recovery.")
+			e.warn("could not remove the incomplete data copy; check the free disk space")
 		}
 	}
 	started := mayHaveStarted(op.Phase)
 	if started {
+		e.begin("stopping " + op.Target.Version)
 		if err := d.compose(ctx, op.Target.Config, "stop", "--timeout", "30", "dockge"); err != nil {
-			op.Phase = "recovery-required"
-			_ = e.writeJournal(state, op)
-			return fmt.Errorf("update failed; could not stop the target: %w", err)
+			return required(err, fmt.Errorf("update failed; could not stop the target: %w", err))
 		}
+		e.ok(op.Target.Version + " stopped")
 	}
 	if op.Previous != nil && started && op.Previous.Schema != op.Target.Schema && o.restoreOnFailedStart {
 		return e.restoreAfterFailedStart(state, op, d, cause)
@@ -206,18 +196,25 @@ func (e *engine) recoverFailure(o options, state string, op operation, d docker,
 	if op.Previous == nil || started && op.Previous.Schema != op.Target.Schema {
 		op.Phase = "recovery-required"
 		_ = e.writeJournal(state, op)
+		if op.Previous == nil {
+			e.warn("the new installation is stopped")
+			details(e.failures(), "Fix the cause above, then start it again:\n"+launcher(o.dir)+" --resume")
+		} else {
+			e.warn(op.Previous.Version + " was not started: the database schema changed, so it needs the data copy")
+			details(e.failures(), "To go back to it with the data copy:\n"+launcher(o.dir)+" --rollback --restore-data")
+		}
 		return fmt.Errorf("update failed: %w; target stopped; inspect the journal and use --rollback --restore-data if the recorded snapshot is required", cause)
 	}
+	e.begin("starting " + op.Previous.Version)
 	if err := d.up(ctx, op.Previous.Config); err != nil {
-		op.Phase = "recovery-required"
-		_ = e.writeJournal(state, op)
-		return fmt.Errorf("update failed (%w); recovery failed: %w", cause, err)
+		return required(err, fmt.Errorf("update failed (%w); recovery failed: %w", cause, err))
 	}
+	e.ok(op.Previous.Version + " started")
+	e.begin("checking that " + op.Previous.Version + " stays healthy")
 	if err := d.verifyRuntime(ctx, op.Previous.ImageID, op.Previous.Version, op.Previous.Mode == "legacy"); err != nil {
-		op.Phase = "recovery-required"
-		_ = e.writeJournal(state, op)
-		return err
+		return required(err, err)
 	}
+	e.ok(op.Previous.Version + " is healthy")
 	op.Phase = "recovered"
 	if err := e.writeJournal(state, op); err != nil {
 		return err
@@ -232,33 +229,42 @@ func (e *engine) restoreAfterFailedStart(state string, op operation, d docker, c
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	required := func(err error) error {
+		e.fail(err)
+		details(e.failures(), "To finish the rollback with the data copy:\n"+launcher(filepath.Dir(state))+" --rollback --restore-data")
 		op.Phase = "recovery-required"
 		_ = e.writeJournal(state, op)
 		return fmt.Errorf("update failed: %w; target stopped; automatic data restore did not complete: %w; inspect the journal and use --rollback --restore-data", cause, err)
 	}
+	e.begin("checking the data copy")
 	binary, err := e.checkRestore(ctx, d, state, op)
 	if err != nil {
 		return required(err)
 	}
-	e.message("Restoring the data snapshot and the previous deployment.")
 	op.RestoreData = true
 	op.Phase = "rolling-back"
 	if err = e.writeJournal(state, op); err != nil {
 		return required(err)
 	}
+	e.begin("restoring the data copy")
 	if err = d.restoreSnapshot(ctx, op.Previous.ImageID, binary, op.Previous.DataDir, op.Backup, op.ID); err != nil {
 		// The journal keeps rolling-back while a restore container may still write.
 		if errors.Is(err, errRestoreRunning) {
+			e.fail(err)
 			return fmt.Errorf("update failed: %w; target stopped; %w", cause, err)
 		}
 		return required(err)
 	}
+	e.ok("data restored; what " + op.Target.Version + " wrote is kept in " + failedDataDir(op.Previous.DataDir, op.ID))
+	e.begin("starting " + op.Previous.Version)
 	if err = d.up(ctx, op.Previous.Config); err != nil {
 		return required(err)
 	}
+	e.ok(op.Previous.Version + " started")
+	e.begin("checking that " + op.Previous.Version + " stays healthy")
 	if err = d.verifyRuntime(ctx, op.Previous.ImageID, op.Previous.Version, op.Previous.Mode == "legacy"); err != nil {
 		return required(err)
 	}
+	e.ok(op.Previous.Version + " is healthy")
 	op.Phase = "recovered"
 	if err = e.writeJournal(state, op); err != nil {
 		return err
@@ -307,10 +313,12 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 	}
 	if op.Phase == "prepared" || op.Phase == "downloaded" {
 		d := docker{run: e.run, dir: o.dir, project: op.Target.Project}
-		daemon, err := d.localDaemon(ctx)
+		daemon, err := e.dockerDaemon(ctx, d)
 		if err != nil {
 			return err
 		}
+		e.section("Rollback")
+		e.begin("checking the interrupted operation")
 		lock, err := lockProject(daemon, d.project)
 		if err != nil {
 			return err
@@ -335,12 +343,18 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 		if op.Previous == nil && actual != nil || op.Previous != nil && (actual == nil || actual.Image != op.Previous.ImageID) {
 			return errors.New("deployment changed during an interrupted preparation")
 		}
-		e.message("The interrupted operation had not stopped the panel; marking it failed before cutover.")
+		e.ok("the interrupted operation " + op.ID + " had not stopped the panel")
 		if o.dryRun {
+			e.closing("Preview only: the journal was not changed.",
+				"To mark the operation failed before cutover, run the same command with --yes instead of --dry-run.")
 			return nil
 		}
 		op.Phase = "failed-before-cutover"
-		return e.writeJournal(state, op)
+		if err = e.writeJournal(state, op); err != nil {
+			return err
+		}
+		e.ok("operation marked failed before cutover; the next update can start")
+		return nil
 	}
 	if err = validateOperation(state, op); err != nil {
 		return err
@@ -349,10 +363,12 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 		return errors.New("rollback project mismatch")
 	}
 	d := docker{run: e.run, dir: o.dir, project: op.Target.Project}
-	daemon, err := d.localDaemon(ctx)
+	daemon, err := e.dockerDaemon(ctx, d)
 	if err != nil {
 		return err
 	}
+	e.section("Rollback")
+	e.begin("checking the recorded operation")
 	lock, err := lockProject(daemon, d.project)
 	if err != nil {
 		return err
@@ -386,7 +402,8 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 	}
 	mustRestore := op.RestoreData || mayHaveStarted(op.Phase) && op.Target.Schema != op.Previous.Schema
 	if mustRestore && !o.restoreData {
-		return errors.New("schema changed: rollback requires --restore-data; this discards panel writes after the snapshot, preserves failed data, and does not restore stack volumes")
+		return withHint(errors.New("schema changed: rollback requires --restore-data; this discards panel writes after the snapshot, preserves failed data, and does not restore stack volumes"),
+			"Preview it: "+launcher(o.dir)+" --rollback --restore-data --dry-run")
 	}
 	if _, err = d.image(ctx, op.Previous.ImageID); err != nil {
 		return fmt.Errorf("previous local image unavailable; no mutable tag will replace it: %w", err)
@@ -397,36 +414,49 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 			return err
 		}
 	}
-	e.message("Rollback to " + op.Previous.Version + " (" + op.Previous.ImageID + ").")
+	e.settle()
+	e.field("Action", "roll back "+op.Target.Version+" to "+op.Previous.Version+", image "+shortID(op.Previous.ImageID))
 	if o.restoreData {
-		e.message("Panel data will be restored; newer writes will remain in the preserved failed-data directory.")
+		e.field("Data", "restored from the copy made before the update")
+		e.note("What " + op.Target.Version + " wrote is kept in " + failedDataDir(op.Previous.DataDir, op.ID) + ".")
+		e.note("Stack volumes are not restored.")
 	}
 	if o.dryRun {
+		e.closing("Preview only: nothing was stopped, restored or started.",
+			"To apply it, run the same command with --yes instead of --dry-run.")
 		return nil
 	}
-	if err = approved(o.yes); err != nil {
+	if err = approved(o.yes, "Roll back to "+op.Previous.Version+"? The panel is unavailable while it restarts."); err != nil {
 		return err
 	}
+	e.section("Rolling back to " + op.Previous.Version)
 	op.RestoreData = o.restoreData
 	op.Phase = "rolling-back"
 	if err = e.writeJournal(state, op); err != nil {
 		return err
 	}
+	e.begin("stopping " + op.Target.Version)
 	if err = d.compose(ctx, op.Target.Config, "stop", "--timeout", "30", "dockge"); err != nil {
 		return err
 	}
+	e.ok(op.Target.Version + " stopped")
 	if o.restoreData {
+		e.begin("restoring the data copy")
 		if err = d.restoreSnapshot(ctx, op.Previous.ImageID, binary, op.Previous.DataDir, op.Backup, op.ID); err != nil {
 			return err
 		}
-		e.message("Preserved post-update data: " + failedDataDir(op.Previous.DataDir, op.ID))
+		e.ok("data restored; what " + op.Target.Version + " wrote is kept in " + failedDataDir(op.Previous.DataDir, op.ID))
 	}
+	e.begin("starting " + op.Previous.Version)
 	if err = d.up(ctx, op.Previous.Config); err != nil {
 		return err
 	}
+	e.ok(op.Previous.Version + " started")
+	e.begin("checking that " + op.Previous.Version + " stays healthy")
 	if err = d.verifyRuntime(ctx, op.Previous.ImageID, op.Previous.Version, op.Previous.Mode == "legacy"); err != nil {
 		return err
 	}
+	e.ok(op.Previous.Version + " is healthy")
 	if op.Previous.Mode == "legacy" {
 		if err = os.Remove(filepath.Join(state, "active.json")); err != nil && !os.IsNotExist(err) {
 			return err
@@ -441,7 +471,9 @@ func (e *engine) rollback(ctx context.Context, o options, state string) error {
 		return err
 	}
 	// Retain the recovery executable; it can install the next verified release.
-	e.message("Previous deployment restored and checked.")
+	e.section("Done")
+	e.note("Dockge2 " + op.Previous.Version + " is running again.")
+	e.field("Updates", launcher(o.dir)+" --dry-run")
 	return nil
 }
 
@@ -561,10 +593,12 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 		return errors.New("initial configuration was not written; mark preparation cancelled with --rollback, then repeat installation")
 	}
 	d := docker{run: e.run, dir: o.dir, project: op.Target.Project}
-	daemon, err := d.localDaemon(ctx)
+	daemon, err := e.dockerDaemon(ctx, d)
 	if err != nil {
 		return err
 	}
+	e.section("Resume")
+	e.begin("checking the recorded operation")
 	lock, err := lockProject(daemon, d.project)
 	if err != nil {
 		return err
@@ -604,13 +638,18 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 			return err
 		}
 	}
-	e.message("Retry recorded target " + op.Target.Version + " without restoring data.")
+	e.settle()
+	e.field("Action", "start the recorded "+op.Target.Version+" again, image "+shortID(op.Target.ImageID))
+	e.note("The data is not restored.")
 	if o.dryRun {
+		e.closing("Preview only: nothing was started.",
+			"To apply it, run the same command with --yes instead of --dry-run.")
 		return nil
 	}
-	if err = approved(o.yes); err != nil {
+	if err = approved(o.yes, "Start "+op.Target.Version+" again?"); err != nil {
 		return err
 	}
+	e.section("Starting " + op.Target.Version + " again")
 	if err = e.installLauncher(state, filepath.Join(op.Target.ReleaseDir, "dockge2-update-linux-"+runtime.GOARCH), o.verifier, o.dir, op.Target.Mode == "development"); err != nil {
 		return err
 	}
@@ -618,12 +657,16 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 	if err = e.writeJournal(state, op); err != nil {
 		return err
 	}
+	e.begin("starting " + op.Target.Version)
 	if err = d.up(ctx, op.Target.Config); err != nil {
 		return e.recoverFailure(o, state, op, d, err)
 	}
+	e.ok(op.Target.Version + " started")
+	e.begin("checking that " + op.Target.Version + " stays healthy")
 	if err = d.verifyRuntime(ctx, op.Target.ImageID, op.Target.Version, false); err != nil {
 		return e.recoverFailure(o, state, op, d, err)
 	}
+	e.ok(op.Target.Version + " is healthy")
 	if op.Previous != nil {
 		if err = writeJSON(filepath.Join(state, "previous.json"), op); err != nil {
 			return err
@@ -633,5 +676,10 @@ func (e *engine) resumeOperation(ctx context.Context, o options, state string) e
 		return err
 	}
 	op.Phase = "success"
-	return e.writeJournal(state, op)
+	if err = e.writeJournal(state, op); err != nil {
+		return err
+	}
+	e.section("Done")
+	e.note("Dockge2 " + op.Target.Version + " is running.")
+	return nil
 }

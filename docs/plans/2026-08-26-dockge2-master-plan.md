@@ -842,6 +842,10 @@ overview: open tasks".
 - [x] Readiness for the production test: a green e2e, the brand and addresses without upstream, a
   fixed tag, a clean image, the static cache, the README section on deployment; CI green, a fresh
   clone passes `npm run check`.
+- [ ] A fresh installation interrupted between writing `.env` and the first start cannot be
+  repeated without removing `.env` and `.dockge2` by hand; see the journal, 2026-09-27, "the
+  installer output in sections". Acceptance: repeating the same install command finishes it or
+  says exactly what to remove, and a regression test injects the interruption.
 - [ ] Backlog: operational acceptance - a small host, updating through failures on a real host,
   production deployment, Compose 5.5 on the host in the gate. Stated in "Operational acceptance".
 - [ ] Backlog: findings of the visual, motion and state audit of 2026-09-27. Stated in "Visual audit
@@ -2646,3 +2650,41 @@ entry above said the stable tag would differ from rc.4 in the version only; thes
 page alone - About, the overlay, the dialog position and two strings - and none of the server, the
 updater, the release files or the migrations, which is what rc.4 and its gate were for. The stable
 tag runs the whole release gate itself before `latest` moves off 0.0.13.
+
+### 2026-09-27: the installer output in sections
+
+A dry run on a fresh Debian host without Docker printed a single line, `Required command: docker`:
+`curl` and `sha256sum` had been checked silently, the loop stopped at the first missing command,
+and nothing said what to do. The owner asked for output that does not run together and for every
+prerequisite to be checked at the start. Of the layouts offered the owner chose sections with a
+status column (`ok`, `missing`, `failed`, `warning`) and the fix under the line, with colour in a
+terminal only.
+
+- **The bootstrap** (`install.sh`) checks the platform and the `curl`, `sha256sum` and `docker`
+  commands first and lists every unmet requirement at once, with a hint, before it downloads
+  anything. Its Updater section shows the Cosign checksum and the signature of the updater; a
+  failed download or verification shows the command's own words.
+- **Docker is still not run before the signature check**, as `test/install/run.sh` requires: the
+  bootstrap only looks for the command. The daemon, the Engine and Compose versions and the Compose
+  plugin are checked by the verified updater in its Docker section. The versions are compared with
+  the release minimums right after the release is verified, not after the plan.
+- **The updater** prints Docker, Release, Plan, the operation step by step, Recovery and Done. A
+  failure names the step that failed, its cause and a hint, and one closing line says where the
+  installation stands. Recovery prints the original failure once, then its own steps.
+- **A fresh installation** used to end with "Update succeeded" and no address. Done gives the
+  address, the command that shows the setup code (never the code itself) and the command for
+  updates.
+- **Colour** only when the stream is a terminal, `NO_COLOR` is unset and `TERM` is not `dumb`. A
+  running step is shown on a terminal and overwritten by its result. Problems go to stderr.
+- **The panel is not affected**: with `--progress json` the human text stays on stderr and stdout
+  carries JSON lines only; the error text of the result line is unchanged. `--status` keeps a plain
+  one-line error.
+
+It reaches installations with the next release: `install.sh` and the updater are release assets,
+and 0.0.14 still prints the old text after its bootstrap.
+
+Found on the way and not fixed: a fresh installation interrupted after `.env` is written and before
+the panel starts cannot be repeated. The installer refuses an existing `.env`, `--update` finds no
+installed state and looks for a vendor Compose file that is not there, and `--rollback` and
+`--resume` do not accept `failed-before-cutover` without a previous deployment. The only way out is
+to remove `.env` and `.dockge2` by hand. It is in the implementation plan.

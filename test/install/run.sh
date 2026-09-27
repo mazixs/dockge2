@@ -27,5 +27,5 @@ chmod +x "$work/bin/"*
 if EXECUTED="$work/executed" PATH="$work/bin:$PATH" bash install.sh --dir "$work/new" --version 1.2.3 --yes > "$work/error" 2>&1; then echo 'Bad verifier checksum accepted' >&2; exit 1; fi
 test ! -e "$work/executed"
 test ! -e "$work/new"
-grep -q 'Cosign checksum mismatch' "$work/error"
+grep -q 'does not match the pinned checksum' "$work/error"
 echo 'Bootstrap and shared updater checks passed.'
