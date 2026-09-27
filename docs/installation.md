@@ -227,12 +227,12 @@ own Compose project and keeps running.
    sudo docker compose -p dockge2 down
    ```
 
-4. Remove the images: first the recovery tags the updater keeps, then the panel images. A command
-   with nothing to remove reports an error and can be ignored:
+4. Remove the images: first the recovery tags the updater keeps, then the panel images. A fresh
+   installation has no recovery tags, and then the first command does nothing:
 
    ```bash
-   sudo docker image rm $(sudo docker image ls dockge2-recovery --format '{{.Repository}}:{{.Tag}}')
-   sudo docker image rm $(sudo docker image ls -q ghcr.io/mazixs/dockge2)
+   sudo docker image ls dockge2-recovery --format '{{.Repository}}:{{.Tag}}' | xargs -r sudo docker image rm
+   sudo docker image ls -q ghcr.io/mazixs/dockge2 | xargs -r sudo docker image rm
    ```
 
 5. Delete the installation directory. With the default layout it also holds the panel data. A data

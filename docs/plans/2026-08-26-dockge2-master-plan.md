@@ -2734,3 +2734,15 @@ printed `http://SERVER:5001` and the command that shows the setup code, not the 
   command is shown.
 
 Checked on local Docker with an isolated project: the printed address opened the panel.
+
+### 2026-09-27: release 0.0.15
+
+The owner asked for 0.0.15 straight after the installer work, without a release candidate: it
+changes the installer, the updater's text and the documentation, not the panel, the migrations or
+the `--progress json` contract that the web update reads. The owner removed the 0.0.14 test
+installation with the uninstall commands, and the recovery-image command failed with "requires at
+least 1 argument" on an installation that was never updated. Both image commands now go through
+`xargs -r`.
+
+Not in this release: an interrupted fresh installation still cannot be repeated without removing
+`.env` and `.dockge2` by hand, see the implementation plan.

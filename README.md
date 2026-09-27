@@ -132,8 +132,8 @@ Removing the panel leaves your stacks running and their files in place:
 ```bash
 sudo /opt/dockge2/.dockge2/update --status    # no update in progress
 sudo docker compose -p dockge2 down
-sudo docker image rm $(sudo docker image ls dockge2-recovery --format '{{.Repository}}:{{.Tag}}')
-sudo docker image rm $(sudo docker image ls -q ghcr.io/mazixs/dockge2)
+sudo docker image ls dockge2-recovery --format '{{.Repository}}:{{.Tag}}' | xargs -r sudo docker image rm
+sudo docker image ls -q ghcr.io/mazixs/dockge2 | xargs -r sudo docker image rm
 sudo rm -rf /opt/dockge2                      # also the accounts, settings and history
 ```
 
