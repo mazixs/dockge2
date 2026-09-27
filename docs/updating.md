@@ -151,7 +151,8 @@ back.
 
 The recovery tool is installed on the host, so it works even when the panel cannot start. A failed
 first installation has no previous deployment: keep its data and journal for diagnosis rather than
-deleting them. [Recovery in detail](self-updates.md#cutover-and-recovery).
+deleting them. If it was interrupted before the panel started, run the same install command again,
+with the same options: it keeps the `.env` it wrote and finishes. [Recovery in detail](self-updates.md#cutover-and-recovery).
 
 Snapshots and recovery images are never pruned automatically. Review disk use yourself, keep the
 set the latest journal refers to, and never run a global `docker image prune` as part of updating.

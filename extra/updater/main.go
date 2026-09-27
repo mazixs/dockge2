@@ -262,6 +262,9 @@ func (e *engine) execute(ctx context.Context, o options) error {
 	if o.rollback {
 		return e.rollback(ctx, o, state)
 	}
+	// interrupted is a first installation that wrote .env and stopped before the panel
+	// started: it is repeated with the same settings instead of refused as an existing one.
+	interrupted := false
 	if exists(filepath.Join(state, "operation.json")) {
 		data, readErr := readRegular(filepath.Join(state, "operation.json"), maxMetadata)
 		if readErr != nil {
@@ -276,11 +279,13 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		default:
 			return fmt.Errorf("operation %s is %s; inspect --status and use --resume or --rollback before another update", pending.ID, pending.Phase)
 		}
+		interrupted = !o.update && active == nil && pending.Phase == "failed-before-cutover" && pending.Previous == nil
 	}
-	if o.update && !exists(filepath.Join(o.dir, ".env")) {
+	envPath := filepath.Join(o.dir, ".env")
+	if o.update && !exists(envPath) {
 		return errors.New("existing installation .env is required; no defaults will replace it")
 	}
-	if !o.update && (active != nil || exists(filepath.Join(o.dir, ".env"))) {
+	if !o.update && (active != nil || exists(envPath) && !interrupted) {
 		return errors.New("installation already exists; use --update")
 	}
 	tmp, err := os.MkdirTemp("", "dockge2-candidate-")
@@ -310,6 +315,12 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		initial := fmt.Sprintf("DOCKGE_PORT=%d\nDOCKGE_DATA_DIR=%s\nDOCKGE_STACKS_DIR=%s\nDOCKGE_IMAGE=ghcr.io/mazixs/dockge2:latest\nDOCKGE_ENABLE_CONSOLE=false\n", o.port, o.dataDir, o.stacksDir)
 		if err = atomicWrite(env, []byte(initial), 0600); err != nil {
 			return err
+		}
+		if interrupted {
+			if left, readErr := readRegular(envPath, maxMetadata); readErr == nil && string(left) != initial {
+				return withHint(errors.New("an interrupted installation left "+envPath+" with other settings"),
+					"Repeat it with the same options, or remove "+envPath+" to install with these.")
+			}
 		}
 	}
 	d := docker{run: e.run, dir: o.dir, project: o.project}
@@ -699,13 +710,18 @@ func (e *engine) execute(ctx context.Context, o options) error {
 		if readErr != nil {
 			return fail(readErr)
 		}
-		if exists(filepath.Join(o.dir, ".env")) {
+		left, leftErr := readRegular(envPath, maxMetadata)
+		switch {
+		case leftErr == nil && interrupted && string(left) == string(initial):
+			e.ok("configuration of the interrupted installation kept in " + envPath)
+		case leftErr == nil || !os.IsNotExist(leftErr):
 			return fail(errors.New("configuration appeared during preparation"))
+		default:
+			if err = atomicWrite(envPath, initial, 0600); err != nil {
+				return fail(err)
+			}
+			e.ok("configuration written to " + envPath)
 		}
-		if err = atomicWrite(filepath.Join(o.dir, ".env"), initial, 0600); err != nil {
-			return fail(err)
-		}
-		e.ok("configuration written to " + filepath.Join(o.dir, ".env"))
 	}
 	if err = e.installLauncher(state, binary, o.verifier, o.dir, o.development); err != nil {
 		return fail(err)

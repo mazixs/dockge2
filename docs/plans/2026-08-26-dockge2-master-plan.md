@@ -842,10 +842,9 @@ overview: open tasks".
 - [x] Readiness for the production test: a green e2e, the brand and addresses without upstream, a
   fixed tag, a clean image, the static cache, the README section on deployment; CI green, a fresh
   clone passes `npm run check`.
-- [ ] A fresh installation interrupted between writing `.env` and the first start cannot be
-  repeated without removing `.env` and `.dockge2` by hand; see the journal, 2026-09-27, "the
-  installer output in sections". Acceptance: repeating the same install command finishes it or
-  says exactly what to remove, and a regression test injects the interruption.
+- [x] A fresh installation interrupted between writing `.env` and the first start is finished by
+  repeating the same install command; see the journal, 2026-09-27, "an interrupted first
+  installation".
 - [ ] Backlog: operational acceptance - a small host, updating through failures on a real host,
   production deployment, Compose 5.5 on the host in the gate. Stated in "Operational acceptance".
 - [ ] Backlog: findings of the visual, motion and state audit of 2026-09-27. Stated in "Visual audit
@@ -2780,3 +2779,23 @@ A Docker integration test pins the wording of Compose's error.
 Not changed: an env file created later on the stack page is used by the services through
 `env_file`. With a global env file present, it joins the variable substitution only when it is
 chosen among the stack's env files, as before: `--env-file` turns off Compose's own `.env`.
+
+### 2026-09-27: an interrupted first installation
+
+A first installation stopped after `.env` was written and before the panel started, for example by
+Ctrl+C at that moment, left `.env` and a journal in `failed-before-cutover` without a previous
+deployment. The installer refused the existing `.env`, and neither `--update`, `--resume` nor
+`--rollback` applied.
+
+- Repeating the install command now finishes it when the journal records exactly that: a failed
+  preparation without a previous deployment and no installed state. Any other `.env` is still an
+  existing installation.
+- The `.env` the interrupted run wrote is kept only when it is byte for byte what this run would
+  write. Other options (a port, a data or stack directory) are refused with the hint to repeat the
+  same options or remove `.env`: overwriting it would silently change a configuration the owner may
+  have edited meanwhile.
+- The other interrupted phases already had a way out: a journal left in `downloaded` resumes with
+  `--resume` once `.env` exists, and before that `--rollback` marks it failed so the install can be
+  repeated. A first start that failed stays `recovery-required` and resumes with `--resume`.
+
+`TestAnInterruptedFreshInstallationCanBeRepeated` sends the signal right after `.env` is written.

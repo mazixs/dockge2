@@ -139,6 +139,52 @@ func TestFreshInstallationSaysWhereToSignIn(t *testing.T) {
 	}
 }
 
+func TestAnInterruptedFreshInstallationCanBeRepeated(t *testing.T) {
+	w := newDeployment(t)
+	for _, p := range []string{filepath.Join(w.state, "active.json"), filepath.Join(w.dir, ".env"), filepath.Join(w.data, "dockge.db")} {
+		must(t, os.Remove(p))
+	}
+	w.containerID, w.running, w.port = "", false, "5001"
+	env := filepath.Join(w.dir, ".env")
+	install := func(ctx context.Context, extra ...string) (int, string) {
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"--dir", w.dir, "--verifier", w.verifier, "--release-dir", w.assets, "--version", "0.0.9", "--stacks-dir", filepath.Join(w.dir, "stacks"), "--yes"}, extra...)
+		code := cli(ctx, args, &stdout, &stderr, w.engine(nil))
+		return code, stdout.String() + stderr.String()
+	}
+
+	// A signal right after .env is written, while the panel has not started yet
+	ctx, cancel := context.WithCancel(context.Background())
+	w.runner.ignoreContext = true
+	w.hook = func(string, []string) {
+		if exists(env) {
+			cancel()
+		}
+	}
+	if code, out := install(ctx); code != 1 || !exists(env) || journal(t, w).Phase != "failed-before-cutover" {
+		t.Fatal(code, out)
+	}
+	w.runner.ignoreContext, w.hook = false, nil
+	written, err := os.ReadFile(env)
+	must(t, err)
+
+	// Other settings would silently lose the ones already written
+	if code, out := install(context.Background(), "--port", "5002"); code != 1 || !strings.Contains(out, "an interrupted installation left "+env+" with other settings") {
+		t.Fatal(code, out)
+	}
+	code, out := install(context.Background())
+	if code != 0 || !strings.Contains(out, "configuration of the interrupted installation kept in "+env) || !strings.Contains(out, "Dockge2 0.0.9 is running.") {
+		t.Fatal(code, out)
+	}
+	if kept, _ := os.ReadFile(env); string(kept) != string(written) {
+		t.Fatal("the configuration was rewritten")
+	}
+	// Once installed it is an installation again, not an interrupted one
+	if code, out := install(context.Background()); code != 1 || !strings.Contains(out, "installation already exists; use --update") {
+		t.Fatal(code, out)
+	}
+}
+
 func TestHostAddressesLeaveOutWhatIsNotReachable(t *testing.T) {
 	addresses := hostAddresses()
 	if len(addresses) > 3 {
