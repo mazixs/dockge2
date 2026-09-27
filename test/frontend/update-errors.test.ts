@@ -39,6 +39,27 @@ test("manual update checks retain server error categories and distinguish a lost
     assert.equal((lost as Record<string, unknown>).manualErrorKey, "updateCheckConnection");
 });
 
+test("a manual check that finds a newer release goes on to its dry run for an owner only", async () => {
+    const about = component("../../frontend/src/components/settings/About.vue", { BrandMark: {},
+        InterfaceIcon: {},
+        PanelContainerCard: {},
+        UPDATE_CHECK_MESSAGES });
+    const run = async (isAdmin : boolean, updateAvailable : boolean) => {
+        const calls : string[] = [];
+        const ctx = { $root: { isAdmin,
+            getSocket: () => ({ timeout: () => ({ emitWithAck: async () => ({ ok: true,
+                latestVersion: "9.9.9",
+                updateAvailable }) }) }),
+            panelUpdateInfo: (version : string, available : boolean) => calls.push(`info ${version} ${available}`),
+            panelUpdateCheck: () => calls.push("check") } };
+        await about.methods.checkNow!.call(ctx);
+        return calls;
+    };
+    assert.deepEqual(await run(true, true), [ "info 9.9.9 true", "check" ]);
+    assert.deepEqual(await run(false, true), [ "info 9.9.9 true" ]);
+    assert.deepEqual(await run(true, false), [ "info 9.9.9 false" ]);
+});
+
 test("parsed log errors cannot override the server acknowledgement or an unknown result", () => {
     const progress = component("../../frontend/src/components/StackProgress.vue", { Terminal: {},
         InterfaceIcon: {} });

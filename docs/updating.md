@@ -10,9 +10,10 @@ their containers are not restarted when the panel is.
 
 ## Update from the web interface
 
-1. Settings -> About -> **Prepare update to <version>**. The panel runs the updater's preview: the release is
-   verified, nothing is downloaded or changed. You see the current and target versions, the
-   configuration fields that change, and whether the database schema changes.
+1. Settings -> About -> **Check for updates**. When a newer release is found, the panel goes on to
+   the updater's preview by itself: the release is verified, nothing is downloaded or changed. You
+   see the current and target versions, the configuration fields that change, and whether the
+   database schema changes.
 2. **Update to <version>** and confirm with your password within ten minutes of the preview.
 3. The page stays open and follows the steps: download, stop, save data, start, verify. While the
    panel restarts the page loses its connection for a minute or two; your stacks keep running. Do

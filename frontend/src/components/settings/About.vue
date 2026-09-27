@@ -56,16 +56,10 @@
                 </div>
                 <p v-if="versionInfo.lastUpdateCheck" class="update-state">{{ $t("updateLastChecked") }}: {{ lastChecked }}</p>
 
-                <!-- The update of the panel itself: dry run, password, then the overlay of the layout -->
+                <!-- The update of the panel itself: dry run, password, then the overlay of the layout.
+                     The dry run follows the check above, so it has no button of its own -->
                 <div v-if="$root.isAdmin && panelNode" class="panel-update-flow">
-                    <template v-if="panelNode.name === 'idle'">
-                        <p v-if="idleNotice" class="update-notice" role="status">{{ $t(idleNotice) }}</p>
-                        <div v-if="panelNode.sub === 'available'" class="update-actions">
-                            <button class="btn btn-primary" type="button" :disabled="!panelOnline" @click="$root.panelUpdateCheck()">
-                                {{ $t("panelUpdatePreviewButton", { version: panelNode.version }) }}
-                            </button>
-                        </div>
-                    </template>
+                    <p v-if="panelNode.name === 'idle' && idleNotice" class="update-notice" role="status">{{ $t(idleNotice) }}</p>
 
                     <template v-else-if="panelNode.name === 'preview'">
                         <template v-if="panelNode.sub === 'checking'">
@@ -216,10 +210,9 @@ export default defineComponent({
         panelNode() : PanelUpdateNode | null {
             return this.$root.panelUpdate?.node ?? null;
         },
-        /** Once a release can be installed from here, installing it is the main action */
+        /** Once a release was checked for this installation, installing it is the main action */
         panelUpdateLeads() : boolean {
-            const node = this.panelNode;
-            return this.$root.isAdmin && (node?.name === "preview" || (node?.name === "idle" && node.sub === "available"));
+            return this.$root.isAdmin && this.panelNode?.name === "preview";
         },
         panelOnline() : boolean {
             return this.$root.panelUpdate?.ctx.link.kind === "online";
@@ -313,7 +306,7 @@ export default defineComponent({
         this.disposed = true;
     },
     methods: {
-        /** Run a single check without enabling the automatic schedule. */
+        /** Run a single check without enabling the automatic schedule, and the dry run of a newer release. */
         async checkNow() {
             this.checking = true;
             this.checkFailed = false;
@@ -330,6 +323,11 @@ export default defineComponent({
                         updateCheckFailed: false };
                     // With the notice switch off the info carries no release; this check found one
                     this.$root.panelUpdateInfo?.(result.latestVersion, result.updateAvailable === true);
+                    // An owner who asked about updates goes on to whether this one can be installed;
+                    // the dry run changes nothing, and the machine refuses it where it does not apply
+                    if (result.updateAvailable === true && this.$root.isAdmin) {
+                        this.$root.panelUpdateCheck();
+                    }
                 } else {
                     this.checkFailed = true;
                     this.manualErrorKey = result?.msg === "authPermissionDenied" || result?.msg === "notLoggedIn"

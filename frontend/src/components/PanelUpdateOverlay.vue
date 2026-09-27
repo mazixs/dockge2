@@ -18,17 +18,28 @@
             <h2 :id="titleId" class="panel-update-title">{{ title }}</h2>
             <p v-if="observer" class="panel-update-note">{{ $t("panelUpdateObserver") }}</p>
 
-            <ol v-if="steps.length" class="panel-update-steps">
-                <li v-for="step in steps" :key="step.key" :class="step.mark" :aria-current="step.mark === 'current' ? 'step' : undefined">
-                    <span class="step-mark" aria-hidden="true"><InterfaceIcon v-if="step.mark === 'done'" name="check" /></span>
-                    <span class="step-label">{{ $t(`panelUpdateStep.${step.key}`) }}</span>
-                    <span class="visually-hidden">{{ markText(step.mark) }}</span>
-                </li>
-            </ol>
+            <div v-if="steps.length" class="panel-update-progress">
+                <div v-if="running" class="progress-head">
+                    <p v-if="currentStep" class="progress-step">
+                        <span class="progress-count">{{ $t("panelUpdateStepCount", { step: currentStep.number, total: steps.length }) }}</span>
+                        <span class="progress-now">{{ $t(`panelUpdateStep.${currentStep.key}`) }}</span>
+                    </p>
+                    <p class="progress-clock">
+                        <span class="visually-hidden">{{ $t("panelUpdateElapsed", { time: elapsed }) }}</span>
+                        <span aria-hidden="true">{{ elapsed }}</span>
+                    </p>
+                </div>
+                <ol class="panel-update-steps" :style="{ '--steps': steps.length }">
+                    <li v-for="step in steps" :key="step.key" :class="[ step.mark, { 'is-rollback': step.key === 'rollback' } ]" :aria-current="step.mark === 'current' ? 'step' : undefined">
+                        <span class="step-bar" aria-hidden="true"></span>
+                        <span class="step-label">{{ $t(`panelUpdateStep.${step.key}`) }}</span>
+                        <span class="visually-hidden">{{ markText(step.mark) }}</span>
+                    </li>
+                </ol>
+            </div>
             <p v-if="stoppedAt" class="panel-update-note">{{ $t("panelUpdateStoppedAt", { step: stoppedAt }) }}</p>
 
             <p class="panel-update-line" role="status" aria-live="polite" aria-atomic="true">{{ lineText }}</p>
-            <p v-if="running" class="panel-update-note">{{ $t("panelUpdateElapsed", { time: elapsed }) }}</p>
             <p v-if="noticeKey" class="panel-update-warning">{{ $t(noticeKey) }}</p>
             <p v-if="stacksRun" class="panel-update-note">{{ $t("panelUpdateStacksRun") }}</p>
             <p v-if="offline" class="panel-update-warning">{{ $t("panelUpdateNoReload") }}</p>
@@ -69,7 +80,6 @@
 
 <script lang="ts">
 import { defineComponent } from "vue";
-import InterfaceIcon from "./InterfaceIcon.vue";
 import {
     PANEL_UPDATE_DIR_PLACEHOLDER,
     panelUpdateCanCancel,
@@ -99,7 +109,6 @@ const TONES : Record<PanelUpdateOutcomeKind, string> = {
 let instances = 0;
 
 export default defineComponent({
-    components: { InterfaceIcon },
     props: {
         /** "overlay" for the owner who follows the update, "banner" for everyone else */
         mode: { type: String,
@@ -154,6 +163,16 @@ export default defineComponent({
                 return panelUpdateSteps(node.sub === "updated" ? "success" : "recovered", true);
             }
             return [];
+        },
+        /**
+         * The step under way, numbered from one
+         * @returns Step and its number, or null when no step is current
+         */
+        currentStep() : { key : string; number : number } | null {
+            const index = this.steps.findIndex((step) => step.mark === "current");
+            const step = this.steps[index];
+            return step ? { key: step.key,
+                number: index + 1 } : null;
         },
         /** Where an update that did not finish stopped, when that is a known step */
         stoppedAt() : string {
@@ -403,21 +422,72 @@ export default defineComponent({
     color: var(--text-strong);
 }
 
-.panel-update-steps {
+.panel-update-progress {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--gap-sm) var(--gap-lg);
+    flex-direction: column;
+    gap: var(--gap-sm);
+}
+
+.progress-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--gap-md);
+}
+
+.progress-step {
+    display: flex;
+    flex-direction: column;
+}
+
+.progress-count {
+    font-size: var(--text-sm);
+    line-height: var(--line-sm);
+    color: var(--text-faint);
+}
+
+.progress-now {
+    font-size: var(--text-md);
+    line-height: var(--line-md);
+    font-weight: var(--weight-medium);
+    color: var(--text-strong);
+}
+
+.progress-clock {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: var(--line-md);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+
+// One segment per step: done ones green, the current one sweeping, the rest a track.
+// A rollback is not a success, so its segment keeps the attention colour once it is done too
+.panel-update-steps {
+    display: grid;
+    grid-template-columns: repeat(var(--steps), minmax(0, 1fr));
+    gap: var(--gap-xs);
     margin: 0;
     padding: 0;
     list-style: none;
 
     li {
+        --mark: var(--accent-text);
+
+        position: relative;
         display: flex;
-        align-items: center;
-        gap: var(--gap-xs);
+        flex-direction: column;
+        gap: var(--gap-sm);
+        min-width: 0;
         font-size: var(--text-sm);
         line-height: var(--line-sm);
         color: var(--text-faint);
+        overflow-wrap: break-word;
+    }
+
+    .is-rollback {
+        --mark: var(--state-attention);
     }
 
     .done {
@@ -426,39 +496,54 @@ export default defineComponent({
 
     .current {
         color: var(--text-strong);
-        font-weight: var(--weight-strong);
+        font-weight: var(--weight-medium);
     }
 }
 
-.step-mark {
-    display: grid;
-    place-items: center;
-    width: var(--icon-md);
-    height: var(--icon-md);
-    border: 1px solid currentColor;
-    border-radius: 50%;
-    font-size: var(--text-xs);
+.step-bar {
+    position: relative;
+    height: 6px;
+    overflow: hidden;
+    border-radius: var(--radius-pill);
+    background-color: var(--line-hair);
 
     .done & {
-        border-color: var(--state-running);
-        color: var(--state-running);
+        background-color: var(--state-running);
+    }
+
+    .done.is-rollback & {
+        background-color: var(--mark);
     }
 
     .current & {
-        border-color: var(--accent-text);
-        background-color: var(--accent-soft);
+        background-color: color-mix(in srgb, var(--mark) 22%, transparent);
+    }
+
+    // Without motion the current segment is half filled, so the state still shows by its shape
+    .current &::after {
+        content: "";
+        position: absolute;
+        inset: 0 50% 0 0;
+        border-radius: inherit;
+        background-color: var(--mark);
     }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-    .current .step-mark {
-        animation: step-pulse var(--motion-slow) var(--motion-ease) infinite alternate;
+    .current .step-bar::after {
+        inset: 0 auto 0 0;
+        width: 45%;
+        animation: step-sweep 1.3s var(--motion-ease) infinite;
     }
 }
 
-@keyframes step-pulse {
+@keyframes step-sweep {
+    from {
+        transform: translateX(-100%);
+    }
+
     to {
-        background-color: transparent;
+        transform: translateX(230%);
     }
 }
 
@@ -544,6 +629,17 @@ export default defineComponent({
     .panel-update-layer {
         padding: var(--gap-md);
         place-items: start center;
+    }
+
+    // Six labels do not fit a narrow card: the head names the current step, and a screen
+    // reader still reads the label of every segment
+    .step-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
     }
 
     .panel-update {

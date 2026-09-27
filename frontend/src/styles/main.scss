@@ -425,6 +425,16 @@ body * {
     box-shadow: var(--shadow-panel);
 }
 
+// Окно стоит посередине экрана, как окно обновления панели. На телефоне оно
+// остается наверху: экранная клавиатура закрыла бы поле пароля в середине
+@media (min-width: 576px) {
+    .modal-dialog {
+        display: flex;
+        align-items: center;
+        min-height: calc(100% - var(--bs-modal-margin) * 2);
+    }
+}
+
 // Имя окна звучит так же, как имя панели: один голос на всю систему
 .modal-title {
     margin: 0;

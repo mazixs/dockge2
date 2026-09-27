@@ -281,6 +281,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - **Малый хост.** Выделенный VPS 1 vCPU / 1 GiB: установка и обновление опубликованного образа, 30 минут скрининга, затем 24 часа soak, три удаленных агента, настоящая приостановка скрытой вкладки ОС, backpressure журналов при нескольких зрителях, пиковый RSS при параллельных Git-превью у лимита, снимки retaining path в браузере. Локально пройден только 30-минутный экран под `MemoryMax=1G` (147-187 MiB в простое, пик 261 MiB). Длительность soak зашита в `extra/performance-audit.ts` (30 минут), для 24 часов нужен параметр.
 - **Обновление на настоящем хосте.** Обрыв питания или SIGKILL и заполнение диска во время cutover; перезагрузка хоста после успешного и неудачного обновления - сохраняются ли идентичность установки и статус восстановления. Инъекции в `extra/updater/engine_test.go` проверяют решения журнала, но не долговечность файловой системы, Docker и SQLite. Гейт релиза гоняет arm64 только под QEMU.
 - **Production deployment.** Bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy, откат образа - на выделенном хосте, а не на стенде.
+- **Compose хоста в гейте (2026-09-27).** Раннер GitHub `ubuntu-24.04` (образ 20260920.314.1) несет Docker Compose 2.38.2, а образ панели, review VPS и машина разработки - 5.5.1. Поэтому гейт релиза проверяет только смешанный случай: хост на 2.38, helper веб-обновления на 5.5. Именно на 2.38 CI и гейт поймали `memswap_limit` и `create_host_path`. Хост на 5.5, как при установке из репозитория Docker, в гейте не проходит ни разу, его видят только локальные прогоны и VPS. Нижняя граница `minCompose` 2.20.0 не проверяется вовсе. Предложение: второй проход `docker.sh`, `managed.sh` и `unmanaged.sh` с плагином 5.5.1, закрепленным по sha256 в `$DOCKER_CONFIG/cli-plugins`; 2.38 оставить как старый хост. Цена - более долгий гейт. Не делать до решения владельца.
 
 ### Техдолг из ревью и аудитов (закрыт 2026-09-26)
 
@@ -314,7 +315,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [x] Консоль, статусы, Compose-файлы и Git-деплой: вставка в терминал, отдельная shell-сессия `sh`/`bash`, статус `ATTENTION` с worker/init-правилами, основной Compose-файл, env-файлы, `.secret` и Compose secrets, сохранение исходного YAML с явным `-f` и `config --quiet`, браузерные и Docker-тесты в CI.
 - [x] UX baseline, блокирующая ошибка Vue I18n, выбор направления "Знакомый Dockge".
 - [x] Контракт общего обзора, dashboard без выбранного агента, история доступности и стабильности с retention 30 дней.
-- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14-rc.4`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
+- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
 - [x] Масштабируемый список и связи сервисов: поиск по образу и серверу, `?q=` в адресе, постраничный вывод, связи только для чтения. Массовые действия не согласованы и остаются в пункте 1.
 - [x] Контейнеры вне `stacksDir`: классификация по меткам, standalone-контейнеры в списке, страница контейнера, управление по настройке владельца. Пункт 2.
 - [x] Собственный контейнер панели: опознание по ID, запрет down/delete/recreate, карточка в "О программе". Пункт 3.
@@ -325,7 +326,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 - [x] Строгий TypeScript во Vue SFC: все компоненты со скриптом на `lang="ts"`, `vue-tsc` со `strictTemplates` в `npm run check`, возврат к JavaScript ловит `test/frontend/sfc-type-check.test.ts`.
 - [x] Миграция vue-i18n с Legacy API mode на Composition API mode.
 - [x] Готовность к прод-тесту: зеленый e2e, бренд и адреса без upstream, фиксация тега, чистый образ, кэш статики, раздел README о развертывании; CI зеленый, свежий клон проходит `npm run check`.
-- [ ] Бэклог: эксплуатационная приемка - малый хост, обновление при сбоях на настоящем хосте, production deployment. Постановка в разделе "Эксплуатационная приемка".
+- [ ] Бэклог: эксплуатационная приемка - малый хост, обновление при сбоях на настоящем хосте, production deployment, Compose 5.5 на хосте в гейте. Постановка в разделе "Эксплуатационная приемка".
 - [x] Техдолг из ревью и аудитов 2026-09-19 и 2026-09-20 закрыт в 0.0.14, см. журнал 2026-09-26.
 - [ ] Бэклог: языки интерфейса - доперевод девяти каталогов с 14-17%, заведение хинди и бенгальского, отдельно RTL для арабского и урду. Постановка в разделе "Языки интерфейса"; не начинать до ответа на вопрос о том, кто переводит.
 - [ ] Бэклог: остаток документации на английский - `docs/design-system.md` и комментарии в коде. Низкий приоритет, частичный русский признан приемлемым.
@@ -1930,3 +1931,28 @@ fresh data directory starts without one either. The local checks ran on Node 24.
 11.19, as CI does. That npm warns about install scripts not listed in `allowScripts`
 (better-sqlite3, node-pty, esbuild, vue-demi, @parcel/watcher) but still runs them, and the native
 modules load from their prebuilds either way.
+
+## 2026-09-27: feedback on rc.4 from About
+
+The owner tried rc.4 on the review VPS and asked for four changes before the stable tag.
+
+- **One button for the check.** After **Check for updates** found a release, About showed a second
+  button, "Prepare update to X", that only started the dry run. The owner read it as a step the
+  panel could take by itself. The dry run now follows the check that found a newer release, and has
+  no button of its own; an expired or closed check is repeated with the same button. Opening About
+  does not start a dry run: each one runs a helper container and verifies the release over the
+  network, and a visit is not a request.
+- **The schema warning** says what happens in the owner's words: the version changes the data in
+  the database, a backup is made before the update, and a rollback restores it.
+- **Dialogs stand in the middle of the screen**, like the update overlay; the password dialog sat at
+  the top. On a phone they stay at the top, so the on-screen keyboard does not cover the field.
+- **The step list of the overlay** is a segmented bar, chosen by the owner from four mockups
+  (vertical timeline, stepper with a line, segmented bar, pills). Above it stand the number and name
+  of the current step and the elapsed time; below it the names of the steps, which a narrow screen
+  leaves to the screen reader. A rollback segment keeps the attention colour.
+
+0.0.14 goes out as the stable tag with these changes, without an rc.5: the owner's decision. The
+entry above said the stable tag would differ from rc.4 in the version only; these changes touch the
+page alone - About, the overlay, the dialog position and two strings - and none of the server, the
+updater, the release files or the migrations, which is what rc.4 and its gate were for. The stable
+tag runs the whole release gate itself before `latest` moves off 0.0.13.

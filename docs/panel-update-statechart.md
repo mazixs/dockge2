@@ -356,6 +356,9 @@ Refinements made while implementing and after the review (`frontend/src/panel-up
   online without news it asks for the status as a probe and marks itself `quiet`, which About shows
   as "taking longer than usual". An answer without the helper is row 8; an unreadable answer keeps
   it checking until the next deadline. News of the running check and `LINK_UP` move the deadline.
+- `CHECK` has no button of its own. About sends it when the owner's **Check for updates** finds a
+  newer release, so the owner asks once and sees whether that release can be installed here. An
+  expired or closed check is repeated the same way. Opening About does not start a dry run.
 
 ### Deadlines of the Link region
 
@@ -371,8 +374,10 @@ Refinements made while implementing and after the review (`frontend/src/panel-up
 
 ### What the screen shows
 
-A step list - Check, Download, Stop, Save data, Start, Verify - with done, current and pending marks,
-the elapsed time and one line for the current state. `Cancel` in `Preparing.Starting` and
+A bar of one segment per step - Check, Download, Stop, Save data, Start, Verify, or Roll back after
+Save data - with done, current and pending segments and the name of each below it (on a narrow
+screen only for a screen reader). While the update runs, the number and name of the current step
+and the elapsed time stand above the bar, and one line below it says what is happening. `Cancel` in `Preparing.Starting` and
 `Preparing.Downloading`, nothing in `Cutover` and `Verifying`, `Close` in every outcome, `Reload` if
 the automatic reload stalls. Every outcome except `Updated` names the reason and, for
 `RecoveryRequired` and `Unknown`, the host commands with `sudo` and the real `<dir>`. The overlay
