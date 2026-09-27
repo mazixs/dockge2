@@ -1,1481 +1,2171 @@
-# Dockge2 Master Implementation Plan
+# Dockge2 master plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox ( - [ ] ) syntax for tracking.
 
-**Goal:** Собрать в одном живом плане все требования пользователя, согласованные решения и этапы развития dockge2: обновление стека, безопасность, автотесты, CI/CD, интеграция полезных upstream-исправлений и безопасное обновление Docker-развёртывания.
+**Goal:** Keep in one living plan all of the owner's requirements, the agreed decisions and the
+stages of dockge2's development: updating the technology stack, security, automated tests, CI/CD,
+integrating useful upstream fixes and updating the Docker deployment safely.
 
-**Architecture:** Сохранить Vue 3 + Vite на фронтенде и Express + Socket.IO + SQLite/Knex на бэкенде, заменяя только подтверждённо устаревшие или лишние компоненты. Исправления для Stack, Compose, YAML и обновления контейнера держать отдельными небольшими задачами с реальными тестами. Авторизацию людей мигрировать на Better Auth отдельно от registry-секретов, Docker socket и машинной аутентификации агентов.
+**Architecture:** Keep Vue 3 + Vite on the frontend and Express + Socket.IO + SQLite/Knex on the
+backend, replacing only components that are confirmed to be outdated or unnecessary. Keep fixes to
+Stack, Compose, YAML and the container update as separate small tasks with real tests. Human
+authentication runs on Better Auth (migrated on 2026-08-27), separately from registry secrets, the
+Docker socket and the machine authentication of agents.
 
-**Tech Stack:** Node.js 24.19.0 LTS как основной runtime; совместимость с Node.js 22.23.2 LTS; TypeScript strict; Vue 3; Vite; Express; Socket.IO; Knex; better-sqlite3; YAML; Node test runner; c8; Docker Compose; GitHub Actions.
+**Tech Stack:** Node.js 24.21.0 LTS as the main runtime (pinned in `.nvmrc`), Node.js 22.23.2 LTS
+also supported (`engines` in `package.json`); TypeScript, strict; Vue 3; Vite; Express; Socket.IO;
+Knex; better-sqlite3; Better Auth; YAML; the Node test runner; c8; Playwright; Go for the updater
+(`extra/updater/`); Docker Compose; GitHub Actions.
 
-**Spec:** Этот файл является главным журналом требований и решений и единственным трекером. Все новые требования пользователя и все принятые совместные решения добавляются сюда до начала соответствующей реализации.
+**Spec:** This file is the main journal of requirements and decisions and the only tracker. Every
+new requirement of the owner and every decision taken together is added here before the work on it
+starts.
 
-**Удаленные планы.** Подчиненные планы, аудиты и ревью, на которые ссылаются записи журнала ниже, удалены из дерева 2026-09-26: их открытые пункты перенесены в разделы "(бэклог, ...)" и чеклист, правила - в `docs/*.md`, остальное - история. Найти удаленный файл: `git log --diff-filter=D --name-only -- docs/plans docs/design`, прочитать: `git show <коммит>^:<путь>`. В дереве остается только декомпозиция незавершенной работы; завершенный план сворачивается сюда и удаляется.
+## How this file is kept
 
-## Global Constraints
+Every new requirement of the owner or decision taken together is added to this file before it is
+implemented. Each entry records the date, the requirement or decision as worded, the reason, the
+tasks and files it touches, and its current status. A finished item is ticked only after the checks
+its task lists.
 
-- Поддерживаемые версии Node.js: 22.23.2 и 24.19.0; при отсутствии несовместимости выбирать 24.19.0.
-- TypeScript должен строго проверять весь TypeScript-код; оставшиеся JavaScript-блоки Vue SFC постепенно перевести в lang="ts" или явно исключить только документированным техническим обоснованием.
-- Покрытие автотестами должно быть выше 60%; текущий целевой порог c8 — 70% для lines, statements, functions и branches.
-- В автотестах запрещены заглушки, которые обходят или ломают проверяемую логику. Использовать реальную файловую систему, реальный process.execPath, реальные Docker Compose-интеграции и чистые функции для детерминированной логики.
-- ESLint должен использовать корректную flat-конфигурацию и проверять TypeScript/Vue без legacy-конфигурации.
-- CI/CD должен проверять lint, TypeScript, тесты с покрытием, сборку фронтенда и high-level dependency audit на Node.js 22.23.2 и 24.19.0.
-- Скрипты package.json должны быть минимальными, понятными и реально используемыми; мёртвые и дублирующие команды удалить.
-- Не добавлять новую библиотеку, если задачу надёжно решает встроенный API Node.js или уже используемая зависимость.
-- Обратная совместимость со старыми данными не требуется: ни одна версия форка не выпущена, установок нет. Ломающие изменения схемы допустимы и предпочтительны, если убирают legacy-путь. Причина, зафиксированная пользователем 2026-08-27: уязвимости чаще всего переезжают в новую версию именно через миграции и сохранение старых данных. Совместимость сохраняем только там, где она достаётся дешево.
-- Не менять структуру Stack и формат файлов на диске без причины: файлы стеков принадлежат пользователю, в отличие от внутренней схемы базы.
-- Не выполнять опасные операции автоматически: git reset --hard, git clean -fdx, docker compose down -v, docker volume prune.
-- Не добавлять удалённый Socket.IO-метод, который даёт браузеру произвольный запуск Git, shell или Docker.
-- Проверки вставки в терминал выполнять настоящим браузером и настоящей Clipboard API; не подменять clipboard, xterm, Socket.IO или Docker только для получения зелёного теста.
-- Содержимое Compose-файла из Git является источником истины: загрузка, проверка и деплой не должны без явного редактирования сериализовать YAML заново.
-- Имена Compose-, env- и secret-файлов принимать только как безопасные относительные имена внутри каталога стека; абсолютные пути, `..`, обратный обход каталога и симлинки отклонять.
-- Секреты не включать в общий Stack JSON, журналы, сообщения об ошибках и ответы списка стеков; доступ к содержимому должен быть отдельным явно авторизованным действием.
-- Изменения выполняются в нашей ветке dockge2; мы не принимаем решения за владельцев основного репозитория Dockge.
-- Для IC использовать формулу `Impact × Confidence`, обе оценки по шкале 1–5; трудоёмкость и риск указывать отдельно.
-- Новые UX/dashboard-возможности считать P2/P3 и не ставить выше исправлений безопасности, статусов, Compose/YAML, TypeScript и покрытия.
-- Глобальный inventory контейнеров и право управления контейнерами вне управляемых Compose-стеков должны быть независимыми настройками/capabilities; безопасный default — managed-only control.
-- Процент доступности показывать только с временным окном, числом наблюдений и явным количеством `UNKNOWN`; отсутствие истории не считать 100%.
-- Основная ветка форка называется `main`; `master` считается устаревшим именем и на удалённом репозитории заменяется после согласования.
-- Нумерация версий форка своя, по SemVer; формы `2`, `2.1` и `2.0.1.1` не использовать как release version.
-  Решение от 19.09.2026: первая публикация выходит под `0.0.1`, чтобы обкатать выпуск образа на живом сервере,
-  а не тратить на проверку релизного конвейера номер стабильной версии. Прежнее решение о `2.0.0` как о первой
-  публичной версии отменено; `2.0.0` остается за первым выпуском, который объявляется стабильным.
-  Номер релиза не годится для проверки совместимости агентов - для нее есть `AGENT_PROTOCOL_VERSION`
-  в `common/agent-socket.ts`, потому что `0.0.1` этого форка новее, чем `1.4.0` upstream.
-- Публичное имя `Dockge 2` не должно автоматически переименовывать технические `dockge`, `DOCKGE_*`, API-события и upstream image без compatibility map и проверки собственного registry.
+**Deleted plans.** The subordinate plans, audits and reviews that the journal entries below refer
+to were deleted from the tree on 2026-09-26: their open items moved to the "(backlog, ...)" sections
+and the checklist, their rules to `docs/*.md`, and the rest is history. To find a deleted file:
+`git log --diff-filter=D --name-only -- docs/plans docs/design`; to read it:
+`git show <commit>^:<path>`. The tree keeps only the decomposition of unfinished work; a finished
+plan is folded in here and deleted.
 
-## Зафиксированные требования пользователя
+The file is kept in English. The entries up to 2026-09-21 were written in Russian; on 2026-09-27
+the file was translated and the journal condensed to its decisions. The original wording is in the
+history of this file.
 
-### Качество и зависимости
+## Global constraints
 
-- Провести code review проекта.
-- Обновить библиотеки стека.
-- Заменить мёртвые библиотеки поддерживаемыми аналогами или встроенными API.
-- Проверить, что выбранные библиотеки оптимальны для текущей архитектуры, а не добавлять зависимости ради формального исправления.
-- Перевести проект с non-LTS Node.js на LTS: при совместимости использовать 24.19.0, иначе 22.23.2.
-- Настроить строгую проверку TypeScript.
-- Проверить и исправить ESLint.
-- Удалить избыточные и неиспользуемые scripts из package.json.
-- Обновить CI/CD на актуальные версии actions и поддерживаемые Node.js.
+- Supported Node.js versions: 22.23.2 and 24.21.0; where nothing is incompatible, choose 24.21.0.
+  `.nvmrc` pins 24.21.0 and `engines` in `package.json` reads `22.23.2 || 24.21.0` (Node 24.21.0
+  since the journal entry of 2026-09-26, "dependencies brought up to what the release age allows";
+  24.19.0 before).
+- TypeScript checks all TypeScript code strictly (`strict`, `noUncheckedIndexedAccess`,
+  `exactOptionalPropertyTypes` in `tsconfig.json`). The JavaScript blocks left in Vue SFCs were to
+  move to `lang="ts"` or be excluded only with a documented technical reason. Done on 2026-09-26
+  (journal, "technical debt from the reviews and audits, closed for 0.0.14"): every component with a
+  script is `lang="ts"` and passes `vue-tsc` with `strictTemplates` (`npm run check-vue`), and
+  `test/frontend/sfc-type-check.test.ts` keeps a new one from coming back as JavaScript.
+- Automated test coverage must be above 60%; the c8 floor is 70% for lines, statements, functions
+  and branches (`.c8rc.json`). On top of it `extra/check-coverage.ts` holds line floors per
+  subsystem (see "Current state"). A floor is not lowered to make a run pass.
+- Automated tests must not use stubs that bypass or break the logic under test. Use the real file
+  system, the real `process.execPath`, real Docker Compose integrations and pure functions for
+  deterministic logic.
+- ESLint uses a correct flat configuration (`eslint.config.js`) and checks TypeScript and Vue
+  without a legacy configuration.
+- CI/CD must check lint, TypeScript, tests with coverage, the frontend build and a high-level
+  dependency audit on Node.js 22.23.2 and 24.21.0. As it runs on 2026-09-27 (`ci.yml`): tests with
+  coverage and floors and the frontend build run on both versions; lint, `check-ts`, `check-vue`,
+  shellcheck, the bundle budget and `test:install` run once, on 24.21.0. No workflow runs a
+  dependency audit; supply is guarded by `min-release-age=7` in `.npmrc` and Dependabot cooldowns
+  (journal, 2026-09-26, "technical debt from the reviews and audits, closed for 0.0.14"). No entry
+  dropped the audit, so this part of the rule is open.
+- `package.json` scripts must be minimal, understandable and actually used; dead and duplicate
+  commands are removed.
+- Do not add a new library when a built-in Node.js API or a dependency already in use solves the
+  task reliably.
+- Backward compatibility with old data. On 2026-08-27 the owner lifted it: no version of the fork
+  had been released and there were no installations, so breaking schema changes were allowed, and
+  preferred when they removed a legacy path; compatibility was kept only where it came cheap. The
+  owner's reason: vulnerabilities most often move into a new version through migrations and kept
+  old data. The premise no longer holds: releases 0.0.1 to 0.0.14 are published (the first on
+  2026-09-19) and installations exist. Existing data is now carried forward. Schema changes are Knex
+  migrations in `backend/migrations/` that run on the database of an earlier release, for example
+  `2026-09-26-1200-account-issuer` (journal, 2026-09-26, "dependencies brought up to what the
+  release age allows"), and the installer imports installations from 0.0.7, 0.0.8 and 0.0.10
+  (`docs/updating.md`, "Upgrading an older installation"; `docs/self-updates.md`, "Legacy import").
+  Panel data is not downgraded: an older panel refuses a database with a migration it does not
+  know, and a rollback restores the data snapshot. No journal entry restates the rule after the
+  first release; this item records the practice.
+- Do not change the structure of a Stack or the format of its files on disk without a reason: the
+  stack files belong to the user, unlike the internal database schema.
+- Never run dangerous operations automatically: `git reset --hard`, `git clean -fdx`,
+  `docker compose down -v`, `docker volume prune`.
+- Do not add a remote Socket.IO method that lets the browser run arbitrary Git, shell or Docker
+  commands.
+- Check paste into the terminal with a real browser and the real Clipboard API; do not replace the
+  clipboard, xterm, Socket.IO or Docker only to get a green test.
+- The content of a Compose file from Git is the source of truth: loading, validation and deployment
+  must not serialise the YAML again without an explicit edit.
+- Accept Compose, env and secret file names only as safe relative names inside the stack directory;
+  reject absolute paths, `..`, walking out of the directory and symlinks.
+- Keep secrets out of the common Stack JSON, logs, error messages and stack list responses; reading
+  their content is a separate, explicitly authorised action.
+- Changes are made in this fork, dockge2; we make no decisions for the owners of the original
+  Dockge repository.
+- For IC use the formula `Impact × Confidence`, both on a scale of 1-5; state effort and risk
+  separately.
+- New UX and dashboard features count as P2/P3 and do not rank above fixes to security, statuses,
+  Compose/YAML, TypeScript and coverage.
+- The global inventory of containers and the right to control containers outside managed Compose
+  stacks were to be independent settings or capabilities, with managed-only control as the safe
+  default. Changed on 2026-09-26 (journal, "list, containers outside the stacks, the panel's own
+  stack"): the inventory is not a setting - external projects and standalone containers are always
+  shown, since seeing them adds no capability (no actions, no files, no environment); control stays
+  separate as the owner setting `containerControl`, per server, off by default and turned on with the
+  password. Delete, kill and exec on such containers wait for their own access model.
+- Show an availability percentage only with its time window, the number of observations and an
+  explicit count of `UNKNOWN`; missing history is not 100%.
+- The fork's main branch is `main`; `master` was the outdated name, to be replaced on the remote
+  after agreement. Done on 2026-09-16: the default branch on GitHub is `main`, and `main` is the only
+  branch of the remote.
+- The fork has its own version numbering, by SemVer; the forms `2`, `2.1` and `2.0.1.1` are not used
+  as a release version. Decision of 2026-09-19: the first publication goes out as `0.0.1`, to try the
+  image release on a live server rather than spend the number of the stable version on testing the
+  release pipeline. The earlier decision that `2.0.0` is the first public version is cancelled;
+  `2.0.0` stays reserved for the first release declared stable. A release candidate is
+  `X.Y.Z-rc.N`, and a candidate that fails the release gate keeps its number unused rather than the
+  pushed tag being moved (journal, 2026-09-26, "0.0.14 goes out as a release candidate first"). The
+  release number does not decide agent compatibility; that is `AGENT_PROTOCOL_VERSION` in
+  `common/agent-socket.ts`, because `0.0.1` of this fork is newer than `1.4.0` upstream.
+- The public name must not automatically rename the technical `dockge`, `DOCKGE_*`, API events and
+  the upstream image without a compatibility map and a check of the project's own registry. The
+  name is now written "Dockge2" (`README.md`, `AGENTS.md`); the registry is `ghcr.io/mazixs/dockge2`,
+  and the `DOCKGE_*` variables and the event names are unchanged.
 
-### Автотесты
+## Requirements
 
-- Добавить автотесты с покрытием выше 60%.
-- Тестами должны проверяться реальные результаты, а не только вызовы функций.
-- Для path traversal и .env использовать настоящие временные каталоги и файлы.
-- Для Docker-поведения добавить отдельную интеграционную проверку с настоящим Docker Compose.
-- Ошибки и неизвестные состояния проверять fail-closed, а не переводить в успешный статус.
+### Quality and dependencies
+
+- Carry out a code review of the project.
+- Update the libraries of the stack.
+- Replace dead libraries with maintained equivalents or built-in APIs.
+- Check that the chosen libraries fit the current architecture, rather than adding dependencies for
+  a formal fix.
+- Move the project from a non-LTS Node.js to an LTS one: use 24 when compatible (now 24.21.0),
+  otherwise 22.23.2.
+- Set up strict TypeScript checking.
+- Check and fix ESLint.
+- Remove redundant and unused scripts from `package.json`.
+- Update CI/CD to current versions of the actions and supported Node.js versions.
+
+### Automated tests
+
+- Add automated tests with coverage above 60%.
+- Tests check real results, not only that functions were called.
+- Use real temporary directories and files for path traversal and `.env`.
+- Add a separate integration check with a real Docker Compose for Docker behaviour.
+- Check errors and unknown states fail closed, rather than turning them into a successful status.
 
 ### Upstream Dockge
 
-Полезные PR интегрируются в нашу ветку, даже если их ещё не приняли в upstream:
+Useful pull requests are integrated into our fork even if upstream has not accepted them yet:
 
-- PR #997 для issue #994: закрыть чтение .env/Compose и удаление каталогов через path traversal. Интегрировать с общим безопасным путём, проверкой symlink и реальными тестами; upstream-тест с подменой Terminal.exec не копировать.
-- PR #979 для issue #964: сохранять .env при добавлении и изменении Stack, очищать существующий файл при удалении содержимого и не создавать новый пустой .env без необходимости.
-- PR #950 для issue #806: считать Stack работающим при running плюс clean-exit init-контейнеры. Адаптировать под backend/child-process.ts, добавить timeout и ограничение вывода; не переносить promisify-child-process.
-- PR #991 для issue #990: сохранять tmpfs.mode: 01777 и не менять смысл YAML-скаляров yes/no/on/off. Использовать текущую библиотеку yaml и round-trip-тесты.
+- PR #997 for issue #994: close reading `.env`/Compose and deleting directories through path
+  traversal. Integrate it with a common safe path, a symlink check and real tests; do not copy the
+  upstream test that replaces `Terminal.exec`.
+- PR #979 for issue #964: keep `.env` when a Stack is added or changed, empty an existing file when
+  its content is removed, and do not create a new empty `.env` without need.
+- PR #950 for issue #806: count a Stack as running when its services run and its init containers
+  exited cleanly. Adapt it to `backend/child-process.ts`, add a timeout and an output limit; do not
+  bring in `promisify-child-process`. Replaced on 2026-08-26 (the journal entry on `ATTENTION`
+  statuses): one-shot is never guessed. An unmarked `exited(0)` next to a running service gives
+  `ATTENTION` with a reason; only a service marked one-shot may exit cleanly (`docs/faq.md`).
+- PR #991 for issue #990: keep `tmpfs.mode: 01777` and do not change the meaning of the YAML scalars
+  `yes`/`no`/`on`/`off`. Use the current `yaml` library and round-trip tests.
 
-Подробные задачи и критерии готовности зафиксированы в docs/plans/2026-08-26-upstream-dockge-fixes.md.
+The detailed tasks and acceptance criteria were in `docs/plans/2026-08-26-upstream-dockge-fixes.md`,
+deleted on 2026-09-26 (see "How this file is kept"). All four are done (see the checklist below).
 
-### Консоль контейнера и выбор оболочки
+### Container console and the choice of shell
 
-- В контейнерной консоли должны работать `Ctrl+V`, `Ctrl+Shift+V`, `Cmd+V` на macOS, а также явное действие "Вставить" в контекстном меню правой кнопки мыши.
-- Вставка должна использовать реальную Clipboard API с обработкой отказа в разрешении и резервным `paste`-событием скрытого поля xterm; не использовать ненадёжный `document.execCommand("paste")`.
-- Вставка в интерактивную консоль должна отправлять точный текст в PTY и не терять пробелы, переводы строк или специальные символы. Основная ограниченная консоль сохраняет свою семантику: вставленный текст не выполняется без отдельного Enter.
-- Убрать текущее ложное поведение `Switch to sh`: выбор shell должен создавать отдельную сессию с новой идентичностью терминала, закрывать/отсоединять старую сессию текущего клиента и показывать ошибку, если выбранного исполняемого файла нет в контейнере.
-- В удалённом событии интерактивного терминала разрешить только заранее перечисленные shell (`sh`, `bash`); имя сервиса и стек проверять до запуска PTY. Произвольную команду shell через новый API не разрешать.
-- Не писать содержимое буфера вставки или выделения в логи.
+- In the container console `Ctrl+V`, `Ctrl+Shift+V` and `Cmd+V` on macOS must work, as well as an
+  explicit "Paste" action in the right-click context menu.
+- Paste uses the real Clipboard API, handles a refused permission and falls back to the `paste`
+  event of the hidden xterm field; do not use the unreliable `document.execCommand("paste")`.
+- Paste into an interactive console sends the exact text to the PTY and loses no spaces, line
+  breaks or special characters. The main restricted console keeps its semantics: pasted text does
+  not run without a separate Enter.
+- Remove the false behaviour of "Switch to sh": choosing a shell creates a separate session with a
+  new terminal identity, closes or detaches the current client's old session and shows an error when
+  the chosen executable is not in the container.
+- The remote event of the interactive terminal allows only the listed shells (`sh`, `bash`); the
+  service name and the stack are checked before the PTY starts. The new API does not allow an
+  arbitrary shell command.
+- Never write the content of the paste buffer or the selection to the logs.
 
-### Детальный мониторинг контейнеров
+### Detailed container monitoring
 
-- Статус стека строить по строкам сервисов и их экземпляров из `docker compose ps --all --format json`, а не по одной агрегированной строке `docker compose ls`.
-- Статусы должны различать `RUNNING`, `ATTENTION`, `EXITED`, `CREATED` и `UNKNOWN`. `N/A`, отсутствие экземпляра, смешанное состояние и недоступность Docker не должны отображаться как обычный `inactive`.
-- `RUNNING` означает, что все отслеживаемые долгоживущие сервисы работают или здоровы. Частично работающий стек, `unhealthy`, `restarting`, неизвестный статус или отсутствующий экземпляр дают `ATTENTION` с предупреждающим значком и перечнем проблемных сервисов.
-- Успешно завершившийся одноразовый worker/init-контейнер не должен переводить стек с работающими сервисами в `EXITED`; ненулевой код завершения должен быть виден как проблема. Для неоднозначных сервисов использовать явную пометку жизненного цикла, а не угадывать по имени контейнера.
-- На странице стека показывать статус каждого сервиса и экземпляра, включая `State`, `Health`, `ExitCode` и причину предупреждения; кнопки start/stop/restart должны опираться на типизированный статус, а не на `serviceStatus[0]`.
+- Build the stack status from the rows of services and their instances in
+  `docker compose ps --all --format json`, not from the one aggregated row of `docker compose ls`.
+  Done on 2026-08-26: the stack list reads one `docker ps --all` filtered by the Compose project
+  label, and the stack page reads `docker compose ps --all` with its Health and ExitCode fields.
+- Statuses distinguish `RUNNING`, `ATTENTION`, `EXITED`, `CREATED` and `UNKNOWN`. `N/A`, a missing
+  instance, a mixed state and an unavailable Docker must not show as a plain `inactive`.
+- `RUNNING` means that every tracked long-lived service is running or healthy. A partly running
+  stack, `unhealthy`, `restarting`, an unknown status or a missing instance give `ATTENTION`, with a
+  warning icon and the list of the services in trouble.
+- A one-shot worker or init container that exited successfully must not turn a stack with running
+  services into `EXITED`; a non-zero exit code is visible as a problem. For ambiguous services use an
+  explicit lifecycle mark rather than guessing from the container name.
+- The stack page shows the status of every service and instance, including `State`, `Health`,
+  `ExitCode` and the reason for a warning; the start/stop/restart buttons rely on the typed status,
+  not on `serviceStatus[0]`.
 
-### Env-файлы и Docker Compose secrets
+### Env files and Docker Compose secrets
 
-- Выбрать и сохранить основной Compose-файл для стека; не полагаться на автоматический поиск Docker Compose, когда в каталоге есть несколько YAML-файлов.
-- Поддержать активный env-файл с произвольным безопасным именем вроде `.env`, `.env.product`, `.env.dev` и упорядоченный список env-файлов для CLI-интерполяции. `global.env` сохранить отдельным глобальным источником.
-- Явно разделить три понятия: CLI `--env-file` для интерполяции Compose, поле сервиса `env_file` для передачи переменных контейнеру и Docker Compose `secrets`. Нельзя молча превращать `.secret` в environment.
-- Добавить управление секретами как отдельными файлами, начиная с `.secret`: логическое имя секрета сопоставляется с файлом, файл сохраняется с ограниченными правами, а Compose YAML получает явную ссылку `secrets` только по действию пользователя. Доступ сервиса к секрету должен быть виден через `/run/secrets/<name>` после деплоя.
-- Не отправлять содержимое secret-файлов вместе с обычным `getStack`; редактирование и раскрытие секрета делать отдельным действием с маскированием по умолчанию. Проверить ротацию, очистку и отсутствие утечки через логи/ошибки.
-- При сохранении YAML не создавать `networks: {}` только из-за пустого редактора сетей. Отсутствующий в исходнике ключ `networks` должен оставаться отсутствующим; явно написанный пользователем ключ сохранять, а удаление последней сети должно удалять ключ только после явного действия.
-- Поддержать Compose `include` и YAML-теги `!reset`/`!override` в режиме сохранения исходного текста или безопасного read-only режима, если структурный редактор не может сохранить их без изменения смысла.
+- Choose and store the main Compose file of a stack; do not rely on Docker Compose finding one
+  itself when the directory holds several YAML files.
+- Support an active env file with any safe name, such as `.env`, `.env.product` or `.env.dev`, and
+  an ordered list of env files for CLI interpolation. Keep `global.env` as a separate global source.
+- Keep three things explicitly apart: the CLI `--env-file` for Compose interpolation, the service
+  field `env_file` that passes variables to the container, and Docker Compose `secrets`. Never turn a
+  `.secret` into environment silently.
+- Add secrets management as separate files, starting with `.secret`: a logical secret name maps to
+  a file, the file is stored with restricted permissions, and the Compose YAML gets an explicit
+  `secrets` reference only on a user action. A service's access to the secret must be visible
+  through `/run/secrets/<name>` after deployment.
+- Do not send the content of secret files with the ordinary `getStack`; editing and revealing a
+  secret is a separate action, masked by default. Check rotation, removal and that nothing leaks
+  through logs or errors.
+- Saving YAML must not create `networks: {}` only because the network editor is empty. A `networks`
+  key missing from the source stays missing; a key the user wrote is kept, and removing the last
+  network removes the key only after an explicit action.
+- Support Compose `include` and the YAML tags `!reset`/`!override` by preserving the source text, or
+  by a safe read-only mode when the structural editor cannot save them without changing their
+  meaning.
 
-### Git-деплой Compose-файлов
+### Deploying Compose files from Git
 
-- В текущем checkout нет отдельного Git-deploy модуля; это зафиксированный пробел аудита, а не основание считать проблему уже исправленной.
-- Для Git-стека источник конфигурации должен явно хранить репозиторий/ветку или commit, основной Compose-файл, env-файлы и secret-ссылки. После `git pull --ff-only` Dockge обязан заново прочитать выбранный файл, сбросить устаревший кэш и не записывать старое содержимое из памяти поверх Git-версии.
-- Перед `docker compose up` запускать `docker compose -f <выбранный-файл> --env-file <выбранные-файлы> config --quiet`; при ошибке не запускать и не перезаписывать стек. Все аргументы передавать массивом, без `shell: true` и без секретов в URL/логах.
-- Путь выбранного Compose-файла передавать явно через `-f`; это устраняет расхождение между файлом, который показывает UI, и файлом, который выбирает Compose автоматически.
-- `networks: {}` в каноническом выводе `docker compose config` считать моделью исполнения, а не поводом менять исходный YAML. Канонический preview не сохранять обратно в Git-файл.
-- Не добавлять `simple-git` или отдельный Compose-парсер без доказанной необходимости: Git запускать через уже проверенный аргументный процессный слой, а семантику Compose проверять самим Docker Compose CLI.
+- The audit found no separate Git deployment module in the checkout of the time; that was recorded
+  as a gap, not as grounds to consider the problem solved. Now: stacks from Git are
+  `backend/stack-git.ts` (clone, check, compare, apply; fast-forward only), with every call of git
+  through `backend/git-command.ts`; see `docs/git-stacks.md`.
+- The configuration source of a Git stack stores the repository and branch or commit, the main
+  Compose file, the env files and the secret references explicitly. After `git pull --ff-only`
+  Dockge must read the chosen file again, drop the stale cache and never write old content from
+  memory over the Git version.
+- Before `docker compose up` run
+  `docker compose -f <chosen file> --env-file <chosen files> config --quiet`; on an error, do not
+  start and do not overwrite the stack. Pass all arguments as an array, without `shell: true` and
+  without secrets in URLs or logs.
+- Pass the path of the chosen Compose file explicitly with `-f`; this removes the difference between
+  the file the UI shows and the file Compose would pick by itself.
+- Treat `networks: {}` in the canonical output of `docker compose config` as the model Compose runs,
+  not as a reason to change the source YAML. Never save the canonical preview back into the Git file.
+- Do not add `simple-git` or a separate Compose parser without proven need: run Git through the
+  argument-based process layer that is already checked, and let the Docker Compose CLI itself check
+  the Compose semantics.
 
-Связанные upstream discussion/issues для этого блока: [#141](https://github.com/louislam/dockge/discussions/141) и закрытый PR [#623](https://github.com/louislam/dockge/pull/623) по вставке, [#370](https://github.com/louislam/dockge/discussions/370) по secrets, [#760](https://github.com/louislam/dockge/issues/760) по выбору Compose-файла, [#294](https://github.com/louislam/dockge/discussions/294) по `include`/пустому `networks`, [#448](https://github.com/louislam/dockge/issues/448) по YAML-тегам и [#36](https://github.com/louislam/dockge/discussions/36) по Git-стекам.
+Upstream discussions and issues related to this block: [#141](https://github.com/louislam/dockge/discussions/141)
+and the closed PR [#623](https://github.com/louislam/dockge/pull/623) on paste,
+[#370](https://github.com/louislam/dockge/discussions/370) on secrets,
+[#760](https://github.com/louislam/dockge/issues/760) on choosing the Compose file,
+[#294](https://github.com/louislam/dockge/discussions/294) on `include` and the empty `networks`,
+[#448](https://github.com/louislam/dockge/issues/448) on YAML tags and
+[#36](https://github.com/louislam/dockge/discussions/36) on Git stacks.
 
-### Авторизация и секреты
+### Authentication and secrets
 
-- **Решение выполнено 2026-08-27:** авторизация людей переведена на Better Auth 1.7.2 в ветке mzx/better-auth. Прежние JWT в браузере, bcrypt-хеши и события `login`/`loginByToken` удалены целиком.
-- Better Auth использовать только в минимальной конфигурации: пользователи, пароли, серверные сессии, `httpOnly`/`secure` cookies, TOTP/backup codes и встроенные ограничения попыток. OAuth, SSO, организации, SCIM, passkeys и прочие плагины не добавлять без отдельного требования.
-- Authorization не считать автоматически решённой: добавить собственные capabilities/RBAC для Stack, Docker, агентов, registry и пользователей.
-- Не хранить JWT браузера в localStorage; перейти к серверной cookie-сессии с истечением и отзывом.
-- Socket.IO должен проверять Better Auth-сессию на handshake и права перед каждым защищённым действием.
-- Пароли агентов не использовать как машинную аутентификацию; перейти на отдельные scoped API keys с ротацией или mTLS.
-- Registry credentials не смешивать с Better Auth; использовать Docker credential helper или отдельный secret manager.
+- **Done on 2026-08-27:** human authentication moved to Better Auth 1.7.2 (1.7.5 now). The former
+  browser JWT, the bcrypt hashes and the `login`/`loginByToken` events are removed entirely.
+- Use Better Auth only in its minimal configuration: users, passwords, server sessions,
+  `httpOnly`/`secure` cookies, TOTP and backup codes, and the built-in attempt limits. Do not add
+  OAuth, SSO, organisations, SCIM, passkeys or other plugins without a separate requirement.
+- Do not consider authorisation solved by it: add our own capabilities/RBAC for Stack, Docker,
+  agents, the registry and users. Done in part: three roles (owner, operator, viewer) are checked on
+  every Socket.IO event and every nested agent call (`docs/authentication.md`). Open, per the role
+  audit of 2026-09-24 (journal, "the owner turns the console on, role audit"): no per-stack or
+  per-agent scope for browser users (MCP keys have it), no 2FA reset or requirement, no session list,
+  no audit log outside MCP.
+- Do not keep a browser JWT in `localStorage`; move to a server cookie session with expiry and
+  revocation.
+- Socket.IO checks the Better Auth session at the handshake and the rights before every protected
+  action.
+- Do not use agent passwords as machine authentication; move to separate scoped API keys with
+  rotation, or mTLS. Still open: a panel reaches an agent by signing in to it with a service account
+  and its password (`backend/agent-auth.ts`, `docs/authentication.md`, "Agents"); scoped keys exist
+  for MCP only.
+- Keep registry credentials apart from Better Auth; use a Docker credential helper or a separate
+  secret manager.
 
-Причина миграции была зафиксирована по исходникам до её выполнения: вход и восстановление доступа выполнялись через Socket.IO-события `login`/`loginByToken` (`backend/socket-handlers/main-socket-handler.ts:67-203`), JWT хранится в браузерном `localStorage`/`sessionStorage` (`frontend/src/mixins/socket.ts:225-242`, `frontend/src/mixins/socket.ts:366-438`), а серверная проверка защищённых действий сводится к флагу `socket.userID` (`backend/util-server.ts:43-47`). В JWT нет заданного срока действия (`backend/models/user.ts:92-97`), а серверного обработчика `logout` в текущем коде нет.
+Why the migration was needed, recorded from the source code before it was done: sign-in and access
+recovery went through the Socket.IO events `login`/`loginByToken`
+(`backend/socket-handlers/main-socket-handler.ts`), the JWT was kept in the browser's
+`localStorage`/`sessionStorage` (`frontend/src/mixins/socket.ts`), and the server check of protected
+actions came down to the `socket.userID` flag (`backend/util-server.ts`). The JWT had no set expiry
+(`backend/models/user.ts`), and the code had no server `logout` handler.
 
-Better Auth не является избыточным именно для этой границы: официально он поддерживает Express, SQLite, серверные сессии, CSRF/trusted origins, rate limiting и TOTP. Избыточным будет подключать все его плагины или поручать ему права на Docker. Интеграция выполнена через собственные таблицы Better Auth (`user`, `session`, `account`, `twoFactor`) в том же SQLite-файле: миграции запускает `getMigrations(auth.options)` при старте, а прежняя таблица пользователей и JWT удалены без обратного перехода, потому что совместимость снята до 2.0.0.
+Better Auth is not excessive for exactly this boundary: it officially supports Express, SQLite,
+server sessions, CSRF and trusted origins, rate limiting and TOTP. Excessive would be enabling all
+of its plugins or handing it the rights over Docker. It is integrated through its own tables
+(`user`, `session`, `account`, `twoFactor`) in the same SQLite file, with migrations run by
+`getMigrations(auth.options)` at startup. The former users table and the JWT were removed without a
+way back, because compatibility had been lifted before any release (see "Global constraints").
 
-### Docker Registry и docker login
+### Docker registry and docker login
 
-- docker login предназначен для аутентификации Docker CLI в registry, а не для входа в Dockge.
-- --password-stdin обязателен вместо передачи секрета в аргументе процесса, но сам по себе не предотвращает сохранение credentials Docker.
-- Registry должен проверяться как hostname[:port]; произвольные URL, HTTP и --insecure не принимать без явной политики окружения.
-- Registry-токен не должен попадать в Settings, UI, логи или --password.
-- Использовать минимальные read-only токены и credential helper.
+- `docker login` authenticates the Docker CLI to a registry; it is not a way to sign in to Dockge.
+- `--password-stdin` is required instead of passing the secret as a process argument, but on its
+  own it does not stop Docker from storing the credentials.
+- A registry is checked as `hostname[:port]`; do not accept arbitrary URLs, HTTP or `--insecure`
+  without an explicit policy of the environment.
+- A registry token must not reach Settings, the UI, logs or `--password`.
+- Use minimal read-only tokens and a credential helper.
 
-### Обновление Git и Docker
+The panel runs no `docker login` of its own (checked 2026-09-27). The image update check uses the
+host's credential helpers, asks the registry API with an anonymous token or the plain `docker login`
+entry, and sends credentials only to an HTTPS realm (journal, 2026-09-24, "env on edit, image update
+check without buildx").
 
-Базовый безопасный сценарий:
+### Git and Docker updates
+
+Replaced: the panel is no longer updated by `git pull` and `docker compose up`. A release
+installation is updated by the signed updater `<installation>/.dockge2/update`, from the host or from
+Settings -> About (journal, 2026-09-25, "updating the panel from the web interface";
+`docs/updating.md`, `docs/self-updates.md`). The scenario first recorded here, on 2026-08-26, was
+this basic safe sequence:
 
 ~~~bash
 git pull --ff-only origin main
 docker compose up -d --pull always --wait --wait-timeout 60
 ~~~
 
-При необходимости принудительного пересоздания допускается:
+and, when a forced recreation was needed:
 
 ~~~bash
 docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 ~~~
 
-- Пересоздание контейнера не удаляет bind mounts и named volumes.
-- В текущем Compose /app/data и /opt/stacks подключаются с хоста, поэтому данные физически переживают контейнер.
-- ./data не должен удаляться Git-командами; для production желательно вынести его за пределы checkout, например в /var/lib/dockge/data.
-- Текущий Compose использует опубликованный image, поэтому git pull сам по себе не обновляет код внутри образа. Код fork сначала собирать и публиковать через CI, затем обновлять сервер через Compose.
-- Реализовать локальный npm run update-docker с --dry-run, проверкой чистой рабочей копии и аргументным запуском разрешённых команд; не выполнять его через UI.
-
-### Масштабируемый интерфейс и dashboard
-
-- Пользователь добавил отдельное, пока не критическое направление: обновить интерфейс и приоритизировать его по IC (`Impact × Confidence`), потому что текущая навигация удобна для небольшого числа стеков, но плохо масштабируется при большом количестве контейнеров.
-- Для StackList запланировать группировку `agent → stack → service → instance`, постраничный/компактный вывод, поиск по endpoint/stack/service/image/labels, фильтры по статусу и безопасные массовые действия только для разрешённых Compose-сервисов.
-- Добавить отображение связей сервисов: `depends_on`, networks, ports, volumes и secrets. Первым сделать read-only просмотр связей; редактирование выполнять через явный Compose-редактор, не менять YAML при открытии панели.
-- Когда агент не выбран и открыта главная область, показывать единый global overview: количество online/остановленных/attention-агентов, running/attention/exited/unknown стеков и контейнеров, время последнего обновления и список проблемных endpoint.
-- Добавить метрики доступности и стабильности: процент за явное окно 24 часа с переключением на 7/30 дней, число наблюдений, `UNKNOWN`, last seen и причины деградации. При недостатке истории показывать `недостаточно данных`, а не 100%.
-- Историческую доступность считать по серверным наблюдениям с retention 30 дней; clean-exit one-shot worker не включать в знаменатель долгоживущих сервисов, а `ATTENTION`/`UNKNOWN` не считать здоровыми.
-- Использовать текущие Bootstrap/SCSS-токены и существующий `DockerStat` как основу; новую библиотеку виртуализации добавлять только после измерения списка из 500/2 000 строк.
-
-### Обзор и управление контейнерами на сервере
-
-- Проверить возможность обнаруживать контейнеры в любых каталогах через `docker ps --all --format json` и Docker Compose labels, не ограничиваясь `DOCKGE_STACKS_DIR`.
-- Разделить три режима: текущий `managed-only` для управления Compose-стеками; `all-readonly` для обзора всех контейнеров; `all-control` для управления внешними/standalone контейнерами после отдельного разрешения.
-- Рекомендованный безопасный default: сохранять `managed-only` control и не включать глобальное управление автоматически. Глобальный read-only inventory — отдельная настройка; для существующих установок не менять область видимости молча.
-- Контейнеры без доступного Compose-файла, с недоступным `config_files` или из другой немонтированной папки показывать как external/standalone и не обещать им Compose-операции.
-- Ключом строки считать `endpoint + containerId`, а не имя контейнера; одинаковые имена на разных агентах не объединять.
-- Действия `start/stop/restart/exec/delete/kill` для внешних контейнеров проверять capability, endpoint и подтверждение; `exec` не должен получать произвольную команду через новый UI без отдельной модели shell-доступа.
-
-### Контрольный контейнер Dockge 2 и основная консоль
-
-- Проверить текущий self-container по реальному `compose.yaml` и Dockerfile: image/tag/digest, healthcheck, restart policy, пользователь процесса, Docker socket, bind mounts `/app/data` и `/opt/stacks`, Docker CLI/Compose CLI и сохранность данных при пересоздании.
-- Отображать control plane отдельной карточкой с health, uptime, image, restart count, last seen и mount status. Не давать общей кнопке контейнеров удалить сам Dockge 2 или вызвать `down -v`.
-- Основную Dockge-консоль оставить выключенной по умолчанию и явно показывать, что через Docker socket пользователь получает практически host-level control. Решение "включение из UI не добавлять" отменено 2026-09-24: владелец включает консоль в настройках безопасности с паролем, `DOCKGE_ENABLE_CONSOLE` больше не читается, см. журнал ниже.
-- Для self restart показывать предупреждение о краткой потере UI и выполнять только безопасную операцию; обновление образа вести через отдельный Git/Compose CLI, а не через произвольный браузерный shell.
-
-### Преобразование Docker Run → Compose
-
-- Текущая зависимость `composerize@1.7.6` используется в `backend/socket-handlers/main-socket-handler.ts`; сначала провести corpus-аудит, а не менять её формально. Заменена собственным конвертером 2026-09-26 по итогам корпуса, см. журнал.
-- Проверить преобразование ports, mounts, env/env-file, restart, network, healthcheck, user, capabilities, devices, labels, `--init`, entrypoint и command; неподдержанные параметры должны давать предупреждение, а не тихо исчезать.
-- Исправить текущую уязвимую к потере данных операцию `split("\\n").slice(1)`: удалять только известный служебный top-level `name`, если он действительно добавлен генератором.
-- После преобразования парсить YAML и запускать `docker compose config --quiet` в изолированном каталоге без запуска контейнеров. Сгенерированный текст показывать в preview с предупреждениями и сохранять только после явного действия.
-- Не добавлять `networks: {}`, `version`, privileged-параметры или другие настройки "для красоты", если их не было в исходной команде; изменение семантики должно быть видимым пользователю.
-
-### Бренд и версия 2.x
-
-- Последний запрос пользователя: публичное имя и репозиторий должны быть `Dockge 2`, а новые размещаемые версии не должны возвращаться к major 1. В текущем коде пакет называется `dockge`, версия — `1.5.0`, release scripts используют `louislam/dockge:1`; это нужно менять через отдельную compatibility map, а не глобальной заменой строк.
-- Предварительное решение для плана: видимое имя — `Dockge 2`; технические `dockge`, `DOCKGE_*`, API-события и upstream-ссылки сохраняются до проверки миграции и собственного Docker registry.
-- Первая стабильная версия — `2.0.0`; далее `2.0.1`, `2.1.0`, `3.0.0`; RC оформлять как `2.0.0-rc.1`, build — как `2.0.0+build.1`. Формат `2`, `2.1` или `2.0.1.1` не использовать.
-- Синхронизировать `package.json`, lockfile, frontend version constant, git tags, Docker tags, `compose.yaml`, README, favicon/icon и GitHub Actions; не публиковать новый форк под upstream tag `:1`.
-- Иконку и визуальный стиль обновлять отдельной P3-задачей после фиксации имени; проверить favicon/PWA, светлую/тёмную тему, контраст, alt/accessible labels и отсутствие растянутых ассетов.
-
-Открытые задачи этого направления с критериями приемки - в разделе "Интерфейс и Docker-обзор: открытые задачи" ниже.
-
-### Сохранность стеков: рецепт, тома, снимки (бэклог, 2026-09-15)
-
-Запрос пользователя от 2026-09-15: можно ли делать резервные копии контейнеров и привязывать их к снимкам, чтобы стек можно было откатить. В том же сообщении сказано, что задача крупная, требует места на диске и управляемости, и потому идет в бэклог, а не в текущую работу.
-
-**Постановка уточнена.** "Копия контейнера" - неправильный объект: контейнер одноразовый, а `docker commit` и `docker export` дают слепок слоя без томов, невоспроизводимый и непонятного происхождения. Эти команды не использовать. Ценность распадается на три части, и копировать надо их:
-
-- **рецепт** - `compose.yaml`, активные env-файлы, секреты; лежит файлами в каталоге стека, места почти не занимает;
-- **данные** - именованные тома и bind-mount; здесь весь объем и вся настоящая ценность;
-- **версия** - дайджест образа, а не тег: без него откат поднимет не то, что было снято.
-
-**Управляемость - главное проектное решение.** Копирование должно быть свойством стека, а не глобальной настройкой: узлу управления и паре контейнеров с телеграм-ботами копии не нужны, и заставлять их платить диском нельзя. Три уровня на стек: не копировать (по умолчанию для нового), только рецепт, рецепт и тома (явное включение с оценкой размера до согласия пользователя).
-
-**Состояние самого Dockge - низкий приоритет.** Он control plane: если он лежит, стеки продолжают работать, и поднять их можно любым другим экземпляром из тех же файлов. Для его собственной базы достаточно снимка `VACUUM INTO` без остановки сервера; отдельной задачей это в бэклоге не нуждается.
-
-**Открытые вопросы, без ответов на которые к реализации не приступать:**
-
-1. Консистентность тома работающего сервиса. Развилка: остановка стека на время снимка (правильно, но простой), снимок на ходу (быстро, риск порванных данных) или дамп средствами самого сервиса до снимка. Самая тяжелая часть задачи.
-2. Восстановление. Без проверенного восстановления копия бессмысленна; восстановление должно быть действием в интерфейсе, а не инструкцией.
-3. Место и ротация: бюджет на стек, число хранимых снимков, поведение при переполнении диска. Заполнить диск копиями - способ уронить все стеки разом.
-4. Безопасность: в копию попадают секреты, значит у нее те же права `0600` и, желательно, шифрование. Хуки вокруг снимка - самое опасное место задачи: ограничение "никаких событий, дающих браузеру запуск произвольных git/shell/Docker команд" действует и здесь.
-5. Форма манифеста снимка: что именно записывается рядом с данными, чтобы откат был воспроизводим (дайджесты образов, имена файлов, версия схемы манифеста).
-
-**Точки опоры в текущем коде:** файлы стека с allow-list имен (`common/stack-files.ts`), рабочий процесс Git `clone` / `preview` / `apply` (`backend/stack-git.ts`) - сейчас он работает на вход, как источник, и его предстоит осмыслить как приемник снимков рецепта; разбор локального и удаленного дайджеста образа (`common/image-digest.ts`). Томов в модели стека нет вообще - ни инвентаря, ни размеров, ни различения именованного тома и bind-mount; это новая возможность, а не доработка существующей.
-
-**Статус:** бэклог. Решение не принято, декомпозиции нет, к реализации не приступать.
-
-### Языки интерфейса: перевод и RTL (бэклог, 2026-09-16)
-
-Запрос пользователя от 2026-09-16: вести проект преимущественно на английском и оставить набор языков из самых распространенных в мире. Набор утвержден и уже сокращен в коде (коммит 8f06651); остальное - работа с содержанием, и она идет в бэклог.
-
-**Что сделано и закрыто.** `languageList` сокращен до одиннадцати языков: английский, русский, китайский упрощенный, испанский, арабский, французский, португальский, индонезийский, урду, немецкий, японский. Удалены 22 каталога, которых нет в списке, и два фантома (`mag`, `mai`), выбор которых бросал исключение. `test/frontend/i18n-catalogue.test.ts` не дает списку и файлам снова разойтись. Позже в меню оставлены только полностью переведенные английский и русский; каталоги остальных девяти лежат в `frontend/src/lang/` до доперевода (комментарий к `languageList` в `frontend/src/i18n.ts`).
-
-**Порядок и выбор до входа (2026-09-24).** В переключателе первым стоит английский, вторым русский, остальные по названию в английской сортировке: сортировка по локали браузера в русском браузере ставила "Русский" выше "English". Язык выбирается и на экране входа, рядом с темой (`LanguagePicker`), чтобы сброшенный выбор не оставлял форму входа на чужом языке. Язык по умолчанию - английский: язык браузера больше не учитывается, первый запуск, очищенное хранилище и сохраненный код, которого нет в меню, открывают интерфейс на английском. Русский и остальные - только явный выбор.
-
-**Задача 1: доперевод. Объем измерим.** `en.json` - 750 ключей. Русский полный. Остальные девять - остатки upstream Dockge на 14-17%, то есть около 120 переведенных строк и 630 английских под видом локали. Это примерно 5700 строк перевода на все девять. Приоритет внутри набора логично вести по числу носителей: китайский, испанский, арабский, французский, португальский, индонезийский, урду, немецкий, японский.
-
-**Задача 2: хинди (`hi`) и бенгальский (`bn`).** Каталогов нет вообще. Намеренно не заведены файлы-заглушки: пункт меню, дающий стопроцентно английский экран, - обещание, которого продукт не выполняет. Заводить вместе с настоящим переводом, не раньше. Гэп записан в `frontend/src/lang/README.md`.
-
-**Задача 3: RTL. Отдельная работа, и она не про арабский.** Атрибут `dir` переключается верно, но `rtlLangs` пуст, пока `ar` и `ur` нет в меню; вернуть их туда вместе с переводом. Верстка к этому не готова: 70 физических CSS-объявлений (`margin-left`, `padding-right`, `left:`, `right:`), ноль правил `[dir="rtl"]`, два логических свойства. Арабский и урду дадут текст справа налево внутри левосторонней раскладки. Урду в обязательном наборе, поэтому вопрос не в том, брать ли арабский, а в том, делать ли RTL. Работа: перевести объявления на логические свойства (`margin-inline-start` и далее), добавить прогон RTL в визуальную приемку и переутвердить эталон партией.
-
-**Открытый вопрос, без ответа на который не начинать задачу 1.** Кто переводит. Машинный перевод строк интерфейса без носителя дает то же, что есть сейчас: экран, который выглядит переведенным. Развилка: принимать переводы через pull request от носителей (медленно, бесплатно, качество проверяемо), заказывать (быстро, деньги, нужен глоссарий терминов Compose) или оставить английский единственным полным и честно это сказать в интерфейсе.
-
-**Мелочь, которую можно взять в любой момент:** в `en.json` 13 ключей, которые не запрашивает ни один компонент (`addFirstStackMsg`, `notAvailableShort`, `addNetwork`, `Remember me`, `newUpdate`, `rmCode`, `rmRfCode`, `envVarCode`, `pasteAnywhereHint`, `tallyRunning`, `tallyAttention`, `tallyStopped`, `listUpdatedAgo`). Удалять вместе с переводом, чтобы не переводить мертвое.
-
-**Статус:** бэклог. Набор языков утвержден, содержание не начато.
-
-### Документация на английском (бэклог, 2026-09-16)
-
-Решение пользователя от 2026-09-16: проект ведется преимущественно на английском, но частичный русский допустим и отдельной задачей на вычистку не является.
-
-Переведены и закрыты: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md`, `CLAUDE.md`, `docs/authentication.md`, `docs/mcp.md`, `frontend/src/lang/README.md`. Код, тесты, CI и `.github` кириллицы не содержали.
-
-Остается, с измеренным объемом:
-
-- `docs/design-system.md` - 155 строк, 81 КБ плотной прозы с точными пикселями и именами токенов. Переводить отдельной аккуратной задачей: спецификация с перевранным значением хуже русской, но верной.
-- `docs/plans/` - этот журнал и декомпозиция текущей работы, а не документация продукта. Завершенные планы и `docs/design/` удалены 2026-09-26. Перевод журнала не планируется.
-- Около 2000 строк русских комментариев и имен тестов, в основном `frontend/src` и `test/e2e`. Работа механическая; делать попутно при правке файла, а не отдельным проходом.
-- `test/visual/scene.ts` рисует эталон с `locale = "ru"`. Переключение на английский потребует переутверждения всех 28 снимков партией. Решение не принято.
-
-**Статус:** бэклог, низкий приоритет. Пользователь сказал, что частичный русский приемлем.
-
-### Интерфейс и Docker-обзор: открытые задачи (бэклог, перенесено 2026-09-26)
-
-Перенесено из удаленного плана product-dashboard (Tasks 3, 5, 6, 7, 9); состояние сверено с кодом 2026-09-26.
-
-1. **Масштабируемый список и связи сервисов.** Сделано в 0.0.14, см. журнал 2026-09-26 "list, containers outside the stacks, the panel's own stack". Открыто одно: массовые start/stop/restart - только по согласованию, для выбранных управляемых стеков, с предпросмотром и результатом по каждому; без согласования не делать.
-2. **Контейнеры вне `stacksDir`.** Сделано в 0.0.14, там же. Открыто: delete/kill/exec для внешних и standalone-контейнеров - только после отдельной модели доступа.
-3. **Собственный контейнер панели.** Сделано в 0.0.14, там же.
-4. **Corpus-аудит `docker run` -> Compose.** Сделано в 0.0.14: корпус из 51 фикстуры, `composerize` заменен собственным конвертером, см. журнал 2026-09-26 "docker run converter of our own".
-5. **Итоговая UX/accessibility/performance-проверка.** Сделано в 0.0.14, см. журнал 2026-09-26 "the final UX, accessibility and performance check", вместе с найденными по ходу английскими отказами сервера.
-6. **Переименование агента.** Сделано в 0.0.14: кнопка в строке агента на Settings -> Agents.
-
-### Эксплуатационная приемка (бэклог, 2026-09-26)
-
-Перенесено из удаленных отчетов о самообновлении и производительности 2026-09-22. До прохождения минимальные требования к памяти не объявлять.
-
-- **Малый хост.** Выделенный VPS 1 vCPU / 1 GiB: установка и обновление опубликованного образа, 30 минут скрининга, затем 24 часа soak, три удаленных агента, настоящая приостановка скрытой вкладки ОС, backpressure журналов при нескольких зрителях, пиковый RSS при параллельных Git-превью у лимита, снимки retaining path в браузере. Локально пройден только 30-минутный экран под `MemoryMax=1G` (147-187 MiB в простое, пик 261 MiB). Длительность soak зашита в `extra/performance-audit.ts` (30 минут), для 24 часов нужен параметр.
-- **Обновление на настоящем хосте.** Обрыв питания или SIGKILL и заполнение диска во время cutover; перезагрузка хоста после успешного и неудачного обновления - сохраняются ли идентичность установки и статус восстановления. Инъекции в `extra/updater/engine_test.go` проверяют решения журнала, но не долговечность файловой системы, Docker и SQLite. Гейт релиза гоняет arm64 только под QEMU.
-- **Production deployment.** Bind mounts, резервное копирование SQLite, Docker credential helper, TLS, reverse proxy, откат образа - на выделенном хосте, а не на стенде.
-- **Compose хоста в гейте (2026-09-27).** Раннер GitHub `ubuntu-24.04` (образ 20260920.314.1) несет Docker Compose 2.38.2, а образ панели, review VPS и машина разработки - 5.5.1. Поэтому гейт релиза проверяет только смешанный случай: хост на 2.38, helper веб-обновления на 5.5. Именно на 2.38 CI и гейт поймали `memswap_limit` и `create_host_path`. Хост на 5.5, как при установке из репозитория Docker, в гейте не проходит ни разу, его видят только локальные прогоны и VPS. Нижняя граница `minCompose` 2.20.0 не проверяется вовсе. Предложение: второй проход `docker.sh`, `managed.sh` и `unmanaged.sh` с плагином 5.5.1, закрепленным по sha256 в `$DOCKER_CONFIG/cli-plugins`; 2.38 оставить как старый хост. Цена - более долгий гейт. Не делать до решения владельца.
-
-### Техдолг из ревью и аудитов (закрыт 2026-09-26)
-
-Все пункты ревью 2026-09-20 и аудита 2026-09-19 закрыты в 0.0.14: сделанное и решения "не делать" с причинами - в журнале 2026-09-26 "technical debt from the reviews and audits, closed for 0.0.14". Список пунктов до закрытия - в истории этого файла.
-
-## Текущее состояние
-
-- Актуальная рабочая копия - основной каталог этого репозитория. Каталога dockge2-review и ветки mzx/dependency-stack-review больше нет, их результат влит в основную ветку этого репозитория (коммиты 749e2c5, f809ae1, 276f5a6, b75a313). Прежняя запись про неизменяемую исходную копию отменена 2026-08-26.
-- Основная ветка называется main; ветки задач: mzx/upstream-fixes, mzx/compose-status, mzx/stack-files, mzx/compose-source, mzx/review-fixes (все влиты или ждут слияния).
-- Базовая модернизация зависимостей, Node.js, ESLint, TypeScript, тестов и CI уже влита в основную ветку.
-- Три уровня проверок: unit (node:test + c8, порог 70%, фактически ~85% строк), Docker-интеграционные в test/docker (по переменной DOCKGE_DOCKER_INTEGRATION=1) и браузерные Playwright в test/e2e. Все три подключены к CI отдельными джобами.
-- Границы, которые запрещено подменять, действительно не подменяются: тесты используют настоящую файловую систему, настоящие дочерние процессы, настоящий Docker Compose, настоящий Clipboard API и настоящий xterm.
-- Проверка npm audit --omit=dev --audit-level=high завершалась без high-level уязвимостей.
-- Production child-process вызовы используют массивы аргументов; shell: true не используется.
-- Формальный diff security scan локальных изменений завершён без новых reportable findings; это не означает, что pre-existing auth и Docker socket архитектура безопасны.
-- В проекте остаются Vue SFC с обычным JavaScript внутри script; это отдельный этап строгой типизации.
-- При запуске чистого UI-стенда обнаружена блокирующая ошибка текущей модернизации: `frontend/src/mixins/lang.ts` вызывает `i18n.global.locale.value` в Vue I18n 11 legacy mode, где `locale` — строка; это включено в UX baseline-задачу.
-- Аутентифицированный UI уже осматривался вживую (главная, страница стека, статусы, файлы и секреты, консоль контейнера), поэтому ограничение про недоступный dashboard снято. Дизайн-направление всё ещё не выбрано: это Task 0 плана product-dashboard.
-- Закрыт весь план 2026-08-26-console-status-compose-git.md: задачи 1-6. Осталось направление product-dashboard (Tasks 0-9) и строгий TypeScript в SFC; Better Auth и миграция vue-i18n выполнены.
-- Локальные агентские файлы AGENTS.md и CLAUDE.md не коммитятся.
-- Tasks 1-5 плана 2026-08-26-upstream-dockge-fixes.md выполнены в ветке mzx/upstream-fixes: path traversal (#994), сохранение .env (#964), статус clean-exit init-контейнеров (#806) и octal tmpfs.mode (#990). Проверено `npm run check` (34 теста, покрытие ~80%), `npm run build:frontend`, `npm audit --omit=dev --audit-level=high` (0) и реальный `npm run test:docker-integration` на Docker Compose v5.5.0.
-- Известное последствие барьера путей: операции над стеком, чьё имя не проходит `^[a-z0-9_-]+$` (внешние Compose-проекты с точкой или заглавными буквами), отклоняются как ValidationError. В списке стеков такие проекты остаются видимыми, но Compose-действия по ним недоступны до отдельной задачи по внешним контейнерам.
-- Закрыто 2026-08-26: отладочный `console.log(options)` в `Stack.getComposeOptions` переведён в `log.debug`, а запись содержимого буфера обмена в `console.debug` из frontend/src/components/Terminal.vue удалена.
-- Блокирующая ошибка Vue I18n закрыта 2026-08-26: смена локали вынесена в чистый `frontend/src/i18n-locale.ts` и работает и в Legacy, и в Composition API mode; регрессия закрыта тестом test/frontend/i18n-locale.test.ts на настоящем vue-i18n. Отдельным пунктом остаётся миграция на Composition API mode, потому что Legacy API объявлен deprecated в vue-i18n 11 и будет удалён в 12, а код использует `$i18n.messages[lang]` и `$i18n.availableLocales`, которые в Composition mode ведут себя иначе.
-
-## План реализации
-
-Выполненные подчиненные планы свернуты в строки ниже и удалены из дерева 2026-09-26 (как их прочитать - в шапке файла). Номера "пункт N" ведут в раздел "Интерфейс и Docker-обзор: открытые задачи".
-
-- [x] Upstream-исправления #997, #979, #950, #991 с полным набором проверок; безопасный CLI Git -> Docker Compose с dry-run (позже заменен `update-dockge.sh` и Go-обновителем).
-- [x] Консоль, статусы, Compose-файлы и Git-деплой: вставка в терминал, отдельная shell-сессия `sh`/`bash`, статус `ATTENTION` с worker/init-правилами, основной Compose-файл, env-файлы, `.secret` и Compose secrets, сохранение исходного YAML с явным `-f` и `config --quiet`, браузерные и Docker-тесты в CI.
-- [x] UX baseline, блокирующая ошибка Vue I18n, выбор направления "Знакомый Dockge".
-- [x] Контракт общего обзора, dashboard без выбранного агента, история доступности и стабильности с retention 30 дней.
-- [x] Бренд и версия: свой namespace образов и адреса, нумерация с `0.0.1` (сейчас `0.0.14`), публикация только через `release.yml` с проверкой в `test/install/release.test.mjs`; проверка обновлений смотрит на релизы этого репозитория и выключена по умолчанию.
-- [x] Масштабируемый список и связи сервисов: поиск по образу и серверу, `?q=` в адресе, постраничный вывод, связи только для чтения. Массовые действия не согласованы и остаются в пункте 1.
-- [x] Контейнеры вне `stacksDir`: классификация по меткам, standalone-контейнеры в списке, страница контейнера, управление по настройке владельца. Пункт 2.
-- [x] Собственный контейнер панели: опознание по ID, запрет down/delete/recreate, карточка в "О программе". Пункт 3.
-- [x] Переименование агента в интерфейсе. Пункт 6.
-- [x] Corpus-аудит `docker run` -> Compose: корпус из 51 фикстуры с проверкой через `docker compose config`, `composerize` заменен собственным конвертером. Пункт 4.
-- [x] Итоговая UX/accessibility/performance-проверка: 2000 контейнеров и 300 стеков под CPU x4, матрица состояний в `test/visual/state-matrix.spec.ts`, Lighthouse accessibility 100 на шести экранах, отказы сервера переведены на ключи каталога.
-- [x] Better Auth: отдельный аудит и миграция после стабилизации Stack/Compose/YAML.
-- [x] Строгий TypeScript во Vue SFC: все компоненты со скриптом на `lang="ts"`, `vue-tsc` со `strictTemplates` в `npm run check`, возврат к JavaScript ловит `test/frontend/sfc-type-check.test.ts`.
-- [x] Миграция vue-i18n с Legacy API mode на Composition API mode.
-- [x] Готовность к прод-тесту: зеленый e2e, бренд и адреса без upstream, фиксация тега, чистый образ, кэш статики, раздел README о развертывании; CI зеленый, свежий клон проходит `npm run check`.
-- [ ] Бэклог: эксплуатационная приемка - малый хост, обновление при сбоях на настоящем хосте, production deployment, Compose 5.5 на хосте в гейте. Постановка в разделе "Эксплуатационная приемка".
-- [x] Техдолг из ревью и аудитов 2026-09-19 и 2026-09-20 закрыт в 0.0.14, см. журнал 2026-09-26.
-- [ ] Бэклог: языки интерфейса - доперевод девяти каталогов с 14-17%, заведение хинди и бенгальского, отдельно RTL для арабского и урду. Постановка в разделе "Языки интерфейса"; не начинать до ответа на вопрос о том, кто переводит.
-- [ ] Бэклог: остаток документации на английский - `docs/design-system.md` и комментарии в коде. Низкий приоритет, частичный русский признан приемлемым.
-- [ ] Бэклог: сохранность стеков - копирование рецепта, томов и дайджестов образов с уровнями на стек. Постановка и открытые вопросы в разделе "Сохранность стеков"; к реализации не приступать до ответа на вопрос о консистентности тома.
-
-## Журнал решений
-
-### 2026-08-26 — upstream PR и единый план
-
-- Пользователь уточнил, что PR upstream не нужно отклонять: мы не владельцы основного репозитория и можем интегрировать полезные изменения в собственную ветку.
-- Принято интегрировать #997 и #979, а #950 и #991 адаптировать под текущую архитектуру и тестовую инфраструктуру.
-- Принято хранить все дальнейшие требования и совместные решения в этом master-файле.
-- Подробный план реализации upstream-исправлений сохранён в отдельном приложении 2026-08-26-upstream-dockge-fixes.md.
-
-### 2026-08-26 — обновление Docker-развёртывания
-
-- Принято рассмотреть связку git pull --ff-only и docker compose up как отдельный безопасный CLI/deployment-сценарий.
-- Для обычного обновления использовать --pull always, --wait, --wait-timeout 60; --force-recreate оставить опциональным.
-- Не использовать down -v, volume prune, git reset --hard или git clean -fdx в автоматическом сценарии.
-- Не запускать Git/Docker-обновление из браузерного Socket.IO API.
-- Данные считать сохранёнными за счёт bind mounts, но рекомендовать размещать production data вне Git checkout.
-
-### 2026-08-26 — Better Auth
-
-- Переход на Better Auth зафиксирован как целевая отдельная миграция, а не смешанное изменение зависимостей и Stack; до реализации это не считается закрытой задачей.
-- Better Auth отвечает за authentication/session/2FA и базовые CSRF/cookie/rate-limit-механизмы; authorization capabilities, агентская аутентификация и registry secrets проектируются отдельно.
-- Принята минимальная конфигурация Better Auth без OAuth/SSO/организаций/SCIM/passkeys до появления соответствующих требований.
-
-### 2026-08-26 — консоль, статусы, env/secrets и Git Compose
-
-- Пользователь добавил обязательное требование: в контейнерной консоли должны работать `Ctrl+V`, `Ctrl+Shift+V` и вставка через правую кнопку мыши, поскольку отладка с ИИ без этого требует отдельного терминала.
-- Зафиксировано, что текущая вставка в `frontend/src/components/Terminal.vue` неполна: она глушит системное контекстное меню, сразу вызывает Clipboard API и не имеет надёжного пользовательского действия при отказе разрешения. Решение — явное меню "Вставить", обработка `paste`-события и xterm custom key handler с реальным браузерным тестом.
-- Зафиксировано, что текущий `Switch to sh` только меняет параметр маршрута, тогда как имя терминала не содержит shell, а существующий PTY переиспользуется. Решение — отдельная shell-сессия, явное отсоединение старой сессии и allow-list `sh`/`bash`.
-- Пользователь потребовал не объявлять стек `inactive`/"мёртвым", если только часть сервисов отсутствует или имеет `N/A`. Решение — сервисная агрегация и отдельный `ATTENTION` с деталями проблемных экземпляров.
-- Пользователь потребовал `.secret`, выбор и название env-файлов (`.env.product`, `.env.dev`) и выбор основного YAML. Решение — отдельная типизированная конфигурация файлов, безопасные имена внутри каталога стека, раздельные CLI `--env-file`, сервисный `env_file` и Compose secrets.
-- Пользователь сообщил, что Git-деплой ломает YAML и добавляет `networks: {}`. Аудит текущего checkout показал отсутствие отдельного Git-deploy модуля; план поэтому разделяет устранение перезаписи YAML в редакторе, явный выбор `-f` и будущий безопасный Git-адаптер. Пустой `networks` должен удаляться из модели редактора, а канонический вывод Compose нельзя сохранять обратно.
-- Все эти решения и критерии сохранены в отдельном исполняемом плане docs/plans/2026-08-26-console-status-compose-git.md.
-
-### 2026-08-26 — масштабируемый UI, dashboard, глобальный Docker и Dockge 2
-
-- Пользователь добавил P2/P3-направление: обновить интерфейс по приоритету IC, чтобы он сохранял удобство при большом количестве агентов, стеков и контейнеров.
-- За IC зафиксирована формула `Impact × Confidence` по шкале 1–5; трудоёмкость и security risk указываются отдельно и не скрываются в одном балле.
-- Для main area без выбранного агента запланирован global dashboard: active/stopped/attention agents, running/attention/exited/unknown stacks/containers, last update, проблемные endpoint, availability percentage с окном и sample count.
-- Доступность нельзя вычислять как статический процент из текущего списка: добавляется серверная история наблюдений с retention 30 дней; `UNKNOWN` не считается успехом, а отсутствие истории даёт `недостаточно данных`.
-- Для больших списков запланированы группировка `agent → stack → service → instance`, поиск/фильтры, постраничный компактный вывод и read-only панель связей `depends_on`/networks/ports/volumes/secrets.
-- Добавлен аудит Docker Run → Compose. Текущий `composerize@1.7.6` не заменять без corpus-проверки; нужно сохранить параметры, предупреждать о неподдержанных флагах, валидировать через Compose CLI и не добавлять настройки ради внешнего вида.
-- Добавлен аудит self-container: health, uptime, image, mounts, Docker socket, restart/update и запрет опасного self-delete. Основную консоль оставить default-off; её включение означает практически host-level control.
-- Разрешено проектировать обзор контейнеров в любых папках, но inventory и control разделены. Рекомендуемый default для существующих установок — managed-only control; all-readonly включается отдельно, all-control требует capability и подтверждения.
-- Пользователь потребовал публичное имя Dockge 2 и нумерацию с major 2. Решение: отображаемое имя — `Dockge 2`, первая стабильная версия — `2.0.0`, а технические `dockge`/`DOCKGE_*`/upstream image сохраняются до compatibility map и определения собственного registry.
-- Добавленная декомпозиция сохранена в docs/plans/2026-08-26-product-dashboard-scope-branding.md.
-
-## Правило ведения файла
-
-Каждое новое требование пользователя или совместно принятое решение добавлять в этот файл до реализации. Для каждой записи фиксировать дату, формулировку требования или решения, причину, затронутые задачи/файлы и текущий статус. Завершённые пункты отмечать только после проверок, перечисленных в соответствующей задаче.
-
-### 2026-08-26 — валидация плана перед реализацией
-
-- Проверено по коду: Tasks 1-4 upstream-плана действительно не были реализованы (`validate()` с инлайновым regex, `path.join` в `get path()` и `getStack()`, `save()` без записи `.env`, `getStatusList()` на агрегированной строке `docker compose ls`, потеря ведущего нуля в `copyYAMLComments`).
-- Ссылки плана на файлы и строки совпали с текущим checkout, поэтому план принят к исполнению без переработки.
-- Отменена устаревшая запись о рабочей копии dockge2-review: работа ведется в основном каталоге этого репозитория.
-- Дополнение к Task 1 по необходимости: конструктор `Stack` и `isManagedByDockge` не должны падать на именах внешних Compose-проектов, поэтому добавлен внутренний `safePath`, возвращающий undefined вместо исключения. Строгий барьер сохранён для всех файловых и Docker-операций.
-- Дополнение к Task 4 по необходимости: восстановление octal распространено на элементы YAML-последовательностей, потому что в issue #990 `tmpfs.mode` находится внутри списка `volumes`, а исходный обход сопоставлял только пары ключ-значение. Побочный эффект YAML 1.1: строки `yes`/`no` выводятся в кавычках, семантика строки сохраняется.
-
-### 2026-08-26 — статусы ATTENTION и найденный блокирующий баг vue-i18n
-
-- Статус стека больше не выводится из агрегированной строки `docker compose ls`: список стеков считает статусы одним вызовом `docker ps --all --filter label=com.docker.compose.project`, а страница стека — `docker compose ps --all` с точными полями Health и ExitCode.
-- Одноразовый жизненный цикл требует явной пометки. Неразмеченный `exited(0)` рядом с работающим сервисом даёт `ATTENTION` с причиной, а не `RUNNING`; ранее принятая формулировка upstream #806 ("running + exited(0) = RUNNING") заменена этим правилом, потому что пользователь потребовал не угадывать одноразовость.
-- Обнаружено при живом прогоне UI: главная страница вообще не рендерилась, потому что `$tc` удалён в vue-i18n 11, а код использовал его в 9 местах. Заменено на `$t(key, n)`, плюрализация проверена на настоящей библиотеке. Это второй дефект того же происхождения, что и ошибка `locale.value`.
-- Pre-existing дефекты `Container.vue`, найденные там же и записанные в задачу 3: необъявленные `ports` и `processing` в шаблоне (кнопки не блокируются во время операции), boolean-props CodeMirror передаются строками.
-
-### 2026-08-26 — файлы стека, env-наборы и secrets
-
-- Выбор файлов стека (основной Compose, упорядоченные env-файлы, активный env, привязки секретов) хранится в существующей таблице `setting` под ключом `stackFiles` с типом `stackFiles`, поэтому новая миграция схемы не потребовалась, а экран общих настроек не может перезаписать эту запись.
-- Совместимость со старыми стеками: один Compose-файл принимается автоматически, при нескольких файлах выбор остаётся детерминированным (`compose.yaml` → `docker-compose.yaml` → `docker-compose.yml` → `compose.yml`, затем сортировка), а UI показывает требование выбрать файл.
-- Каждая Compose-команда получает явный `-f` и `--env-file` в заданном порядке; несуществующие env-файлы не передаются, чтобы команда не падала. `global.env` остаётся первым источником.
-- Доступ к содержимому секрета отделён от обычного API: `getStack` отдаёт только имя файла, размер, дату и привязки, а `revealSecret`/`saveSecret`/`deleteSecret` требуют текущий пароль. Файлы секретов пишутся с правами `0600`; на Windows выводится предупреждение, что права наследуются от каталога.
-- Метка одноразового секрета не превращается в `environment`: связь появляется только явным действием, которое добавляет верхнеуровневый `secrets` и `services.<name>.secrets` в выбранный файл.
-- Побочная находка: `Settings.get` запускал незакрытый `setInterval`, из-за чего процесс, однажды прочитавший настройку, не завершался. Таймер очистки кэша получил `unref()`, а чтение выбора файлов теперь не падает при недоступной базе, потому что источник истины - файлы на диске.
-
-### 2026-08-26 — основная ветка main
-
-- Пользователь решил перейти с `master` на `main` как имя основной ветки форка.
-- Локальная ветка переименована через `git branch -m master main`; CI (`ci.yml`, `json-yaml-validate.yml`), CONTRIBUTING и README обновлены.
-- `npm run update-docker` по умолчанию подтягивает `origin/main`, а для развёртываний на другой ветке добавлен параметр `--branch=<имя>` с проверкой безопасного ref-имени, чтобы через него нельзя было передать опции Git, путь или shell-синтаксис.
-- Удалённая часть перехода (push `main`, смена default branch на GitHub, удаление `origin/master`) выполняется отдельно и требует явного разрешения; на момент записи `origin/master` ещё содержит старое состояние.
-
-### 2026-08-27 — сохранность исходного YAML
-
-- Подтверждена причина жалобы на порчу YAML и `networks: {}`: пересборка файла из JS-модели в watcher `jsonConfig` при служебных обновлениях и безусловная инициализация `networks` в `NetworkInput`. Обе устранены.
-- Принято правило записи: исходный текст меняется только при явной правке пользователя (текстовый редактор или структурное действие). Загрузка стека, обновление статуса и открытие страницы файл не трогают.
-- Структурный редактор доступен только для файлов, которые можно пересобрать без потери смысла. При `include`, anchor, alias, merge key или кастомных тегах структурные блоки скрываются, остаётся текстовый режим с объяснением.
-- Структурная правка применяется точечным diff-ом к документу исходника, поэтому неизменённые части сохраняют комментарии, кавычки, стиль и octal-запись.
-- Перед каждым `up` выполняется `docker compose config --quiet` с выбранными файлами; ошибка означает отказ от запуска. Канонический вывод `config` не сохраняется в исходный файл.
-- Обновление отдельного стека из Git закрыто локальным CLI `npm run deploy-stack` с проверкой чистоты каталога и без опасных команд; браузерного API для Git по-прежнему нет.
-
-### 2026-08-27 — консоль контейнера и Playwright
-
-- Причина неработающей вставки: интерактивный терминал слушал только `onKey`, поэтому вставленный текст не попадал в PTY. Переход на `onData` делает нативную вставку основным путём, а Clipboard API остаётся для явного пункта меню.
-- Принято решение добавить Playwright как dev-зависимость: проверить вставку с настоящим Clipboard API, настоящим xterm и настоящим контейнером иначе нельзя, а подмена этих границ запрещена ограничениями плана. В CI появилась отдельная джоба, которая ставит только Chromium.
-- e2e-окружение поднимает собственные backend и frontend, сеет временный каталог данных и контейнер (`test/e2e/seed.ts`) и включает `disableAuth`, чтобы тесты не вводили пароль в форму.
-- Shell стал частью идентичности терминала, а событие интерактивного терминала принимает только `sh`/`bash`, проверяет сервис по compose-файлу и наличие shell в контейнере. Добавлено `terminalLeave`, поэтому сессия без клиентов закрывается.
-- Тесты проверены на способность ловить регрессию: возврат прежней реализации `onKey` роняет e2e-тест вставки.
-
-### 2026-08-27 — независимое ревью и исправления
-
-- Ревью сегодняшнего диапазона коммитов выполнено отдельной моделью (Sonnet 5), как требует правило "ревью отдаёт не та модель, которая писала код". Отчёт запрошен полным списком без предварительной фильтрации.
-- **BLOCKER, подтверждён и исправлен:** `saveStack`/`deployStack` создают `Stack` напрямую, а `save()` загружал выбор файлов только при `isAdd`. Поэтому правка существующего стека уходила в исторические `compose.yaml`/`.env` вместо выбранных файлов, затирая посторонний файл, а деплой шёл с неверным `-f`. Теперь `save()` всегда загружает сохранённый выбор до записи; добавлен тест, воспроизводящий именно продовый путь (`new Stack(...)` + `save(false)`), которого раньше не было ни в одном тесте.
-- **MAJOR, подтверждён и исправлен глубже, чем предполагалось:** закрытие терминала контейнера через Ctrl+C не завершало сессию. Более того, проверка на живом Docker показала, что и kill процесса `docker exec` оставляет shell работать внутри контейнера. Добавлен `Terminal.end()`: сначала отмена строки и `exit`, затем kill для сессии, которая это игнорирует. Проверено интеграционным тестом, который считает процессы внутри контейнера через `ps`.
-- Секретные значения теперь вычищаются из сообщения об ошибке `docker compose config` (`Stack.redactSecrets`), потому что гарантии, что Compose не процитирует значение, нет.
-- Мелкие правки по отчёту: флаг явного удаления сети сбрасывается даже при сбое сериализации; удалён мёртвый `isSameComposeContent`; шаблон безопасного имени вынесен в единственный `isSafeNameSegment`; убрано двойное чтение YAML-узла в `unbindSecret`; Docker-интеграционные тесты перенесены в `test/docker/`, чтобы юнит-прогон их больше не захватывал.
-- Замечания ревью о ложно-зелёных тестах закрыты новыми тестами: продовый путь сохранения, жизненный цикл терминала (unit и Docker), редакция секретов в ошибке.
-
-### 2026-08-27 — ревью четырьмя Opus-агентами и исправления
-
-Ревью проведено четырьмя независимыми агентами по разделённым областям: безопасность и границы доверия, логика статусов и YAML-редактора, подсистема терминалов, надёжность тестов. Ниже - что подтверждено и что сделано.
-
-**Безопасность.**
-- Барьер путей не покрывал симлинк самого каталога стека и синхронные чтения (`composeYAML`, `composeENV`, набор env-файлов). Добавлен `resolveStackFilePathSync`, проверка каталога на симлинк, `lstat` вместо `stat` в инвентаре, пропуск симлинков при классификации файлов и запись через `O_NOFOLLOW`, что закрывает и подмену файла между проверкой и записью.
-- `startService`/`stopService`/`restartService` собирали аргументы вручную: значение из браузера попадало в позицию имени сервиса, и Compose принимал там свои флаги (`--remove-orphans`, `--build`, `--timeout=0`), то есть действие расширялось на весь стек. Теперь эти операции идут через `getComposeOptions` (с выбранным `-f` и env-файлами) и через `assertServiceExists`, который отклоняет и значения, начинающиеся с дефиса.
-- `serviceStatusList` создавал стек с `skipFSOperations`, поэтому после появления явного `-f` статус сервисов ломался для стеков не на `compose.yaml`. Исправлено.
-- Ограничены размеры массивов в `setStackFiles`; общий экран настроек больше не может создать произвольные ключи (allow-list `pickGeneralSettings`), потому что через них можно было испортить внутреннюю запись выбора файлов; `StackConfig.getAll` возвращает копию, а не живой объект кеша настроек.
-- Добавлены таймауты и лимиты вывода оставшимся вызовам `docker compose ls`, `docker ps`, `docker network ls`, `docker stats`; ошибки проксирования на агент теперь доходят до клиента, а не оставляют интерфейс в состоянии ожидания.
-- Сообщение об ошибке `docker compose config` проходит через `redactSecrets`.
-
-**Терминалы.**
-- `terminalLeave` мог завершить сессию, к которой уже присоединился другой клиент, а `terminalInput`/`terminalResize` позволяли писать в чужую сессию по угаданному имени. Добавлена проверка принадлежности клиента терминалу.
-- Обрыв соединения (закрытая вкладка, упавший браузер) не завершал сессию, потому что `end()` вызывался только из `unmounted`. Теперь сессия контейнера завершается и по факту отсутствия клиентов в серверном интервале.
-- `kill()` и обработчик выхода удаляли запись из реестра по имени и могли выбросить уже новый терминал. Удаление выполняется только если запись всё ещё принадлежит этому объекту; `end()` защищён от повторного входа и снимает запись сразу, поэтому переподключение в течение grace-периода создаёт новую сессию, а не цепляется к умирающей.
-- `end()` дополнительно отправляет EOF, потому что `exit` не доходит до шелла, если на переднем плане работает приложение. Известное ограничение: интерактивное приложение внутри контейнера может пережить завершение сессии, Dockge не убивает процессы внутри контейнера, чтобы не задеть чужие сессии.
-- Многострочная вставка в ограниченную консоль обрезается до первой строки с предупреждением, потому что эхо и буфер строки иначе расходятся, а один Enter выполнял все вставленные строки. Фокус после вставки через меню возвращается в терминал, Escape в меню не уходит в PTY, меню не выходит за край экрана, получает фокус и озвучиваемое сообщение.
-
-**Логика статусов и YAML.**
-- Сервис в состоянии `created` рядом с работающим был невидим (RUNNING без причин) - теперь это `notStarted` и `ATTENTION`, а стек, где ничего не запускалось, остаётся `CREATED` без шума по каждому сервису.
-- Стек, состоящий только из one-shot задач, во время работы задачи показывался как `EXITED` - исправлено.
-- `missingInstance` сообщается только когда стек действительно поднят, иначе профили и остановленные стеки давали вечное предупреждение.
-- `update()` пропускал пересоздание контейнеров для стеков в `ATTENTION`, то есть кнопка обновления тянула образы и молча их не применяла.
-- Недоступный Docker обрушивал рассылку списка стеков целиком, и интерфейс продолжал показывать последние зелёные статусы. Теперь список отдаётся со статусом `UNKNOWN`.
-- Восстановление octal переписано: исходный текст возвращается точечно по позициям узлов, без переключения документа на YAML 1.1, поэтому нетронутые `yes`/`no` больше не окавычиваются, а короткие значения вида `007` не искажаются.
-- Фронтенд: структурная запись запрещена, если модель не соответствует текущему тексту (иначе промежуточное состояние текста приводило к потере сервисов); сохранение выбора файлов больше не перезагружает стек в режиме правки и не стирает несохранённые правки; правило `networks` опирается на состояние файла при загрузке, а явным удалением считается только удаление реально существовавшей сети; редактор сетей перезагружает список при внешнем обновлении.
-
-**Надёжность тестов.** Подтверждено и исправлено: тест на две вкладки не мог упасть (проверял асинхронный выход вместо реестра), проверки типов в socket-событиях проходили из-за несуществующего стека, права `0600` проверялись только при создании файла, отсутствовал изолированный случай inline merge-ключа, не было теста на реальный shell сессии и на `runDeploy`. Все эти проверки добавлены. Docker-набор теперь падает в CI, если переменная окружения не выставлена; e2e гасит свои контейнеры в teardown, не зависит от порядка тестов и очищает строку приглашения перед каждой вставкой.
-
-**Покрытие стало честнее:** из `.c8rc.json` убраны исключения `backend/terminal.ts` и `backend/agent-socket-handlers/docker-socket-handler.ts`, добавлены `extra/deploy-stack.ts` и `extra/update-dockge.ts`, исключены файлы только с типами. Из-за этого цифра снизилась с 85% до 78.8% строк при пороге 70% - разница и есть реальные пробелы, которые раньше не измерялись.
-
-**Осталось незакрытым (записано как ограничения):** правка массива в структурном редакторе заменяет узел целиком, поэтому комментарии внутри списков теряются; первая структурная правка нормализует отступы и переводы строк файла; нестроковые ключи карт (числовые ключи в `x-` расширениях) при правке дублируются; расхождение статусов при `COMPOSE_PROJECT_NAME` в env-файле; `ATTENTION` смешивает деградацию и полную неработоспособность, из-за чего у лежащего стека нет кнопки запуска. Это отдельные задачи, а не побочные эффекты сделанного.
-
-### 2026-08-27 — долги ревью закрыты
-
-- Структурный редактор больше не заменяет последовательность целиком: diff идёт по элементам, поэтому комментарии у нетронутых элементов списка (порты, тома, переменные) сохраняются, а добавление и удаление элемента не переписывает соседей.
-- Числовые ключи карт (например внутри `x-` расширений) правятся на месте: раньше правка добавляла второй ключ в строковом виде, а удаление не срабатывало вовсе.
-- Форматирование файла сохраняется: отступ определяется по исходнику и передаётся сериализатору, переводы строк CRLF восстанавливаются. Первая структурная правка больше не переформатирует весь файл.
-- Секретная привязка сериализует документ тем же способом, что и структурный редактор.
-- ATTENTION перестал означать "работает": кнопка запуска на странице стека появляется, если ни один контейнер не запущен, даже когда статус ATTENTION. Список стеков сортируется alert-first, то есть стеки с предупреждением идут первыми, а не в конце. На дашборде появился счётчик `unknown`, поэтому недоступный Docker больше не выглядит как четыре нуля без объяснения.
-- Контейнеры стека сопоставляются по метке рабочего каталога `com.docker.compose.project.working_dir`, а не только по имени проекта. Это устраняет расхождение, при котором `COMPOSE_PROJECT_NAME` в env-файле давал "активен" в списке и "unknown" с пустым списком сервисов на странице стека. Хостовый обход индексируется и по имени проекта, и по каталогу.
-
-Проверки: 101 unit-тест, 7 Docker-интеграционных, 12 браузерных, lint, tsc и сборка фронтенда - зелёные. Покрытие 79.6% строк при пороге 70%.
-
-### 2026-08-27 — миграция vue-i18n и мелкий техдолг фронтенда
-
-- vue-i18n переведён на Composition API mode (`legacy: false`, `globalInjection: true`), legacy-опции `silentFallbackWarn`/`silentTranslationWarn` заменены на `missingWarn`/`fallbackWarn`. Причина - Legacy API объявлен deprecated в 11 и удаляется в 12; предупреждение об этом печаталось на каждой загрузке страницы.
-- Компоненты больше не читают внутренности i18n: список языков отдаёт `availableLanguages()` из `frontend/src/i18n.ts`, поэтому `$i18n.messages[lang]` и `$i18n.availableLocales` исчезли из шаблонов. В Composition mode `messages` - ref, и прежний код молча сломался бы.
-- `<i18n-t>` получил `scope="global"`: в новом режиме компонент ищет локальный scope и на каждой такой вставке писал `[intlify] Not found parent scope`.
-- `currentLocale()` больше не падает без `localStorage`/`navigator`, поэтому модуль i18n загружается и в тестах; это позволило проверить фактическую конфигурацию приложения unit-тестом, а не только рассуждением.
-- Смена языка покрыта браузерным тестом `test/e2e/language.spec.ts`: выбор языка в настройках переводит интерфейс, значение сохраняется после перезагрузки. Ранее это требование плана закрыто не было.
-- `Container.vue` использовал в шаблоне необъявленные `ports` и `processing`: первое давало предупреждение Vue на каждый рендер, второе означало, что кнопки сервиса не блокировались во время операции. `processing` теперь проп со страницы, `ports` читается из `envsubstService`.
-- CodeMirror получал `dark`/`wrap`/`tab` строками `"true"` вместо boolean - исправлено в `Compose.vue` и `GlobalEnv.vue`.
-- Консоль браузера на главной, странице стека и `/console` теперь чистая: предупреждений Vue и intlify нет.
-
-### 2026-08-27 — обратная совместимость отменена до 2.0.0
-
-- Пользователь снял требование сохранять совместимость со старыми данными и схемой: релизов не было, установок нет.
-- Следствие для миграции авторизации: старая таблица `user`, bcrypt-хеши, JWT в браузере и события `login`/`loginByToken` удаляются целиком, вместо совместимого перехода. Меньше кода - меньше поверхности атаки.
-- Файлы стеков (compose, env, secrets) под это правило не попадают: они принадлежат пользователю и формат остаётся файловым.
-
-### 2026-08-27 — авторизация на Better Auth
-
-- Авторизация людей переведена на Better Auth 1.7.2: серверные сессии в `httpOnly`/`SameSite=Lax` cookie, срок 7 дней с обновлением раз в сутки, `Secure` только под HTTPS. JWT, `localStorage`, bcrypt, `check-password-strength`, `jsonwebtoken`, `jwt-decode` и `limiter` удалены из зависимостей.
-- Учётная запись создаётся ровно одна: `databaseHooks.user.create.before` отклоняет вторую регистрацию, поэтому открытая в интернет панель не даёт зарегистрироваться постороннему. Сброс доступа - `npm run reset-account`, он удаляет учётную запись и сессии, а стеки, настройки и агентов не трогает.
-- Handshake Socket.IO проверяет сессию по cookie; события авторизации на сокете больше нет. Подтверждение пароля для опасных действий идёт через `auth.api.verifyPassword` с cookie того же сокета, то есть чужая сессия не подтвердит действие.
-- Второй фактор включён по-настоящему: плагин `twoFactor` даёт TOTP и backup codes, а блок в настройках безопасности перестал быть скрытым. Проверка подтверждения кода вращает сессию, поэтому диалог переподключает сокет после включения 2FA.
-- Кросс-origin в dev закрыт явно: CORS для `/api/auth/*` и Socket.IO отвечает только `trustedOrigins`, preflight от чужого origin получает 403.
-- Тесты: `test/backend/auth.test.ts` (7 проверок) и `test/backend/two-factor.test.ts` (4 проверки с настоящим TOTP-генератором на HMAC-SHA1), плюс `test/e2e/auth.spec.ts` - вход через реальную форму, отказ при неверном пароле и выход с проверкой, что сессия мертва на сервере.
-- E2E-прогон больше не отключает аутентификацию: seed создаёт владельца, `global-setup` входит один раз и передаёт cookie-состояние всем спекам, а спек авторизации работает без него. Так браузерные тесты идут по тому же пути, что установка у пользователя.
-- Побочно закрыт баг локализации: сообщения `disableauth.message1/2` во всех 31 локали хранили `<strong>`, который после перехода на `<i18n-t>` печатался как текст. Теги заменены на слоты `{disableAuth}`/`{scenarios}`. Русская локаль дополнена 91 отсутствующим ключом и блоком 2FA.
-
-### 2026-08-27 — ревью авторизации тремя агентами и исправления
-
-Три независимых Opus-ревьюера (бэкенд-безопасность, фронтенд-флоу, честность тестов) дали 60+ замечаний. Найденное и закрытое, по важности:
-
-- **Блокер: вход был невозможен на любом реальном адресе.** `resolveTrustedOrigins` знал только `localhost`, поэтому обращение с адреса LAN, по имени хоста или через домен получало 403 `INVALID_ORIGIN`, а UI показывал это как "пароль не подходит". Теперь список строится по запросу: origin принимается, если совпадает с хостом, который сам браузер и запросил, плюс `DOCKGE_TRUSTED_ORIGINS`, плюс `X-Forwarded-Host` при включенном `DOCKGE_TRUST_PROXY`. Проверено на живом стенде: LAN 200, имя хоста 200, чужой origin 403, через прокси 200.
-- **Блокер: лимит попыток обходился заголовком `X-Forwarded-For` и запирал владельца без него.** better-auth берет IP из заголовка, поэтому свой middleware перезаписывает `x-dockge-client-ip` адресом соединения, а конфиг читает только его. Живая проверка: 5 попыток и 429, подделанный `X-Forwarded-For` нового бюджета не дает, за прокси каждый клиент считается отдельно.
-- **Блокер интерфейса: setup-экран возвращался при каждом подключении сокета.** Флаг `needSetup` решался один раз при старте; теперь решение читается из базы (`shouldShowSetup()`), и это закреплено тестом.
-- **Блокер интерфейса: вход по резервному коду был невозможен.** Поле принимало 6 символов, а код уходил в TOTP-проверку, хотя резервный код длиннее и проверяется другим эндпоинтом. Разделение вынесено в `isTotpCode` и покрыто тестом.
-- **Сокет переживал отзыв сессии.** Права проверялись только на handshake, поэтому выход, смена пароля или отзыв сессии не выкидывали уже открытый сокет. Добавлен `dropRevokedSessions()` в 10-секундном цикле.
-- **Подтверждение пароля по сокету было неограниченным оракулом.** `verifyPassword` через `auth.api` лимитов не знает: 30 попыток проходили без отказа. Добавлен счетчик 5 попыток в минуту на аккаунт; блокировка короткая осознанно, чтобы украденная сессия не запирала владельца надолго.
-- **Режим `disableAuth` ломал секреты.** Без cookie `verifyPassword` всегда отвечал 401, то есть `revealSecret`/`saveSecret`/`deleteSecret` не работали никогда. Теперь в этом режиме пароль сверяется с хешем владельца напрямую (`verifyAccountPassword`).
-- **Повторная отправка формы 2FA заново логинилась паролем**, сжигая challenge и лимит входа; теперь при открытом challenge отправляется только код, поле чистится, и есть возврат к вводу почты.
-- **Смена пароля и выключение 2FA оставляли сокет с мертвой сессией**, из-за чего последующее подтверждение пароля отвечало "неверный пароль"; оба места переподключают сокет.
-- **Перезагрузка SPA на каждом переподключении.** Первый пакет `info` намеренно без версии, а watcher считал переход в `undefined` сменой версии сервера.
-- Прочее: `signOut` без проверки ошибки, `clearData()` как заглушка, `reconnectSocket()` без таймаута (запирал модалку 2FA), сообщения сервера в UI без перевода (добавлена карта кодов ошибок в `auth-messages.ts`), мертвое состояние `socketIO.token`/`remember`, дубли данных в `main.ts`, `$root.socket.token` в `Settings.vue`, кнопка выхода в режиме без аутентификации, транзакция в `reset-account`, `callbackResult`/`callbackError` в настройках, приведение флагов настроек к boolean, `Vary: Origin` всегда, `sslKeyPassphrase` из debug-лога, права 0600 на файл базы.
-
-Тесты по итогам ревью: `test/backend/auth-boundaries.test.ts` (11 проверок: origin, лимитер и его обход, отзыв сессии, режим без аутентификации, блокировка пароля, срок жизни cookie, Secure под TLS, живучесть секрета), `test/frontend/auth-messages.test.ts`, усиленный `test/e2e/auth.spec.ts` (позитивный контроль до выхода, коды ответов, флаги cookie, отсутствие токена в storage). Итог: 127 unit-тестов, 16 браузерных, 7 Docker-интеграционных - зеленые.
-
-Долги того же ревью, закрытые следом: отказы в тестах 2FA проверяются кодом ответа и текстом, а не голым `rejects` (мутация "500 вместо 400" больше не проходит); число резервных кодов и их уникальность запинены; лимит входа поднят до 10 в минуту на клиента, чтобы браузерные тесты и человек с опечаткой не упирались в 429, и это зафиксировано с двух сторон; тело запроса смены пароля вынесено в `passwordChangeRequest()` с тестом на `revokeOtherSessions`, потому что раньше тест сам передавал этот флаг и не заметил бы его исчезновения из UI.
-
-Известные ограничения, зафиксированные осознанно: окно до 10 секунд между отзывом сессии и отключением сокета; TOTP-код можно переиспользовать внутри своего 30-секундного окна (поведение better-auth); токены сессий лежат в SQLite в открытом виде, поэтому копия файла базы равна компрометации, и ротации секрета из UI нет; установка старой версии Dockge не поддерживается - совместимость снята до 2.0.0.
-
-### 2026-08-27 — дизайн-система зафиксирована
-
-- Пользователь выбрал каркас "список и инспектор" и порядок работы: сначала экран пасты, потом остальные экраны. Решение принято после разбора четырёх направлений, четырёх раскладок "Пульта" и двух независимых ревью (дизайн-ревью по эвристикам дало 22/40, браузерные замеры - четыре провала контраста, 38 целей меньше 24 px, ноль мобильных раскладок).
-- Система зафиксирована документом `docs/design-system.md` и кодом: `frontend/src/styles/tokens.scss` (обе темы), `fonts.scss` (локальный IBM Plex с кириллицей), `vars.scss` приведён к тем же значениям, чтобы старые правила `.dark &` не расходились с новыми компонентами.
-- Проверяемость важнее описания: `test/frontend/design-tokens.test.ts` считает контраст прямо из токенов и падает, если текст не проходит 4,5:1, состояние не проходит 3:1, синий начинает означать состояние или цели нажатия уменьшаются. Тест сразу нашёл два промаха в моей же светлой теме (бледный текст 4,07 и граница контрола 2,97) - исправлено.
-- Типографика: одно семейство в трёх весах. Узкое начертание IBM Plex Sans Condensed, которое стояло в макетах, отброшено - у него нет базовой кириллицы (только `cyrillic-ext`), то есть русский интерфейс им не набрать. Ссылка на `'JetBrains Mono'`, которая нигде не поставлялась и молча откатывалась на системный monospace, убрана; xterm получил поставляемый IBM Plex Mono.
-- Отменено: общий радиус 50rem ("таблетки"), градиент на акценте, прежний акцент `#74c2ff` (белый текст на нём не проходил порог).
-- Порядок дальнейших слоёв: экран пасты как маршрут → список и инспектор вместо StackList и страницы стека → нижний док для терминалов и логов → удаление старых правил `.dark &` → пустые состояния и первый запуск.
-
-### 2026-08-27 — слой создания стека в коде
-
-- Реализован первый слой выбранного направления: `CreateStackSheet` поверх списка. Вход тремя способами - кнопка в шапке, `Ctrl+V` в любом месте страницы вне поля ввода, перетаскивание `compose.yaml` в окно. Блок "Docker Run" с главной убран: его работу делает поле слоя.
-- Команда распознаётся по содержимому и преобразуется в том же поле; исходный текст держится в памяти и возвращается кнопкой, потому что программная подстановка значения ломает родную отмену браузера.
-- Отчёт о преобразовании вынесен в `common/docker-run-flags.ts` и судит по настоящему выводу конвертера: сначала комментарий-отказ самого `composerize`, потом наличие ключа, в который флаг должен был превратиться. Из-за этого пришлось признать, что `--device` и `--gpus` конвертер переносит - в макетах я утверждал обратное. На экране остаётся один флаг, из-за которого сервис не заработает, остальные под кнопкой.
-- Найден и исправлен настоящий баг сервера: `composerize` пишет неподдержанный флаг комментарием первой строкой, а обработчик срезал первую строку, оставляя `name: <your project name>` в compose-файле пользователя. Теперь снимается ровно строка сгенерированного имени (`stripGeneratedProjectName`), сообщение конвертера сохраняется.
-- Результат остаётся в списке: `markStackFresh` подсвечивает новую строку и помечает её "только что" на минуту вместо тоста.
-- Ошибка проверки конфигурации не закрывает слой: показывается текст Docker Compose, файл остаётся черновиком на диске.
-- Проверено вживую в браузере (создание, возврат команды, ошибка проверки) и тестами: 146 unit, 20 браузерных, покрытие 81,9%. Чего сознательно нет: "Прервать" (нужен серверный обработчик остановки `compose up`) и пошаговый прогресс по контейнерам.
-
-### 2026-08-28 — список и инспектор вместо страницы стека
-
-- Строка списка ведёт в `/stack/<имя>`, где `StackInspector.vue` показывает состояние, группу управления (Запустить/Остановить · Перезапустить · Обновить · "Ещё" с compose-файлом, `down` и удалением), одну строку внимания с причиной, таблицу сервисов с действиями по каждому и одну свёрнутую строку "Связи и сети", которая разворачивается на месте. Список остаётся рядом: на экране два объекта, как и требует документ.
-- Отдельной страницы стека больше нет. `/compose/<имя>` - это редактор файла: он открывается на всю ширину (`Dashboard` скрывает список для `/compose` и `/terminal`), из него убраны жизненный цикл, удаление, причина внимания и карточки контейнеров в режиме просмотра. Одно действие живёт в одном месте, а не в двух.
-- Раскладка редактора перестроена: текст файла и env слева, выбор файлов и секреты справа, вывод стека во всю ширину под ними. До правки в режиме просмотра левая половина экрана была пустой, а вся работа жалась в правую.
-- Русские формы множественного числа: `russianPluralRule` в `i18n.ts` с ограничением индекса по числу форм самого сообщения. Живая проверка показала "2 сервисов" - vue-i18n считал по английскому правилу. Правило закрыто тестом `test/frontend/i18n-plurals.test.ts` (три проверки, включая работу через сам экземпляр i18n).
-- Свои стили переведены с `@import` на `@use` (Sass убирает `@import`); два `@import` остались вынужденно, потому что Bootstrap читает переопределения `!default` только из области видимости файла и сам внутри написан на `@import`. Собранный CSS побайтово тот же, а предупреждения из `node_modules` гасятся `silenceDeprecations` в конфиге Vite.
-- Проверено вживую в браузере при 1600 и 1100 px (инспектор, разворот строки связей, редактор в двух режимах) и тестами: 149 unit, 23 браузерных (три новых на инспектор), покрытие 81,9%.
-- Дальше по документу: нижний док для терминалов и логов, удаление старых правил `.dark &`, пустые состояния, предпросмотр обновления и "Прервать" (последним двум нужен серверный обработчик).
-
-### 2026-08-28 — нижний док для вывода
-
-- `TerminalDock.vue` смонтирован в `Layout`, поэтому вывод стал общим уровнем: он переживает переход к другому стеку и открытие редактора. Сессии - вкладки: логи стека (`displayOnly`) и shell контейнера (`interactive`), у каждой своё имя терминала из общих помощников, так что `sh` и `bash` не делят PTY.
-- Неактивные вкладки скрыты через `v-show`, а не `v-if`: размонтирование `Terminal` отправляет `terminalLeave`, то есть переключение вкладок убивало бы shell.
-- Высота дока принадлежит человеку: тянется мышью, меняется стрелками с фокуса на полосе (`role="separator"`), хранится в `localStorage` и ограничена 160 px снизу и 70% окна сверху. Страница получает `padding-bottom`, иначе док закрывал бы кнопки внизу.
-- В бэкенд добавлено одно событие `joinCombinedTerminal(stackName)` - симметрично уже существовавшему `leaveCombinedTerminal`. Оно принимает только имя стека, а `Stack.getStack` отвергает всё, что не каталог стека, поэтому команду через него не передать.
-- Кто отписывается от логов: док при закрытии вкладки, а инспектор - только если док этот вывод не держит (`$root.dockHasLogs`). Иначе уход с экрана обрывал бы `docker compose logs -f`, который человек оставил открытым.
-- Из редактора убран встроенный "Терминал": раньше вывод стека жил внутри экрана правки и исчезал при переходе. Маршрут `/terminal/...` оставлен для прямых ссылок и его браузерные тесты не изменились.
-- Тесты нашли две ошибки в моих же спеках: жёсткий `page.goto` действительно сбрасывает док (это верное поведение SPA, а не дефект), а `getByRole("button", {name: /shell/i})` попадал в "Остановить shellbox" и останавливал сервис. Проверки переписаны на переход внутри приложения и на `/^shell\b/i`.
-- Итог: 149 unit, 25 браузерных (два новых на док), покрытие 81,9%, живая проверка в браузере - две вкладки, живой `bash` в контейнере и список стеков над доком.
-
-### 2026-08-28 — интерфейс приведён к дизайн-системе
-
-Работа шла тремя параллельными агентами с жёсткими рамками файлов (чипы и список; общий слой и оболочка; новые экраны), сведение и живая проверка - за мной.
-
-- **Синий больше не означает состояние.** `statusColor()` возвращала варианты Bootstrap, поэтому "работает" рисовалось тем же синим, что интерактив. Её заменила `statusStateName()`, а вид состояния собран в один компонент `StateChip.vue` (точка `--state-*` плюс слово): раньше стек, сервис и контейнер рисовались тремя разными способами, включая заливку бейджа.
-- **`main.scss` больше не дублирует темы.** Правил `.dark &` было десять плюс блок на ~190 строк - теперь ноль. Тему Bootstrap задаёт одна таблица `--bs-*` → токен. Живая проверка нашла, что таблицу нельзя объявлять на `:root`: тёмные токены живут на `body.dark`, поэтому на `:root` она вычислялась со светлыми значениями и в тёмной теме все заголовки получили почти чёрный цвет. Исключение под селектором темы осталось одно: три переменные Bootstrap с вшитым SVG.
-- **Собственные цвета из компонентов убраны.** Списки ввода (`ArrayInput`, `ArraySelect`, `NetworkInput`) держали `$dark-bg2` без условия, то есть в светлой теме были тёмными. Настройки, счётчики главной, меню терминала, `DockerStat`, `TwoFADialog`, `About`, `Appearance`, `GlobalEnv` переведены на токены.
-- **Поверхность консоли - токен `--surface-console`**, одинаковый в обеих темах: подсветка CodeMirror и xterm нарисованы для тёмного фона, и на белом красные ключи YAML не проходили порог. Притемнение под слоем тоже стало токеном (`--scrim`) - `backdrop-filter: brightness()` в светлой теме почти не давал эффекта.
-- **Мелочи, найденные глазами, а не тестом:** белая заплата вместо многострочного списка выбора в секретах (строкам `option` фон рисует система), таблица сервисов висела прямо на фоне и уезжала за край на узком экране (панель плюс прокрутка внутри себя), кнопки дублировались тремя описаниями вида (осталось одно в `main.scss`).
-- **Контракты документа, доведённые в коде:** переключатель внешней сети стал `button role="switch"` с `aria-checked` вместо чекбокса Bootstrap; крестик вкладки в доке вынут из кнопки вкладки (кнопка в кнопке недоступна с клавиатуры); в слое создания фокус заперт внутри и возвращается на кнопку, с которой пришли.
-- **Новые сторожевые тесты** в `test/frontend/design-tokens.test.ts`: компонент не имеет права объявлять цвет (литерал `#rrggbb` или `rgba()` в блоке стилей - падение) и тема не дублируется правилами под тёмную (блок под селектором темы допустим только если внутри одни переменные `--bs-*` с вшитым ассетом). Оба теста сразу нашли остатки и держат систему от расползания.
-- Проверено: 151 unit, 25 браузерных, покрытие 81,9%, lint и `tsc` чистые, сборка без предупреждений, живые снимки всех экранов в двух темах и на двух ширинах (1600 и 1100).
-- Осталось сознательно: дифф перед записью для переключателя сети, предпросмотр обновления и "Прервать" (нужны серверные обработчики), пустые состояния и первый запуск.
-
-### 2026-08-28 — строка списка и инспектор доведены до макета
-
-Сравнение согласованного макета ("Вставил и развернул", 2026-08-27) со сборкой показало, что каркас был собран, а содержимое пульта - нет: в строке списка стояли только точка состояния и имя, тогда как макет обещал агента, чип источника, чипы сервисов с "+N", доступность и обновления, плюс фильтры, счётчики в шапке и причину с кнопками починки. Разрыв закрыт по первому пункту плана.
-
-- **Сервер отдаёт то, из чего строится строка.** `summariseServices()` в `common/compose-status.ts` судит каждый сервис отдельно по тому же host-wide `docker ps`: нечитаемый вывод остаётся "неизвестно", объявленный без контейнера сервис - "остановлен", код выхода 137 - "внимание". `backend/stack-source.ts` читает источник каталога (`.git`, `git remote get-url`, `git status --porcelain`, `git rev-list --count HEAD..@{u}`) без единого обращения к сети и кеширует ответ на минуту, иначе десятисекундный крон гонял бы git по каждому стеку. Учётные данные из адреса удаляются: адрес виден в интерфейсе.
-- **Строка списка** получила агента, чип источника ("Git · синхронно", "Git · -2", "локальный"), чипы сервисов с состоянием и "+N" (скрытые названы в подсказке - молча обрезать нельзя) и колонку обновлений. Заголовок колонок повторяет сетку строки.
-- **Фильтры и счётчики.** Фильтры - кнопки с `aria-pressed` и счётчиками, посчитанными по всему списку, а не по отфильтрованному, иначе кнопка меняла бы своё число от собственного нажатия. Значение фильтра живёт в адресе, поэтому счётчик "требуют внимания" в шапке ведёт сразу к срезу. Поиск ищет и по именам сервисов: владелец помнит "gotenberg", а не то, в каком стеке он лежит.
-- **Раскладка исправлена на "Каркас 1"**: список широкий, инспектор - 400 px. Было наоборот, из-за чего в строку не влезало ничего, кроме имени.
-- **Инспектор** получил чипы происхождения (агент и каталог, число сервисов, реестры образов из `common/image-source.ts`, источник), причину с кнопками "Логи N" и "Перезапустить N", компактную таблицу сервисов с расходом памяти (`docker stats`) и аптаймом (текст состояния докера) и подпись "состояние на N с назад".
-- **Честность вместо выдумки:** колонка обновлений показывает отставание в коммитах, а где проверки нет - прочерк с подсказкой "проверка образов ещё не реализована". Колонки "Доступность 24 ч" нет вовсе: для неё нужно хранить наблюдения, это следующий слой с миграцией.
-- Тесты: 163 unit (новые - `summariseServices`, `readStackSource` на настоящих репозиториях в temp-каталогах, `summariseRegistries`), 29 браузерных (новый спек на строку, фильтр, поиск по сервису и чипы инспектора), покрытие 82,35%.
-- Найдено попутно: класс `.attention` у счётчика в шапке совпал с классом полосы внимания и сломал существующий спек - счётчику дано своё имя.
-
-### 2026-08-28 — доступность без вранья
-
-Второй пункт разрыва с макетом: колонка "Доступность 24 ч" и секция в инспекторе. Считать было нечем - истории состояний не существовало.
-
-- **Хранится изменение, а не выборка.** Таблица `stack_observation` (миграция `2026-08-28-1200`) получает строку только тогда, когда состояние стека отличается от последнего записанного. Крон знает состояние каждые десять секунд, но запись каждого тика - это миллионы строк в месяц, которые не несут ни одного нового факта: между двумя изменениями состояние по определению то же. История хранится 31 день, чистится не чаще раза в шесть часов.
-- **Запись идёт из крона, а не из рассылки списка.** Сначала я повесил её на `sendStackList`, и живая проверка показала пустую таблицу: список строится только когда есть вошедший клиент. То есть процент описывал бы не работу стека, а время, которое владелец смотрел в экран. Вынесено в `observeStacks()`, который крон вызывает независимо от сокетов.
-- **Расчёт - чистая функция** `computeAvailability()` в `common/availability.ts`, десять тестов на правила: меньше получаса наблюдений - "мало данных" с указанием, сколько наблюдалось; полное окно без сбоев - "без сбоев · 24 ч", а не "100%"; деградация считается отрезками (одна долгая авария - один сбой); пропуск в наблюдениях уменьшает покрытие, а не создаёт зелёное время; остановленный стек получает срок, а не долю; `ATTENTION` и `UNKNOWN` здоровыми не бывают.
-- **Окна 24 ч / 7 д / 30 д** приходят по событию `stackAvailability`, и сервер принимает только эти три значения: произвольное число позволило бы клиенту заказать обход всей истории. Если окно наблюдалось не целиком, под выводом стоит приписка "наблюдалось 2 дня окна" - процент без неё выглядел бы полным.
-- **Время работы контейнера теперь на языке интерфейса.** `docker ps` отвечает "Up About a minute", и в русской панели это выглядело чужим. Фраза разбирается в миллисекунды (`common/docker-time.ts`, три теста на настоящих формулировках докера) и печатается своими словами; неразобранная фраза не печатается вовсе.
-- **Форматирование вынесено** в `frontend/src/format.ts`: процент и длительность обязаны выглядеть одинаково в строке и в инспекторе. Язык передаётся явно - иначе одна и та же панель писала бы "94,2%" или "94.2%" в зависимости от машины, на которой открыта.
-- Спеки доступности пришлось поправить дважды, и оба раза прав был продукт: живой сервер дописывает свои наблюдения к засеянным, поэтому число сбоев не фиксировано, а стек без запущенных контейнеров честно показывает "остановлен N назад", а не "мало данных".
-- Осталось: доступность стеков агента (их списки приходят на клиентский сокет, а не в серверный крон, поэтому истории по ним нет) - записано в документе как известное ограничение.
-
-### 2026-08-28 — сведение с макетом по картинке
-
-Пользователь сказал, что на макет всё ещё не похоже. Вместо спора я снял согласованный макет ("Каркас 1") и сборку в одном браузере, склеил в одну картинку и сравнил. Разница была не в данных, а в характере: у меня строка списка была двухэтажной с чипом-словом на 96 px, список - карточкой с тенью, полосы внимания не было, док появлялся только при открытой сессии, а "Обновить" ничем не отличалось от прочих кнопок.
-
-Что изменено по картинке:
-
-- **Строка списка - одна линия**: точка состояния, имя, агент, чип источника моно, точки сервисов с именами моно и "+N", доступность, обновления. Тонкий разделитель под каждой строкой; выбранная строка помечена акцентной полосой слева.
-- **Слово состояния** в строке ушло в скрытый текст и в подсказку точки: имена стеков выравниваются по одной вертикали, как в макете, а правило "цвет не единственный носитель смысла" держится другой колонкой - доступность всегда говорит словами, а требующие внимания стеки названы по имени в полосе внимания. Это записано в документе как осознанный обмен.
-- **Список - плоская область** с разделителем справа, а не карточка с тенью: строки читаются как таблица.
-- **Полоса внимания над списком** (`AttentionStrip.vue`): называет проблемные стеки по имени с причиной и ведёт к срезу `?filter=attention`.
-- **Шапка плотная**: логотип, "Развернуть стек", вкладки с подчёркиванием ("Стеки", "Консоль", "Настройки"), справа "N требуют внимания", спокойные счётчики и "обновлено N с назад" - последнее считается от прихода списка, а не от таймера рендера.
-- **Док виден всегда**, с кнопкой "+ сессия", которая открывает вывод любого стека; пустая полоса честно говорит "Открытых сессий нет".
-- **Инспектор**: "Обновить" стало главной кнопкой (при отставании Git - "Обновить из Git"), группа управления влезла в одну строку после отказа от значков, сервисы стали парами "имя - расход и аптайм" с действиями, которые проявляются при наведении и по фокусу.
-- Вкладок "Контейнеры" и "Агенты" из макета нет: за ними нет экранов, и выдумывать пустые я не стал.
-- Тесты: 184 unit, 32 браузерных. Три спека переписаны под новую разметку (таблица сервисов стала парами, док виден всегда), и это правки ожиданий, а не обход поведения.
-
-### 2026-08-30 — обновления, прерывание, пустые состояния и стенд
-
-- **Предпросмотр обновления.** Событие `stackUpdatePreview` отвечает, что известно до запуска: состояние рабочей копии (отставание, незакоммиченные правки) и ответ реестра по каждому образу. Кнопка "Обновить" теперь открывает предпросмотр, а выполняет вторая кнопка - смешивать эти состояния документ запрещает.
-- **Сравнение digest переделано после живой проверки.** Первая версия сравнивала `docker image inspect --format {{.Id}}` с digest конфигурации из манифеста. На containerd-хранилище `Id` - это digest манифеста, поэтому только что скачанный образ объявлялся устаревшим. Теперь сравниваются одинаковые величины: `RepoDigests` локально и `docker buildx imagetools inspect` в реестре; без buildx работает запасной путь только для одноархитектурных образов, иначе ответ остаётся "неизвестно". Проверено вживую: свежескачанный образ - "актуально", нескачанный - "образ ещё не скачан", несуществующий тег - "реестр не ответил".
-- **"Прервать"** появилось и в инспекторе, и в слое создания: событие `abortCompose` завершает только собственный compose-терминал стека, имя которого строит общий помощник, поэтому чужую сессию им не закрыть. Пока команда идёт, видно секунды и что происходит с каждым сервисом ("в очереди", "ждём проверку здоровья", "здоров").
-- **Пустые состояния** сведены в один компонент `EmptyState.vue`: пустой список зовёт слой создания, список под фильтром предлагает снять фильтр, выключенная консоль объясняет переменную окружения, первый запуск говорит, что учётная запись одна.
-- **Запуск проекта.** Появились `docker-compose.yml` (production, `restart: unless-stopped`), `docker-compose.local.yml` (разработка, без restart, порты 5000 и 5001, `node_modules` отдельным томом), исполняемый `local.sh` (пересоздаёт контейнеры строго своего compose-проекта, проверяет наличие Docker) и `.env.example` с полным списком переменных.
-- **Найден и исправлен настоящий баг сборки образа:** `npm ci --omit=dev` в `docker/Dockerfile` запускал node-gyp для better-sqlite3, а в базовом образе нет ни python, ни компилятора. Добавлен `--ignore-scripts`: готовые бинарники лежат в самих пакетах (`better-sqlite3/prebuilds`, `node-pty-prebuilt-multiarch/prebuilds`). Образ собран и проверен в работе - база открывается, авторизация готова, `docker ps` и `docker compose` внутри контейнера работают через сокет хоста.
-- Проверено: 190 unit, 32 браузерных (один спек падал из-за переиспользования уже запущенного сервера - на чистом прогоне зелёный), покрытие 81,9%.
-
-### 2026-08-31 — раскладка переставлена: работа получила место
-
-Владелец сказал, что интерфейсом неудобно пользоваться: список размазан по 1600 px (имя слева, доступность и обновления у правого края), а инспектор с действиями зажат в 400 px. Это отменяет пропорции "Каркаса 1" из макета, и правильно: макет рисовался до того, как в панели появилось что делать.
-
-- **Навигатор 320 px**, две строки на стек: имя с точкой состояния и одна мета-строка ("2 сервиса · 95,8% · 1 сбой"). Четыре колонки строки уехали в рабочую область - там образам, портам и расходу есть место, а в строке они заставляли взгляд ходить через пустоту.
-- **Рабочая область - остальное, но не шире 1100 px.** Первый вариант растянул таблицу на всю ширину, и получилась та же размазанность: имя слева, расход через 700 px пустоты. Теперь таблица шириной по содержимому.
-- **Пустая рабочая область стала главным сценарием.** Раньше на главной висели счётчики (дубль шапки) и кнопка "Развернуть стек" (дубль шапки). Теперь там стоит тот же бриф, что в слое: `CreateStackSheet` получил режим `inline`, логика одна, разная только оболочка. Агенты свёрнуты в строку - они нужны редко.
-- **Две подписи о доступности врали, и живая проверка это показала:** "99,9% · 0 сбоев" (доля упала из-за остановки, а не из-за сбоя - теперь показывается только процент с объяснением в подсказке) и "100%" при доле меньше единицы (процент округляется вниз, потому что простой был).
-- Спеки поправлены под новое поведение, и одна правка содержательная: вставка через `Ctrl+V` проверяется на экране открытого стека, а не на главной - на главной поле вставки теперь стоит прямо в рабочей области, и вставка честно попадает в него, а не в слой.
-- Проверено: 190 unit, 32 браузерных, покрытие 81,9%, живые снимки главной и стека в двух темах на 1600 и 1180 px.
-
-
-### 2026-09-13 — файлы и журнал стали вкладками, нижний док убран
-
-Владелец сказал, что файлы уводят на другую страницу, а журнал вылезает снизу и мешает. Выбран вариант "убрать нижнюю панель совсем".
-
-- **Обзор, Файлы и Журнал - вкладки одной страницы стека.** Маршруты `/stack/<имя>`, `/stack/<имя>/files` и `/stack/<имя>/logs` рендерят один и тот же `StackInspector.vue`, поэтому router переиспользует экземпляр: шапка, список и страница остаются на месте, меняется только рабочая область. Статичный сегмент пути обгоняет параметр в оценке маршрута - тот же приём, что уже работал для `git`.
-- **`/compose/<имя>[/<агент>]` теперь редирект** во вкладку файлов, чтобы старые ссылки не ломались. `Compose.vue` получил режим `embedded` и props имени стека и агента; свой заголовок и свои вкладки он в этом режиме не рисует.
-- **`TerminalDock.vue` удалён вместе с `$root.openStackLogs`, `openContainerShell` и `dockHasLogs`.** Вместо него `StackSessions.vue` внутри вкладки журнала: вкладки сессий сверху, терминал занимает рабочую область. Сессии переживают уход на другие вкладки того же стека (панель держится `v-show`, чтобы `Terminal` не размонтировался и не отправил `terminalLeave`), но на другой стек не переносятся - открытый стек показывает свой журнал.
-- **Панель файлов, наоборот, на `v-if`:** опрос и состояние редактора уничтожаются честно, а вопрос о несохранённых правках приходит через `beforeRouteUpdate` / `beforeRouteLeave` инспектора, который делегирует их встроенному `Compose` - внутрикомпонентные охранники срабатывают только у маршрутного компонента.
-- **xterm внутри скрытой вкладки подгоняется к мусорному размеру**, поэтому при показе журнала вызывается повторная подгонка и фокус.
-- Ключи локализации `dock*` переименованы в `session*`, устаревшие удалены; сцена, её README и дизайн-система описывают вкладки, а не док.
-- Проверено: 314 модульных проверок, lint и проверка типов чисто, сборка фронтенда проходит; живая проверка в сцене - переключение вкладок, shell из меню строки сервиса с фокусом, выживание сессии при уходе на другие вкладки, смена стека, прямая ссылка на файлы, обе темы. E2E (`test/e2e/stack-sessions.spec.ts` и правки соседних спек) не запускались: нужен живой бэкенд и Docker.
-
-
-### 2026-09-14 - журнал и файлы сведены с макетом
-
-Владелец показал три кадра макета: журнал, файлы и сравнение Git. Сравнение совпало, две другие вкладки пришлось привести к тому же виду. Правила взяты из `source.css` замороженного экспорта макета (см. `docs/design/2026-09-13-reference-export.md`) и выражены нашими токенами, сам макет остается замороженным и в приложение не импортируется.
-
-- **Одна сетка на всех вкладках.** Файлы и журнал получили ту же `inspector-grid`, что и обзор: главная колонка и панель источника 265 px справа. Раньше источник был только на обзоре, и левый верхний угол файлов выглядел пустым.
-- **Журнал - карточка.** Рамка, радиус, шапка на поверхности панели с вкладками сессий и "+ сессия", консоль внутри, подпись снизу. В шапке появилось состояние связи словом (`StateChip`, а не второй чип): локальный стек смотрит на свой сокет, стек агента - на статус этого агента. Подпись под консолью говорит, принимает ли показанная сессия ввод, потому что вывод стека и оболочка выглядят одинаково.
-- **Вывод стека - всегда первая вкладка**, оболочки пристраиваются справа. Просьба открыть оболочку приходит из таблицы сервисов раньше `mounted`, поэтому открытый следом вывод стека забирал показ себе, и набранная команда уходила в никуда; теперь запрошенная сессия остается показанной.
-- **Область консоли под наблюдением `ResizeObserver`.** Высота считается от экрана, и после изменения размера окна старая сетка xterm налезала на подпись. Область также обрезает содержимое, чтобы отставший холст не закрывал текст.
-- **Файлы - карточки файлов.** Имя файла в шапке моноширинным, отметка "На сервере", копирование в буфер и действия редактора там же; ряд кнопок над редактором убран. Под текстом подпись о том, что показан исходник с комментариями. Env-файл оформлен так же.
-- Новые ключи локализации: `sessionLive`, `sessionLogsNote`, `sessionShellNote`, `fileSourceNote`, `copyFile`, `copiedToClipboard`. В сцену добавлено `composeFileName`, иначе шапка карточки файла оказывалась безымянной только там.
-- Проверено: 314 модульных проверок, lint и проверка типов чисто; в сцене обе темы, ширины 400 и 1440 px, оболочка из меню строки сервиса с вводом команды. E2E не запускались: нужен живой бэкенд и Docker; селекторы `.sessions`, `.session-tab`, `.editor-box` и `.service-menu` сохранены намеренно.
-
-### 2026-09-14 - журнал отделен от терминала контейнера
-
-Владелец сказал: журнал нужен для вывода и ошибок, а оболочка bash/sh - это другое, и ей место в своей вкладке после журнала. Вкладка журнала успела стать терминалом для оболочек - это исправлено.
-
-- **Вкладок стека теперь четыре:** обзор, файлы, журнал, терминал. Маршрут `/stack/<имя>/terminal[/<агент>]` рендерит тот же `StackInspector.vue`, поэтому переключение остается на месте.
-- **`StackJournal.vue` - только вывод стека.** Одна консоль, выбирать нечего, фокус журналу не отдается: он ничего не принимает, а забранный фокус увел бы клавиатуру со страницы. Подпись под консолью прямо говорит, что нажатия здесь ничего не делают.
-- **`StackTerminals.vue` - оболочки контейнеров.** Вкладки открытых сессий с закрытием, "+ сессия" со списком работающих сервисов, подпись о том, что команды выполняются внутри контейнера. Пустая вкладка показывает выбор сервиса, а не черный прямоугольник: консоль появляется вместе с первой оболочкой.
-- **"Открыть shell" из меню строки сервиса ведет во вкладку терминала** и сразу отдает ей ввод. Кнопка логов в строке по-прежнему ведет в журнал.
-- Обе панели держатся смонтированными после ухода на другую вкладку: журнал иначе начал бы вывод заново, терминал потерял бы открытые оболочки.
-- Новый ключ `terminalPickService`, вкладка журнала получила свою контурную иконку `logs` (иконка терминала осталась за терминалом).
-- E2E разделены на `test/e2e/stack-journal.spec.ts` и `test/e2e/stack-terminal.spec.ts`; селекторы теперь `.journal`, `.terminals`, `.terminal-tab`, `.terminal-start`. Не запускались: нужен живой бэкенд и Docker.
-
-### 2026-09-14 - ход команды виден на странице стека
-
-Владелец спросил, где показывается вывод запуска и перезапуска ("[+] Running 2/2", "✔ Container ... Removed", "[+] Pulling 13/13") - окном поверх страницы или как-то иначе. В Dockge 1 это черная консоль прямо под кнопками действия; там же она и осталась, но в нашей дизайн-системе.
-
-- **`StackProgress.vue` - панель под шапкой стека, над вкладками.** Видна с любой вкладки, ничего собой не закрывает. Окно поверх отвергнуто: оно прячет ровно то, ради чего команду запускали, и мешает уйти на другую вкладку, пока команда идет.
-- **Открывается сама** при начале команды и при первой строке вывода; закрывается только кнопкой. В шапке - команда словом и состояние: "идет N с" с кнопкой прерывания, потом "готово за N с" или "не удалось" с красной рамкой.
-- **Один вывод - один терминал.** Раньше терминал прогресса слушал только `Compose.vue`, то есть вкладка файлов: с обзора вывод запуска был не виден вовсе. Теперь встроенный редактор его не создает (два терминала с одним именем отнимали бы строки друг у друга), а о начале и конце развертывания сообщает событиями `run-start` / `run-end`.
-- **Действия над отдельным сервисом тоже идут в эту панель**: сервер пишет их вывод в тот же терминал прогресса.
-- Класс корневого элемента - `.progress-panel`: `.progress` в bootstrap означает полосу загрузки высотой 1rem, и консоль превращалась в полоску.
-- Новые ключи: `progressTitle`, `progressFinished`, `progressFailed`, `progressHide`, `progressNote`. Сцена печатает записанный вывод compose по кнопкам действий, ничего не выполняя.
-- Проверено в сцене: светлая и темная темы, панель остается видимой при переходе обзор - журнал, вывод не налезает на подпись. Новый `test/e2e/stack-progress.spec.ts` не запускался: нужен живой бэкенд и Docker; он же запускает стек файлов, поэтому teardown теперь останавливает и его.
-
-### 2026-09-14 - ход команды говорит шагами, а терминал ждет своей очереди
-
-Владелец: "терминал - отталкивает людей, но терминал нужен для работы". Ubuntu решает это тем, что терминал не всплывает сам, пока человек его не позовет или пока не случилась ошибка. Панель хода переделана по этому правилу.
-
-- **Шаги вместо вывода.** `common/compose-progress.ts` разбирает тот же поток в ресурсы и их состояния: вид (контейнер, сеть, том, образ), имя, глагол, секунды. Compose в TTY перерисовывает свой блок на месте, поэтому строки сводятся по ресурсу и последнее слово о нем побеждает. Незнакомый глагол - не шаг, а обычный вывод; строки слоев образа пропускаются.
-- **Читается буфер xterm, а не сокет.** В буфере перерисовка уже свернута к тому, что стоит на экране, а перенесенные строки склеиваются обратно по `isWrapped`. Разбор идет по событию `onWriteParsed` с задержкой 120 мс, поэтому шаги не дергаются на каждый байт. Терминал остается смонтированным всегда: он связан с сокетом по имени.
-- **Движение отвечает на событие, а не украшает.** Строка выезжает снизу - ресурс поднялся; работающий шаг дышит точкой; итог ставится галочкой или крестом с коротким появлением; нить под шапкой набирает долю по счету compose, а без счета бежит сама. При `prefers-reduced-motion` бесконечные анимации выключены, состояние остается в форме значка и в слове.
-- **Вывод - по просьбе.** Кнопка "Показать вывод" под шагами; вывод раскрывается сам при провале шага и когда compose ответил текстом без шагов. Открытый руками вывод запоминается на следующие команды.
-- **Убран дублирующий блок выполнения с обзора** (`.running` и `progressLabel`): он говорил то же самое хуже. Освободившиеся ключи `serviceQueued`, `serviceWaitingHealth`, `serviceHealthy` удалены, `abortRunning` остался - он нужен листу создания стека.
-- Новые ключи: `progressShowLog`, `progressHideLog`, `progressWaiting`, `progressSteps`, `progressSeconds`, `progressKind*` (4), `progressRun*` (6), `progressVerb*` (18); `progressHide` теперь про панель, а не про вывод. Значки `network`, `volume`, `image`, `check`, `cross` добавлены в `InterfaceIcon.vue`.
-- Сцена печатает ход кадрами, с подъемом курсора и очисткой блока, как настоящий compose; стек uptime-kuma всегда падает - на нем проверяется красная рамка и вывод, раскрывшийся сам.
-- Проверено в сцене: светлая и темная темы, ожидание ответа, ход, удача, провал с раскрытым выводом, ширина колонки 300 px (имена усекаются, строка не переполняется). `test/e2e/stack-progress.spec.ts` переписан под новое поведение и не запускался: нужен живой бэкенд и Docker.
-
-### 2026-09-14 - состояние говорит таблица, ход - одна строка, вывод - окно
-
-Владелец: "а что если тут выводить статус активный по запуску и перезапуску, а если будут ошибки, то можно нажать кнопку и вылезеть окно с фул логом запуска? чтобы панель не мешала каждый, а то статус же по сути дублируется". Дублирование признано: панель шагов и колонка "Состояние" говорили об одном и том же в двух местах. Но не полностью - в таблице нет сетей, томов, загрузки образов, общего времени и прерывания, и таблицы нет на вкладках файлов, журнала и терминала. Поэтому дублирующая часть отдана таблице, а остаток ужат до строки.
-
-- **Колонка "Состояние" читает шаги compose.** Пока команда идет, чип сервиса называет то, что говорит compose ("создается", "запускается", "запущено"), и его точка дышит; цвет идет от состояния шага: работа - внимание, готово - работает (или остановлен для "остановлено" и "удалено"), провал - неудача. Через `TAIL_DELAY` = 4 с после конца шаги отпускаются, и слово снова берется из замера Docker - иначе таблица врала бы о том, что случилось после команды.
-- **Compose называет контейнеры, а не сервисы.** Шаг ищется по имени контейнера из `docker ps`, затем по `container_name` из файла, затем по тому, как compose собирает имя сам (`<стек>[-_]<сервис>[-_]<номер>`); шаг загрузки образа сопоставляется по имени сервиса и уступает шагу контейнера.
-- **Панель стала строкой** (`.run-strip`): знак итога, команда словом, что происходит сейчас, счет шагов, секунды, "Прервать", "Показать вывод", закрытие, нить по нижнему краю. После удачи строка уходит сама через 4 с, после неудачи остается красной и называет сорвавшийся шаг. Обертка компонента - `display: contents`: пустой блок оставлял бы дыру в колонке страницы.
-- **Полный вывод - в окне.** Модальное окно bootstrap с постоянной разметкой (как `Confirm.vue`), поэтому терминал внутри никогда не размонтируется и не теряет связь с сокетом; сетка xterm подгоняется по `shown.bs.modal`. Окно не открывается само даже при провале: человек нажимает кнопку - так он и просил. К выводу последней команды ведет пункт "Вывод последней команды" в меню "Еще" стека.
-- **Словари вынесены в `frontend/src/progress-labels.ts`**: одни и те же глаголы нужны и строке хода, и таблице сервисов, а SFC не отдает наружу ничего, кроме компонента.
-- `StateChip` получил признак `busy`: точка дышит, пока шаг не готов. Движение выключается при `prefers-reduced-motion`, слово остается.
-- Новые ключи: `progressLogTitle`, `progressLastRun`, `progressFailedAt`, `progressStepLine`; `progressHideLog` удален, `progressHide` теперь просто "Скрыть". Сцена сообщает настоящие имена контейнеров, состояние остановленного - `exited`, как его называет Docker, а падение uptime-kuma привязано к сервису web: на нем видно красную строку сервиса.
-- Проверено в сцене: светлая и темная темы, ход с живыми словами в таблице, удача с самоуходом строки, провал с красной строкой и окном вывода, ширина колонки 360 px (кнопки переносятся, строка не переполняется). `test/e2e/stack-progress.spec.ts` обновлен под новые селекторы и не запускался: нужен живой бэкенд и Docker.
-
-### 2026-09-14 - одна анатомия панелей на вкладках файлов, журнала и терминала
-
-Владелец: "посмотри на текущее состояние файлов и журналов, а также терминала ... мне кажется дизайн очень несогласованный между собой". Снимки и замеры подтвердили: три разные шапки (49, 35 и 33 px) в трех стилях, две семьи значков (контурные во вкладках и карточке файла, font-awesome в шапках журнала и терминала), заголовки `h4` над формами при именах в шапках у соседей, тень у `.shadow-box` при отсутствии тени у остальных панелей, радиус 10 у источника при 7 у остальных, кнопки обычного размера рядом с `btn-sm`, бирки палитры Bootstrap, `select multiple` рядом со списком флажков, красная кнопка удаления в каждой строке, "Логи" в шапке при вкладке "Журнал", "+ сессия" при "Открыть shell" в меню, свое движение `slide-fade` у файлов при `tab` у остальных вкладок, консоль на 50vh с четвертью пустой страницы под ней, карточки контейнеров с bootstrap-классом `.container`, из-за чего они были уже и стояли по центру.
-
-- **Одна анатомия панели** в `main.scss`: `.panel` (рамка, радиус панели, без тени), `.panel-bar` (высота контрола с отступом, контурный значок, имя, `.panel-meta` у правого края, действия `btn-sm`), `.panel-body`, `.panel-console`, `.panel-foot` (мелкий кегль под линией; `.kept` окрашивает щит зеленым). Ее используют файл Compose, env-файл, "Выбор файлов", "Секреты", "Контейнеры", "Дополнительно", "Сети", "Общее" при создании, журнал, терминал и источник. Дублирующие блоки CSS в `StackJournal`, `StackTerminals`, `StackSourcePanel` и `Compose` удалены.
-- **Имя говорит шапка.** Заголовки `h4` над формами убраны; кнопка сохранения выбора файлов стоит в шапке своей панели и включается, когда есть что сохранять. Значки в шапках - контурные `InterfaceIcon`; добавлены `lock` и `sliders`.
-- **Список внутри панели - строки.** Файлы секретов и сервисы разделены тонкими линиями внутри одной панели, а не вложенными карточками. Бирки имени и сервисов набраны на поверхности панели, привязанное имя - акцентом. Сервисы для привязки секрета выбираются флажками, как env-файлы. Удаление - `btn-normal.btn-danger-text`: красное слово на обычной кнопке.
-- **Одно слово - одно действие.** Кнопка терминала называется "Открыть оболочку", как пункт меню сервиса; ключ `sessionNew` удален. Шапка журнала - "Журнал paperless" по имени вкладки.
-- **Консоль растет до низа страницы.** `.work-column` стала flex-колонкой, `.inspector` и вкладки журнала и терминала с открытой оболочкой - `flex: 1`; источник справа остается у верхнего края. Вкладка файлов получила то же движение `tab`, что остальные; внутри страницы стека собственный въезд редактора отключен.
-- Новые ключи `fileSelection`, `bindServices`. E2E `compose-files.spec.ts` выбирает сервис флажком.
-
-### 2026-09-15 - проход по всем экранам: одна сетка, один контрол, телефон без прокрутки
-
-Владелец: "пройдись по всему дизайну и доведи его до идеала, чтобы было удобно и красиво". Прошли все экраны в обеих темах на 1440 px и на телефоне 375 px по тестовой сцене (`test/visual/`), без бэкенда и Docker. Сцена расширена так, чтобы общий обзор вообще стал открываемым: маршрут `""` теперь отдает `StabilityDashboard`, маршрут стека получил имя `stackInspector` (без него ссылки из обзора падали), добавлены заготовки `stabilityOverview` и `stackAvailability`.
-
-- **Общий обзор: один сервер - одна таблица.** Раньше на каждый стек рисовалась своя таблица: заголовки колонок повторялись столько раз, сколько стеков, и колонки не совпадали по ширине между ними. Теперь колонки называются один раз, а стек стал полкой внутри таблицы (`<tbody class="stack-group">` со строкой-заголовком на подложке `--surface-sunken`). Имя стека в полке пишется как в списке слева - без подчеркивания, оно появляется при наведении и фокусе. Ключ `stabilityTableCaption` заменен на `stabilityHostTableCaption` ("Контейнеры на сервере {0}"). Имя контейнера переносится только по границе слова: `anywhere` разрешал таблице сузить колонку до одной буквы.
-- **Консоль перестала быть черной дырой.** xterm рисует своей темой чистый черный, и в светлой теме черный прямоугольник внутри почти черной панели давал видимый шов. Терминал получает цвета токенами (`consoleTheme()`: фон, текст, курсор, выделение), подложка `.xterm-viewport` перекрыта токеном, а `.panel-console` держит текст на отступе от рамки - строки, прижатые к линии панели, читались как обрезанные. Добавлен токен `--surface-console-selection`.
-- **Один контрол - один вид.** `ThemePicker` стал обычным контролом формы с признаком `compact`: в настройках он занимает ширину поля рядом с выбором языка (раньше два одинаковых контрола стояли разной ширины), в шапке и на экране первого запуска тот же контрол показан компактно. Меню учетной записи собрано группами: работа со стеками, разделы настроек, внизу - выбор темы и выход; раньше выбор темы стоял посреди ссылок и читался как еще один переход.
-- **Второй призыв к действию в одной рамке убран.** В панели терминала "Открыть оболочку" в шапке появляется только когда сессия уже есть: пока сессий нет, выбор сервиса стоит в теле панели, и два одинаковых предложения спорили за нажатие. Это тот же случай, что раньше закрыли в панели источника.
-- **Телефон.** Полоса вкладок стека прокручивается сама (страница больше не уезжает вбок: было 382 px при экране 375), ниже 480 px уходят значки вкладок - имя важнее знака. Лента файлов сравнения снова становится списком, подпись решения уходит на свою строку, бирки сервисов у секрета переносятся с подписью на отдельной строке, способы создания стека не переносятся в две линии. В ящике списка имя раздела не повторяется - оно уже стоит на кнопке, которая его открыла, а "Новый стек" получает подписанную кнопку внизу.
-- **Env-файл перестал быть невидимкой.** Владелец спросил, как вообще править env. Оказалось, что панель env существовала только в режиме правки: compose читался свободно, а `.env` нельзя было даже открыть, и завести новый env-файл из интерфейса было нечем. Разобрано как иерархический автомат вкладки: `Add` / `Manage{View, Edit{Structured, Text-only}}` и ортогональная область `processing`. Дочернее состояние заводило сущность вместо того, чтобы менять поведение, - панель поднята на уровень compose, режим решает только `:disabled`. В чтении панель показывается, если активный файл действительно лежит в каталоге (`envPanelVisible`), иначе экран обещал бы несуществующий файл. Кнопка "Изменить" появилась в шапке панели env: режим правки один на экран, но включать его можно от того файла, который человек читает. Пустой файл говорит об этом строкой - черный прямоугольник с одной строкой читался как сбой загрузки.
-- **Заведение env-файла - отдельный переход.** В панели "Выбор файлов" появилась строка с именем и кнопкой "Добавить env-файл": она зовет уже существовавшее событие `saveEnvFile` (бэкенд не менялся - `writeEnvFile` и так требует `classifyStackFile(...) === "env"` и запрещает `..`, абсолютные пути и симлинки). Завести файл, включить его в подстановку и открыть в редакторе оставлены тремя шагами: `saveFileSelection` в режиме правки не перечитывает тексты, поэтому объединенное действие оставило бы заголовок панели с новым именем и текстом старого файла, а при сохранении записало бы старый текст в новый файл; кроме того глубокий наблюдатель `inventory` сбрасывает черновик выбора. Пока выбор файлов не сохранен, форма заведения закрыта и объясняет это строкой `saveFileSelectionFirst` - незавершенный переход блокирует следующий. Имя проверяется тем же `isEnvFileName`, что и на сервере; занятое имя и неподходящее имя говорят разное. Новые ключи: `addEnvFile`, `addEnvFileHint`, `envFileNameHint`, `envFileNameTaken`, `saveFileSelectionFirst`, `envFileEmpty`.
-- Тестовая сцена научилась этому сценарию: `getStackFiles` отдает копию инвентаря (по настоящему сокету он приходит разобранным из JSON, а одна и та же ссылка молча гасила перерисовку), `setStackFiles` запоминает выбор, тексты env хранятся по именам файлов. Заодно в `Compose.vue` разведены совпадавшие `ref="editor"` у двух редакторов: `composeEditor` и `envEditor`.
-- **Обрезка теперь показывает спрятанное.** Владелец разрешил обрезать текст, но потребовал показывать при наведении, что именно скрыто. Директива `v-ellipsis-title` (`frontend/src/directives/ellipsis-title.ts`) вешает `title` только когда `scrollWidth` действительно больше `clientWidth`, и снимает его при обратном: подсказка, повторяющая видимый текст, - шум. Берется `innerText`, а не `textContent`: на телефоне часть подписи убирается медиа-запросом, и подсказка обещала бы текст, которого на экране нет. Ширина меняется без перерисовки, поэтому за элементом следит `ResizeObserver`. Применена к строке фактов инспектора, заголовку и шагу строки хода команды; у выбора сервера (`select`) ширину текста не измерить, там подсказка стоит всегда и собирается в `selectedServerLabel`. Строка списка стеков уже несла полное имя в `title`, ее не трогали.
-- **Эталонные снимки экранов.** Владелец: "Эталон надо сохранить, не надо каждый промпт за эталон считать, это bad practice". Добавлены `playwright-visual.config.ts`, `test/visual/design.spec.ts` и команды `npm run test:visual` / `npm run test:visual:approve`. Снимаются девять экранов в светлой и темной теме на 1280 px и пять из них на телефоне 390 px - 28 эталонов в `test/visual/baseline/`, коммитятся. Настоящие E2E оставлены отдельным конфигом: им нужен Docker, и приемка вида падала бы по причинам, к виду отношения не имеющим. Детерминизм: сцена без сокета, `page.clock.setFixedTime` (возраст статуса и окна доступности иначе меняли бы кадр каждую секунду), тема ставится явно, анимации выключены на время снимка. Переутверждение - отдельная команда: обновленный заодно с правкой снимок перестает быть эталоном.
-- **Две поломки консоли, которые видны только вживую.** Снимки журнала расходились от прогона к прогону: xterm меряет ширину знакоместа один раз, при открытии, и успевал померять запасной моноширинный до загрузки IBM Plex Mono - сетка раскладывалась под чужой шрифт и такой оставалась до первого изменения размера окна. Терминал теперь ждет `document.fonts.load` для консольного шрифта и только потом открывается (`openTerminal`), а `unmounted` терпит терминал, которого еще нет. Вторая поломка вылезла следом на живом экземпляре: `StackTerminals`, `StackJournal` и `StackProgress` просят подгонку размера у дочернего компонента, и запрос, пришедший до открытия, создавал `FitAddon` привязанным в пустоту - дальше `fit()` молчал, и оболочка выходила шириной 882 px внутри панели 654 px. `updateTerminalSize` теперь ничего не делает, пока терминала нет: открытие само заканчивается подгонкой. Проверено на живом экземпляре: 76 колонок на 27 строк в панели, `whoami` в контейнере отвечает.
-- Значок `chevron-left` добавлен в `icon.ts`: возврат к разделам настроек на телефоне его требовал, и в консоли висела ошибка.
-- **Живой экземпляр для приемки.** Тестовая сцена отвечает заготовками и врет в обе стороны: 14 сентября она показала несуществующую поломку (отдавала одну и ту же ссылку на инвентарь), а настоящую скрыла бы так же легко. `extra/seed-review.ts` раскладывает в `.tmp/review` (внутри проекта, в .gitignore) четыре стека под крайние случаи разметки: работающий из трех сервисов, стек с тремя compose и пятью env-файлами и секретом, стек с падающим контейнером и стек с длинным именем, который остается неразвернутым. Владелец заводится тем же обработчиком, что и в интерфейсе, со случайным паролем, после чего вход выключается настройкой `disableAuth`: пароль в браузер не вводится. Образы берутся только те, что уже есть локально. Именно на нем нашлись обе поломки консоли и то, что экран файлов молчит о файле, который лежит на диске, но не проходит список разрешенных имен (`SAFE_SEGMENT` отвергает кириллицу - это верно по замыслу, но сказать об этом человеку экран не умеет).
-- Проверено: `npm run check` - lint, типы и 322 модульных теста проходят; `npm run test:visual` - 28 эталонов сходятся три прогона подряд. Живой экземпляр поднимался из `extra/seed-review.ts` (см. ниже). Docker-интеграция и E2E не запускались.
-
-### 2026-09-15, второй проход - живой экземпляр: один словарь состояний, одна коробка внимания
-
-Тот же наказ владельца, но проверка велась не по сцене, а по поднятому экземпляру с настоящими контейнерами: расхождения ниже видны только когда элементы стоят рядом на одном экране.
-
-- **Выключенная кнопка выглядит одинаково у всех видов.** У `btn-primary:disabled` оставалась синяя заливка, у `btn-normal:disabled` - обычная: недоступное действие обещало вес, которого у него нет. Теперь у любой выключенной кнопки заливки вида нет, остаются тонкая рамка и приглушенная надпись из токенов. Прозрачность Bootstrap (`opacity: .65`) отменена: она ставила контраст надписи в зависимость от того, что оказалось под кнопкой.
-- **Шапка панели перестала зависеть от уровня заголовка.** `.panel-title` задавал только цвет и вес, размер брался от тега: там, где в шапке стоял `h2`, надпись выходила 22 px рядом с 14 px у соседней панели. Размер и межстрочный интервал теперь заданы в самом классе.
-- **Колонка настроек ограничена 720 px.** На 1440 px поля растягивались во всю ширину окна, и подпись от поля отделяло полэкрана пустоты.
-- **Раздел MCP после неудачного чтения показывает причину и повтор.** Раньше при сбое загрузки он отрисовывал форму значений по умолчанию; нажатие "Сохранить" записало бы их поверх настоящих настроек.
-- **Файл, чье имя не принял список разрешенных имен, назван на экране.** До этого он просто исчезал из списка: на диске лежит, в интерфейсе его нет. Теперь он показан отдельным блоком с причиной и тем, что с этим делать. Список имен не ослаблен - менялся только экран.
-- **Ноль в счете состояний приглушен.** Оранжевое "0 Требуют внимания" читалось как предупреждение при полном порядке.
-- **Один словарь состояний.** У понятия "состояние контейнера" было два набора слов: в таблице сервисов стояли сокращения "акт." / "ост." / "неакт.", в остальном интерфейсе состояния писались целиком. Сокращения и выдававшие их мертвые хелперы `statusName` / `statusNameShort` удалены, `exited` переведено как "остановлен", осиротевшие ключи (`attention`, `draft`, `created_stack`) убраны. Стек, сервис и контейнер называют одно и то же одними словами.
-- **Регистр подписи чипа задан в одном месте.** Чип читался "Работает" на уровне стека и "остановлен" на уровне сервиса. Правило `::first-letter` живет в `StateChip.vue`, а не в словаре: те же слова в строке хода команды (`progressStepLine` "{0} {1} {2}") стоят внутри предложения, и второй набор строк ради регистра удвоил бы словарь. Стековая бирка внимания переведена на семью `pages*` (`pagesAttention`), метка `reasonBadge` пишется с заглавной.
-- **Внимание рисуется одной коробкой.** Ее вид был выписан отдельно на главной и на странице стека и успел разойтись: в одном месте метка шла с заглавной, в другом принудительно приводилась к строчной. Вид вынесен в `.attention-block` / `.attention-badge` в `main.scss`, экраны задают только раскладку.
-- **Полоса внимания вернулась на общий обзор.** `AttentionStrip.vue` существовал в коде, но после перестройки главной (`edf3fe9`) его не импортировал никто: элемент не стоял ни на одном экране. Он поставлен над счетом состояний - счет считает контейнеры, полоса называет стеки по именам с причиной.
-- **Экран входа.** Карточка была прижата к верху и оставляла под собой полэкрана пустоты; теперь стоит посреди области под шапкой (`.auth-screen`). Заодно исправлен эталон: в сцене `/login` и `/setup` лежали внутри рабочей области и снимались с рейкой стеков сбоку - раскладка, которой в приложении не бывает. Теперь они стоят рядом с рабочей областью.
-- **Эталон получил состояние внимания.** В сцене один стек переведен в `ATTENTION` с причиной: без него ни чип этого состояния, ни полоса внимания не попадали ни на один снимок.
-- Проверено: `npm run check` - lint, типы и 324 модульных теста проходят, покрытие 80.66% при пороге 70%; `npm run test:visual` - 28 снимков сходятся после одного осознанного переутверждения. Docker-интеграция и E2E не запускались. Коммит не делался.
-
-### 2026-09-15, третий проход - живой экземпляр: место под вывод, одна марка, один флажок
-
-Тот же наказ и тот же поднятый экземпляр, следующий круг по экранам. Здесь собраны расхождения, которые не видит ни сцена, ни линтер: они появляются, когда страницу открывают на настоящем окне с настоящими данными.
-
-- **Страница из одной консоли занимает рабочую область до низа.** Консоль сервера и оболочка контейнера задавали телу панели высоту числом строк: под панелью оставалась пустая четверть экрана, на высоком мониторе - половина. Добавлен `.page-fill` в `main.scss`: панель растет до низа, тело отдает остаток терминалу, нижняя граница держится минимумом в 280 px. Заодно у `.panel-bar` и `.panel-foot` проставлен `flex: none` - концы панели фиксированы, тянется тело.
-- **Шапка консоли называет сервер, а не страницу.** Над заголовком "Консоль" стояла панель с подписью "Консоль": слово дважды подряд ничего не добавляло, а на агенте скрывало главное - чья это машина. Теперь в шапке имя своего хоста или отображаемое имя агента.
-- **Удаление последнего действующего владельца выключено.** Кнопка всегда кончалась ошибкой `authLastOwner`: сервер проверяет это сам. Причина стоит в подписи панели одной фразой вместе с обычной подсказкой - вторым элементом строки она встала бы во вторую колонку, потому что подпись панели это flex-ряд.
-- **Раздел MCP отличает отказ в доступе от неудачного чтения.** `/api/mcp` требует настоящей сессии даже при выключенном входе, и на локальном экземпляре раздел всегда получал 403, а показывал совет проверить пароль владельца, который относится только к отправке формы. Теперь 403 назван своей причиной, и кнопка повтора при нем не показывается: повтор вернул бы ту же выдачу слово в слово.
-- **Флажок - общая анатомия, а не копия в каждом экране.** Bootstrap ставит коробку в float с отрицательным левым полем; в строке настроек она уезжала за левый край панели, где ее срезала рамка. Правило было выписано тремя копиями (настройки, пользователи, MCP, о программе), и одна из них проигрывала Bootstrap не весом селектора, а порядком подключения стилей. Теперь `.form-check` живет в `main.scss` после импорта Bootstrap, где выигрывает детерминированно, копии удалены.
-- **Коробка редактора держит место под шесть строк.** На пустом или однострочном файле она сжималась до одной строки и переставала читаться как поверхность, в которой пишут.
-- **Марка продукта - один компонент.** Имя было выписано в шапке, на первом запуске, в разделе о продукте и нигде на входе: читалось то "dockge2", то "Dockge", а на первом запуске номер поколения пропадал. Добавлен `BrandMark.vue`, все четыре экрана берут его; на входе марка появилась впервые - дизайн-система ее обещала. Номер поколения задан долей от кегля (73%), а не токеном шкалы: марка стоит на экранах разного размера, а пропорция у нее одна. Телефонное исключение по размеру номера удалено вместе со старыми правилами.
-- **Мелочи регистра и шага.** Счет в шапке панели отделен от стоящей рядом кнопки шагом больше, чем между кнопками: иначе он читался как подпись к соседней кнопке. Имя сервера в строке списка агентов поднимает первую букву тем же правилом `::first-letter`, что и чип состояния - в шапке стека то же имя стоит внутри предложения, и там заглавной быть не должно.
-- **Сид обзора пишет `disableAuth` с типом `general`.** Раздел настроек читает только строки этого типа, поэтому экран безопасности показывал переключатель "Отключить аутентификацию" выключенным при уже выключенном входе, вместе с формой пароля, которая ничего не меняет. Правка только в `extra/seed-review.ts` и в локальной базе обзора.
-- Проверено: `npm run check` - lint, типы и 324 модульных теста проходят, покрытие 80.66% при пороге 70%; `npm run test:visual` - 28 снимков сходятся после одного осознанного переутверждения на всю партию (все расхождения предварительно разобраны по снимкам). Docker-интеграция и E2E не запускались. Коммит не делался.
-
-### 2026-09-15, четвертый проход - телефон и отметки состояния
-
-Проход по тем же экранам с ширины 390 px и по местам, где элемент показывает сам себя: где я, что выбрано, куда нажимать. Проверка велась скриптом по четырнадцати маршрутам (горизонтальная прокрутка страницы, элементы за правым краем, обрезанный текст без подсказки, цели нажатия ниже 30 px) и глазами по снимкам.
-
-- **Рейка отмечает открытый стек на всех его вкладках.** Маршруты файлов, журнала, терминала и сравнения Git - соседи обзора, а не его дети, поэтому `router-link` считал пункт активным только на обзоре: на четырех страницах из пяти в рейке не было видно, какой стек открыт. Теперь строка сравнивает себя с параметрами маршрута и ставит и `.active`, и `aria-current="page"`.
-- **Длинное имя в рейке отдает подсказку при наведении.** Директива `v-ellipsis-title` уже существовала и вешала `title` только на действительно обрезанный текст, но самое частое место обрезки - имя стека в рейке - ее не использовало. Заодно снята постоянная подсказка со всей строки: она повторяла видимый текст.
-- **Мертвый код строки списка убран.** Четыре вычисляемых свойства доступности и три правила стилей остались от прежнего вида строки: доступность словами живет на странице стека и в панели стабильности, а в рейке стоит чип состояния.
-- **Шапка таблицы сервисов вышла из `caption`.** На телефоне таблица шире экрана, и вместе с ней уезжали вправо счет сервисов, время проверки и меню колонок. Теперь шапка стоит над областью прокрутки (`.services-scroll`), а у таблицы осталась подпись для читающих с экрана.
-- **Полоса внимания на узком экране.** Действие уходит на свою строку, метка и причины делят первую. В три колонки причине оставалось десять знаков ширины: имя стека переносилось по дефису, а слово "остановлен" рвалось пополам.
-- **Ящик со стеками на телефоне - одна полоса прокрутки, а не три.** Прокручивались и список (40dvh), и сам ящик (60dvh), и страница; палец попадал в случайную из них. Ящик прокручиваться перестал, список остался с прежним пределом, и под ним снова видна кнопка создания стека.
-- **Цели нажатия по системе.** В токенах появился `--control-height-sm` (24 px), который на узком экране растет до `--control-height-touch`: выбор окна доступности был жестко 24 px и под пальцем не нажимался. У переключателя внешней сети рисунок остался 34x20, а цель нажатия стала во всю высоту контрола - комментарий в коде обещал нужный размер, которого не было.
-- **Текущий пункт выпадающего меню.** Сплошная заливка акцентом (наследие значений Bootstrap) читалась как выделение мышью; теперь это мягкий акцент, как у строки в рейке и раздела настроек. Мертвый блок значений `.list-group` удален - в шаблонах он не встречается.
-- **Значок у каждого пункта меню стека.** У "Обновить образы" его не было, и левый край меню шел лесенкой.
-- **Раздел MCP, который не удалось прочитать,** объясняется той же коробкой, что и выключенная консоль: заголовок называет состояние, подсказка - причину, повтор стоит только там, где может помочь.
-- **Панель отключения входа названа по делу:** "Вход в интерфейс" вместо "Расширенные" - в ней одна кнопка, и она про вход.
-- Проверено: `npm run check` - lint, типы и 324 модульных теста, покрытие 80.66% при пороге 70%; `npm run test:visual` - 28 снимков, переутверждены обзор стека (шапка таблицы) и телефонная главная (полоса внимания). Docker-интеграция и E2E не запускались. Коммит не делался.
-
-### 2026-09-15, пятый проход - клавиатура, контраст, структура заголовков
-
-Проход по трем срезам, которых раньше не было: обход по Tab на четырнадцати маршрутах, расчет контраста каждого видимого текста на его фактическом фоне в обеих темах, разбор структуры заголовков на пятнадцати экранах.
-
-- **Ловушка фокуса в журнале снята.** `xterm` забирал фокус при открытии любого терминала, включая вывод, и перехватывал Tab. На вкладке журнала обход давал одну остановку из двадцати семи: попав в вывод, клавиатурой из него было не выйти. Теперь фокус забирает только терминал, в который печатают (`mainTerminal`, `interactive`), у вывода стоит `disableStdin`, а Tab в режиме вывода отдается браузеру. В оболочке контейнера Tab остался рабочей клавишей - там он дополняет имя.
-- **Кольцо фокуса у консоли и редактора.** Поле ввода `xterm` скрытое и размером в пиксель, а `cm-content` без рамки: приход туда с клавиатуры ничем не отмечался. Кольцо рисует коробка вокруг. У консоли это слой поверх (`::after` с `--layer-sticky`), а не `outline`: холсты xterm лежат выше контура и закрывали даже шестипиксельный.
-- **Состояние - это текст, значит порог у него текстовый.** Состояния стоят словом рядом со счетчиком, в приговоре стабильности и в строке правки Git. Прежний тест проверял 3:1 на двух поверхностях с объяснением, что текста они не несут. `--state-running` на общей поверхности давал 4.36, на утопленной 3.78. Четыре состояния и `--text-faint` сдвинуты по светлоте на несколько единиц (например `#238353` -> `#1f7349`), тест проверяет 4.5 на пяти поверхностях для шести состояний и четырех текстовых токенов. После правки живой расчет по четырнадцати маршрутам в обеих темах не находит ни одного промаха.
-- **Заголовок панели стал заголовком.** В настройках шапка панели была `h2`, в рабочей области - `span` с тем же классом; на странице создания стека структура шла от `h1` к `h4`. Одиннадцать шапок переведены в `h2`, имя сервиса - в `h3`. Вид не изменился: размер и вес держит класс `.panel-title`, а не уровень тега.
-- Проверено: `npm run check` - lint, типы и 324 модульных теста, покрытие 80.66% при пороге 70%; `npm run test:visual` - 28 снимков, переутверждены четыре снимка журнала (из вывода пропал курсор ввода, которого там и не должно быть). Docker-интеграция и E2E не запускались. Коммит не делался.
-
-### 2026-09-15 - сохранность стеков записана в бэклог
-
-Разговор начался с вопроса о PostgreSQL внутри Dockge и закончился постановкой о резервных копиях. Постгрес отклонен: Dockge - control plane, его база хранит пользователя, настройки, агентов и историю статусов, а не истину о стеках; истина лежит файлами в каталоге стеков и в самом Docker. Встроенный сервер базы дал бы вторую систему хранения, парадокс загрузки (стек с базой поднимает то, что сам собирается хранить), `pg_upgrade` между мажорными версиями, новый секрет и потерю переносимости "скопировал каталог - перенес экземпляр". SQLite остается.
-
-Из того же разговора вырос настоящий вопрос: копии стеков. Формулировка пользователя - копии должны быть управляемыми и включаться на стек, потому что узлу управления и паре контейнеров с телеграм-ботами они не нужны, а задача требует проработки, системной логики и места на диске, и потому идет в бэклог.
-
-- **Причина записи.** Требование зафиксировано до реализации, как велит правило ведения файла. Постановка уточнена: копируют не контейнер, а рецепт, данные и версию образа; `docker commit` и `docker export` не подходят.
-- **Затронутые файлы.** Пока только этот план: раздел "Сохранность стеков: рецепт, тома, снимки" в требованиях и один пункт в плане реализации. Точки опоры на будущее - `common/stack-files.ts`, `backend/stack-git.ts`, `common/image-digest.ts`; модели томов в коде нет.
-- **Статус.** Решение не принято, декомпозиции нет, к реализации не приступать. Первый вопрос к ответу - консистентность тома работающего сервиса.
-- Предложенные ранее и не согласованные мелочи остаются непринятыми: предупреждение о сетевом каталоге данных в README и `docker-compose.yml`, снимок собственной базы через `VACUUM INTO`.
-
-### 2026-09-15 - проверка готовности к прод-тестам
-
-Вопрос пользователя: насколько текущее состояние готово к тестам в production. Проверено делом, а не по памяти.
-
-**Что зеленое.** `npm run check` - lint, строгие типы, 324 модульных теста, покрытие 80.66%. `npm run test:docker-integration` - 9 из 9 на настоящем Docker Compose 5.5.1, чужие проекты не затронуты. `npm run test:visual` - 28 снимков, 8 пропущено. Прод-сборка фронтенда собирается, бэкенд в `NODE_ENV=production` отдает ее сам, сжатые копии уходят с `Content-Encoding: br`, база и `bootstrap-token` создаются с правами `0600`. Образ из `docker/Dockerfile` собирается (753 МБ), контейнер поднимается, healthcheck в состоянии healthy, без сокета Docker панель деградирует предупреждениями, а не падением.
-
-**Что красное.** `npm run test:e2e` на чистом стенде: 27 тестов прошли, 13 упали. Первый прогон шел на непочищенном каталоге `/tmp/dockge-e2e` и дал 40 падений из 40 - эта цифра неверна, верная 13. Причина падений не в продукте, а в тестах: после переработки интерфейса селекторы устарели. Форма входа больше не `#floatingInput` / `#floatingPassword` / `.form-container`, а `#login-identifier` / `#login-password` / `.auth-card`; `.reason-badge` стал `.attention-badge`, `.create-heading` исчез; состояние в строке списка стало точкой с невидимой подписью; изменились меню сервиса, настройка колонок и вкладки терминалов. Одно падение - не тест, а поведение: при выборе другого стека вкладка журнала закрывается, и человек возвращается на обзор. Пока это не починено, браузерной страховки у проекта нет, и задание CI `e2e` на `main` будет красным. Разбор по тестам и порядок работ - в `docs/plans/2026-09-16-prod-readiness-fixes.md`.
-
-**Исправлено по ходу проверки:**
-
-- `frontend/vite.config.ts`: `emptyOutDir: true`. Каталог сборки лежит выше корня Vite, поэтому сам он его не чистил, и каждая сборка досыпала новый бандл к прежним - 1833 файла и 284 МБ, которые целиком попадали в образ. После правки 183 файла и 5.0 МБ.
-- `frontend/src/lang/en.json`: `familiarOverview` стал "Global overview". В английском две ссылки назывались "Overview" - боковая на общий обзор и вкладка стека; на слух и для программы чтения экрана они были одним и тем же. В русском они и так различались ("Общий обзор" и "Обзор"). Побочно это снимает `strict mode violation` в e2e. Снимки не изменились: в тестовой сцене боковой ссылки нет.
-- `package.json`: `express` 4.22.2 -> 4.22.3 и `npm audit fix`. Закрыты два предупреждения `qs` (обход `array-limit` и отказ в обслуживании), в том числе в дереве MCP SDK: `qs` везде 6.16.0. В прод-зависимостях 0 уязвимостей. Осторожно: `npm audit fix --omit=dev` вычищает dev-зависимости из `node_modules`, после него нужен `npm install`.
-
-**Что остается сделать до прод-тестов (не начато):**
-
-1. Починить e2e - без этого гейта нет.
-2. Бренд и адреса: `README.md` выше раздела авторизации - по-прежнему upstream Dockge, корневой `compose.yaml` ставит `louislam/dockge:1`, `package.json` тянет образы `louislam/dockge:*` и версию 1.5.0 при заявленной 2.x. Человек, который поставит панель по README, получит не этот форк. Это задача 8 плана.
-3. `docker/Dockerfile` собирается от `louislam/dockge:base` и `louislam/dockge:build-healthcheck`: базовый образ форка чужой.
-4. `extra/seed-review.ts` попадает в образ (`COPY . .`), а он ставит `disableAuth`. Место ему в `.dockerignore`.
-5. Хешированные ассеты отдаются с `Cache-Control: public, max-age=0` - имя уже содержит хеш, можно отдавать как неизменяемые.
-6. Разметка плана устарела: задачи 1-9 отмечены невыполненными, хотя журнал описывает их как сделанные. Перед сдачей разметку надо привести в соответствие.
-
-**Статус.** Готово к внутреннему тесту в контейнере на своей машине. К прод-тестам у посторонних - нет: пункты 1 и 2 обязательны.
-
-### 2026-09-16 - выполнен план готовности к прод-тестам
-
-Отработан `docs/plans/2026-09-16-prod-readiness-fixes.md`, очереди 1-3. Итог: браузерная страховка вернулась, форк перестал выдавать себя за upstream, состояние зафиксировано тегом.
-
-**A. e2e в зеленом.** `npm run test:e2e` - 40 из 40, `npm run test:visual` - 28 снимков и 8 пропущенных, `npm run check` - 324 теста, lint и строгие типы чисто. Селекторы переписаны под новую разметку: форма входа, отметка состояния в строке списка, меню сервиса, вкладки терминалов, настройки MCP. Ни одна проверка не ослаблена - каждый новый селектор доказывает то же свойство, что и старый; там, где текст зависит от языка, сверяется регулярное выражение по обоим языкам, а не фрагмент английской строки. В `container-terminal.spec.ts` добавлена задержка ввода: xterm терял порядок символов при мгновенном наборе, и падение выглядело как ошибка bash, хотя bash отвечал верно.
-
-**Два настоящих дефекта, найденных тестами.** Оба починены в продукте, а не в тестах.
-
-1. `frontend/src/pages/DashboardHome.vue`: `<router-view :key="$route.path">`. У стека все вкладки - один и тот же компонент на разных путях, поэтому ключ-путь пересоздавал инспектор при каждой смене вкладки: открытая оболочка контейнера умирала, журнал перечитывался с нуля. Теперь вкладки стека ключуются личностью стека, а не путем; смену стека инспектор отслеживает сам. Адрес сервера в ключе остался - он меняет источник данных целиком, и там пересоздание как раз нужно.
-2. `extra/update-dockge.ts`: обновление делало `docker compose pull`. Образ собирается локально из этого репозитория, публикации нет, поэтому `pull` не мог принести новую версию никогда - команда обновления была тихо бесполезной. Последовательность заменена на `git pull --ff-only origin <branch>` -> `npm ci` -> `npm run build:frontend` -> `docker compose config --quiet` -> `docker compose up -d --build --wait --wait-timeout 60`. Конфигурация проверяется до перезапуска, `--wait` не дает остаться в неопределенном состоянии.
-
-**B. Бренд и адреса.** `package.json` - `dockge2` 2.0.0, образы `mazixs/dockge2`. `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, шаблоны `.github` переписаны и указывают на этот репозиторий. Удален корневой `compose.yaml`: он ставил `louislam/dockge:1` и затенял документированный `docker-compose.yml`. Удалены скрипты обслуживания чужого трекера (`close-incorrect-issue`, `reformat-changelog`, `FUNDING.yml`). `backend/check-version.ts` читает релизы этого репозитория (раньше спрашивал upstream и сравнивал его версии с нашими) и по умолчанию выключен: это исходящий запрос, которого администратор не просил.
-
-Отступление от буквального критерия задачи B зафиксировано осознанно. Критерий требовал, чтобы `grep -ri louislam` не находил ничего, кроме лицензии. Оставлены: атрибуция форка и оригинальное уведомление MIT (`README.md` дважды, `CONTRIBUTING.md`, `LICENSE`), настоящий сторонний образ `louislam/uptime-kuma:1` в `frontend/src/components/Container.vue` и `extra/templates/uptime-kuma/compose.yaml`, ссылка на происхождение кода в `extra/healthcheck.go`. Стирать их значило бы скрыть происхождение форка и сломать рабочий шаблон.
-
-**C. Состояние зафиксировано.** Работа с 31 августа лежала в рабочей копии без коммитов. Разобрана на коммиты по смыслу - аутентификация, MCP, доступность, Git, ход команды и журнал, модель стека, интерфейс, окружение разработки и каркас сервера, бренд и путь обновления - и помечена тегом `v2.0.0-rc.1`. Вместе с исправлениями, которые нашел прод-тест, в ветке тринадцать коммитов. Прод-тест проводится с тега. В `origin` ничего не отправлено.
-
-**D. Свой базовый образ.** `docker/Dockerfile` собирается от `mazixs/dockge2:base` и `mazixs/dockge2:build-healthcheck`; рецепты и раньше лежали в репозитории, но образы тянулись чужие. Добавлены `npm run build:docker-base-local` и `npm run build:healthcheck-local` - разовый локальный прогон, после которого сборка релиза не зависит от чужого пространства имен.
-
-**E. Образ вычищен.** В `.dockerignore` добавлены `docs`, `test`, `extra/seed-review.ts`, `playwright*.config.ts`, `.github` и файлы разработчика. Проверено внутри собранного образа: ни одного файла приемки и тестов, панель работает так же. Важнее прочего то, что `extra/seed-review.ts` больше не попадает внутрь: он поднимает сервер с выключенной аутентификацией.
-
-**F. Кэш статики.** `/assets/` отдается как `immutable, max-age=1y` - имя уже содержит хеш; остальной каталог (`manifest.json`, иконки) как раньше. По ходу выяснилось, что корень отдает не статическая точка монтирования, а `backend/routers/main-router.ts`, поэтому `Cache-Control: no-cache` для `index.html` пришлось ставить там; проверено `curl` по обоим адресам. Без этого браузер после обновления панели мог открыть старую разметку со ссылками на удаленные бандлы.
-
-**G. Разметка плана сверена.** Задачи 0, 1, 2, 4, 8 отмечены выполненными по своим acceptance-критериям. Задачи 3, 5, 6, 7, 9 оставлены невыполненными с записью, что именно в них не закрыто - это честнее, чем сплошная галочка по журналу.
-
-**H. README о боевом развертывании.** Данные только на локальном диске и вне Git-копии, `PUID`/`PGID`, обратный прокси с `DOCKGE_TRUST_PROXY` и `DOCKGE_SECURE_COOKIES`, обновление через `npm run update-docker`, откат на предыдущий тег образа. Из README убран раздел на русском, дублировавший установку, и исправлено описание обновления: `--pull always` в последовательности нет, конфигурация проверяется `docker compose config --quiet`.
-
-**Статус.** Очереди 1-3 закрыты. Очередь 4 - сам прод-тест на чистом хосте - не выполнена: чистого хоста нет, и часть шагов (перезагрузка хоста, TLS за настоящим прокси) на рабочей машине не воспроизводится.
-
-### 2026-09-16 - прод-тест с тега: девять шагов и два дефекта
-
-Очередь 4 плана готовности выполнена настолько, насколько воспроизводима без отдельного чистого хоста. Стенд: локальный bare-репозиторий как `origin`, клон по тегу `v2.0.0-rc.1` в `.tmp/prodtest/deploy`, порт 5099, каталоги данных и стеков отдельные, имя проекта - настоящее (`dockge2`), иначе команда обновления обновляла бы не ту панель. Пароль владельца - разовый, сгенерированный для стенда; в браузер не вводился ни один пароль, все шаги сделаны по HTTP API и socket.io.
-
-**Пройдено.**
-
-1. Клон по тегу, `.env` из примера, `npm install`, `npm run build:frontend`, `docker compose up -d --build --wait` - контейнер healthy за 17 секунд.
-2. Первый запуск: `bootstrap-token` и `dockge.db` созданы с правами `0600`, владелец создан разовым кодом, вход по паролю работает. Файлы каталога данных принадлежат root - процесс работает от root, а `PUID`/`PGID` по коду влияют только на файлы стеков, как и написано в README.
-3. Стек из `docker run`: команда превращена в compose, стек развернут, сервис отвечает снаружи, статусы читаются.
-4. Журнал стека: при открытии отдает последние строки из буфера, дальше идет живой поток - проверено перезапуском стека при открытом журнале.
-5. Секреты: сохранение и раскрытие требуют пароль, неверный пароль получает отказ, список отдает только метаданные без содержимого.
-6. Правка `compose.yaml` руками на диске - панель отдает новый текст.
-7. Обновление документированной командой `npm run update-docker` с отделенной HEAD (клон по тегу): fast-forward, `npm ci`, сборка фронтенда, проверка конфигурации, пересборка образа и `--wait` - 28 секунд, версия внутри контейнера сменилась, владелец и стеки на месте.
-8. Откат на предыдущий образ: панель поднялась на прежней версии, данные читаются, стек работает.
-9. За TLS-прокси (nginx, самоподписанный сертификат): вход по HTTPS, cookie сессии получает префикс `__Secure-` и флаг `Secure`, сессия читается, websocket соединяется, стек разворачивается, оболочка сервиса отвечает через прокси. Чужой origin отвергается и напрямую, и через прокси.
-
-**Найдено и исправлено два дефекта.**
-
-1. `package-lock.json` остался с `"name": "dockge"` и `"version": "1.5.0"`. Первый же `npm install` по README переписывал эти поля, рабочая копия становилась грязной, а `npm run update-docker` отказывается работать на грязной копии - намеренно, чтобы `git pull --ff-only` не встал на полпути. То есть развертывание, поставленное точно по README, нельзя было обновить документированной командой. Файл пересобран так, как его делает чистая установка; `npm ci` больше копию не пачкает.
-2. Рукопожатие socket.io сравнивало `Origin` с заголовком `Host`, который видит процесс. Обратный прокси этот заголовок переписывает - обычный рецепт `proxy_set_header Host $host` - поэтому страница по HTTPS открывалась, а websocket отвергался, и панель навсегда оставалась в состоянии "подключение". Ни `DOCKGE_PUBLIC_URL`, ни `DOCKGE_TRUSTED_ORIGINS`, ни `DOCKGE_TRUST_PROXY` на это не влияли: единственным выходом был `DOCKGE_WS_ORIGIN_CHECK=bypass`, то есть снятие защиты вместо ее настройки. Теперь рукопожатие судит тот же набор доверенных источников, что охраняет запросы аутентификации: запрошенный адрес, публичный URL, дополнительные источники и прокси-заголовки - только когда прокси доверенный. Решение вынесено в `isHandshakeOriginTrusted` и закрыто тестом в `test/backend/auth-boundaries.test.ts`.
-
-**Исправлено в документации по результатам теста.** README обещал, что предыдущий образ остается на хосте под своим тегом. Это неверно: `DOCKGE_IMAGE` - один фиксированный тег, и `docker compose up --build` переставляет его на только что собранный образ, а прежний остается без имени. Теперь в разделе отката сказано дать образу имя до обновления. Добавлен рабочий фрагмент nginx и объяснение, что websocket проверяется по тем же источникам.
-
-**Не выполнено.**
-
-- Перезагрузка хоста. Машина рабочая, перезагружать ее нельзя. Проверено косвенно: политика контейнера - `unless-stopped`, `docker.service` и `docker.socket` включены в автозапуск.
-- Самовосстановление после сбоя процесса не доказано. `docker kill` Docker считает ручной остановкой, поэтому политика не срабатывает, а SIGKILL изнутри не убивает PID 1 в своем пространстве имен. Нужен другой способ проверки.
-- Установка руками человека, который этот код не писал. Это и есть настоящий прод-тест, и он остается за пользователем.
-
-**Ошибка в процессе, для честности.** При проверке восстановления мой `grep` по подстроке зацепил посторонний контейнер из чужого проекта на той же машине, и он был убит вместе с моими. Состояние восстановлено через `docker start`, контейнер снова работает. Вывод на будущее: выбирать контейнеры точным именем или фильтром по проекту, а не подстрокой.
-
-### 2026-09-16 - работа выехала в репозиторий, и выяснилось, что он выпустил бы релиз сам
-
-Задача была из пяти пунктов: исправить ошибки, проверить игнор и слить все в `main`, убедиться,
-что версии и адреса ведут на этот форк, ничего не выпускать и подготовить репозиторий к тому,
-чтобы тесты можно было гонять из него.
-
-**Главное, что нашлось.** `.github/workflows/nightly-release.yml` стоял на расписании `0 2 * * *`
-и публиковал образы в Docker Hub и ghcr. Пункт "релизы не выпускай" нарушился бы сам, в первую же
-ночь после публикации, без единой команды с моей стороны. Расписание убрано, остался только
-ручной запуск. Это единственный воркфлоу, который вообще что-то публикует, - проверено поименно.
-
-**Остальное по релизному пути.** `build:docker` вешал на стабильную сборку еще и теги `beta` и
-`nightly`, то есть один образ выдавал себя за три разные линии. `update-version.ts` коммитил
-`commit -a`, забирая все, что случайно лежало в рабочей копии, ставил неаннотированный тег без
-`v` и не смотрел на код возврата - неудачный коммит проходил за удачный и получал тег. Теперь
-коммитится только `package.json`, тег аннотированный и всегда с `v`, а сбой замечается.
-`mark-as-nightly.ts` переписывал README заменой версии по всему тексту, а версия встречается там
-прозой и в имени ветки `release/2.0`; теперь трогается только манифест.
-
-**Что проверял только линтер.** `tsconfig.json` не включал `extra/`, поэтому скрипты выпуска и
-обновления никто не проверял типами. Ошибка в них не видна в продукте - она видна тому, кто
-пытается обновить панель. Каталог включен, четыре нетипизированных параметра типизированы.
-
-**CI.** Матрица гоняла Windows и macOS, где панель не работает в принципе: она управляет Docker
-через сокет хоста и запускает `docker compose`, а README поддержку этих систем не обещает.
-Красный прогон на неподдерживаемой системе не сообщает ничего, поэтому остался только Linux.
-`json-yaml-validate` слушал несуществующую ветку `2.0.X`, а после публикации упал на
-`tsconfig.json`: это JSONC, TypeScript читает в нем комментарии, строгий парсер - нет. Файл
-внесен в исключения; комментарии в нем объясняют настройки и стоят дороже этой проверки.
-
-**Игнор.** Отслеживаемых, но игнорируемых файлов нет, неотслеживаемых нет, эталоны снимков лежат
-в Git. Добавлены `certs` и `docker-compose.override.yml` - они появляются у того, кто развернул
-панель по README. Заголовок файла теперь говорит правду про `.dockerignore`, который шире.
-
-**Адреса и версии.** Все продуктовые адреса ведут на этот репозиторий. Упоминания upstream
-оставлены осознанно: атрибуция форка, лицензия MIT, цитаты чужих issue в исторических планах,
-настоящий сторонний образ `louislam/uptime-kuma:1` в шаблоне и ссылка на происхождение кода в
-`extra/healthcheck.go`. Визуальная фикстура показывала версию `1.5.0`, которой у форка никогда не
-было; теперь она читает манифест. Ни один эталон от этого не сдвинулся - экрана "О программе"
-среди снимков нет.
-
-**Документация перед публикацией.** Репозиторий публичный, а документации в нем не было вообще:
-первая отправка публиковала ее целиком. В заметках по дизайну лежали абсолютные пути машины
-автора и имя постороннего проекта, оказавшегося рядом с проверочными стеками. К панели это
-отношения не имеет, поэтому убрано; смысл записей сохранен.
-
-**Слияние и публикация.** Все локальные ветки уже содержались в `mzx/familiar-dockge`, поэтому
-слияние в `main` прошло перемоткой. Ветка `main` отправлена в `origin`. Ветка по умолчанию
-переключена с `master` на `main`: `master` стоял на точке ответвления от upstream, и клонирование
-по README отдавало бы не этот форк, а чужой код версии 1.5.0. Тегов не отправлено, релизов не
-создано, образы не публиковались.
-
-**Проверки локально.** `npm run check` - 325 из 325, покрытие 80.67%. Playwright e2e - 40 из 40.
-Визуальная приемка - 28 снимков, 8 пропущены. Docker-интеграция - 9 из 9. Сборка фронтенда проходит
-и не пачкает рабочую копию.
-
-**А потом первый настоящий CI нашел три вещи, которых локально не видно.** Юнит-тесты прошли на
-обеих версиях Node, остальное упало, и каждое падение оказалось настоящим.
-
-1. `json-yaml-validate` разбирал `tsconfig.json` строгим JSON-парсером. Это JSONC: TypeScript
-   читает в нем комментарии, а они там объясняют настройки. Файл внесен в исключения - проверка
-   говорила только то, что он не того формата, в котором никогда и не был.
-2. Docker-интеграция падала на четырех тестах. Один поднимает целый экземпляр панели с
-   `NODE_ENV=production`, а в этом режиме бэкенд без `frontend-dist/index.html` выходит с кодом 1;
-   в задании CI сборки фронтенда не было, локально она просто лежала от прошлых запусков. Тест при
-   этом выбрасывал вывод дочернего процесса (`stdio: "ignore"`) и сообщал один код возврата -
-   теперь вывод собирается и попадает в текст ошибки. Еще два теста запускали одноразовый
-   контейнер через `up -d` и ждали его отдельной командой `compose wait`. В Compose 2.38 (CI) она
-   ищет работающие контейнеры и на уже вышедшем отвечает `no containers for project`, в Compose
-   5.5 (локально) - нет. Ожидание убрано: запуск без `-d` ждет сам, и это верно для обеих версий.
-3. Браузерные тесты: 39 из 40, упал первый вход в терминал контейнера - `.xterm-screen` не
-   появился за 15 секунд, при том что следующие три теста того же файла прошли за четыре. Это не
-   флейк. Терминал открывается только после `document.fonts.load`, и у этого ожидания не было
-   предела: шрифт идет по сети, и на холодном профиле он просто не успел. На медленном канале
-   пользователь увидел бы на месте терминала пустую коробку и ждал бы вечно. Ожидание ограничено
-   тремя секундами, а опоздавший шрифт пересчитывает сетку сам.
-
-Полезный вывод: CI на GitHub - не копия моей машины, и три дефекта из трех были видны только
-оттуда. Один из них (терминал, ждущий шрифт без предела) - настоящий продуктовый, а не тестовый.
-
-**Подтверждено.** После исправлений все задания зеленые: `json-yaml-validate`, юнит-тесты на Node
-22.23.2 и 24.19.0, Docker-интеграция и браузерные сценарии. Отдельно проверено то, ради чего все
-и делалось: `git clone` публичного репозитория встает на `main`, `npm ci` не оставляет в копии ни
-одного изменения, `npm run check` дает 325 из 325 при покрытии 80.67%. Тесты из репозитория гоняются.
-
-### 2026-09-16 - разбор устного отчета по живому экземпляру: 28 пунктов
-
-Отчет надиктован после работы с локальным экземпляром. Ниже - что сделано, а не что обещано.
-
-**Первый экран ждал молча.** `fillAvailability` и `fillStackDetails` шли по стекам последовательно:
-на каждый стек один запрос к базе и одно чтение каталога, на пяти стеках - 28 круговых обращений
-подряд. Обе функции переведены на `Promise.all` с сохранением try/catch на каждый стек, а пустое
-состояние больше не утверждает, что стеков нет, пока список еще в пути: до первого ответа
-показывается скелет строк.
-
-**Метрики стабильности стали ссылками.** Счетчики в обзоре ведут на список стеков с готовым
-фильтром, а `filterRunning` и `filterUnknown` добавлены к набору фильтров. "Неизвестно" объяснено
-в тексте: после 90 секунд без свежего наблюдения состояние не считается известным.
-
-**Русский интерфейс говорил по-английски в восьми местах, а не в трех.** Проверка нашла `Cancel`
-рядом с "создать", `Saved` в ответе сервера и еще шесть ключей, которых в каталоге не было -
-`$t()` печатает имя ключа, и это выглядит одинаково во всех языках. Написаны два сторожевых
-теста: один сверяет каждый `$t("...")` из `frontend/src` с `en.json`, второй - каждый `msg:` из
-обработчиков сокета. Прежние тесты сверяли каталоги между собой и этот класс пропускали
-структурно. Сообщения Docker-обработчика переведены на `msgi18n`, а неизвестный ключ теперь дает
-понятную ошибку вместо своего имени.
-
-**2FA показывала резервные коды до того, как что-то введено.** Коды придерживаются до успешной
-проверки, закрытие крестиком по ходу настройки сообщает, что она брошена. Better Auth без
-`skipVerificationOnEnable` и не включал второй фактор до `verifyTotp` - выйти из аккаунта было
-нельзя, но интерфейс вводил в заблуждение.
-
-**Мигрирующий контейнер считался остановленным сервисом.** `readOneShotServices` теперь выводит
-одноразовость еще и из `depends_on: { X: { condition: service_completed_successfully } }` -
-это однозначное заявление, что X отработал и вышел.
-
-**Сканирование папки молчало.** Пункт меню показывает ход и сообщает, сколько стеков нашлось.
-
-**Страница "Новый стек" сведена с эталоном.** Согласование шло отдельным автономным файлом
-`docs/design/2026-09-16-new-stack-and-type-scale.html`: семь расхождений, живой макет на настоящих
-токенах, три вопроса. Замечания по макету - зажатая карточка и заглушки вместо значков - исправлены
-до кода. В коде: карточка 560px по центру рабочей области, знак и заголовок на одной оси с ней,
-дорожка шагов с линией стоит над выбором источника, вкладки - сегментный переключатель во всю
-ширину, главное действие залито акцентом, про распознавание `docker run` написано прямо.
-
-**Ветка перестала набираться по памяти.** Обработчик `gitListBranches` спрашивает
-`git ls-remote --heads` по кнопке, а не при наборе: это сетевой запрос к чужому адресу. Адрес
-проходит `validateGitRepository`, запуск идет через ту же огражденную обертку `git()`, событие
-внесено в список операторских. Пока список не запрошен, поле остается обычным вводом, поэтому
-закрытый репозиторий без доступа форму не блокирует.
-
-**Шкала кегля приведена к одному правилу.** Было 74 использования 12px против 89 использований
-14px, граница не была проведена никем. Теперь 12px остается там, где 14 физически не помещается:
-число в бирке и инициалы в кружке. Остальные 95 использований `--text-xs`/`--line-xs` стали
-`--text-sm`/`--line-sm`. Подпись под полем больше не мельче поля, к которому относится.
-
-**Настройки названы своими именами.** Раздел "Основные" держал одну настройку и читался как
-сосед "Агентов Dockge" - теперь "Адрес сервера". "Общий .env" стал "Переменные для всех стеков",
-и пояснение говорит, что чей .env кого перекрывает. Каскад разделов сознательно не трогался.
-Панель "О продукте" рисовала значок вкладки браузера - непрозрачный зеленый квадрат поверх темы;
-теперь тот же контур, что в шапке. Роль и доступ пользователя стали парой бирок, две подсказки
-в форме добавления разведены в список. Новые ключи MCP несут имя продукта (`dg2_`), выпущенные
-раньше продолжают приниматься: отзыв ключа - решение владельца, а не побочный эффект переименования.
-
-**Эталоны переутверждены партией.** 28 снимков, каждое расхождение разобрано глазами до
-утверждения.
-
-**Что осталось и почему.**
-
-- *Полоса ~8px справа.* Диагностирована: `html { scrollbar-gutter: stable; }` вместе с полностью
-  прозрачной дорожкой webkit-полосы шириной 10px. Это осознанный компромисс против скачка
-  раскладки при появлении прокрутки, поэтому решение требует живого прохода, а не правки вслепую.
-- *Дрожание интерфейса при перезапуске.* Нужен живой прогон с настоящим контейнером.
-- *Тестовый контейнер hello-world для полного прохода.* Не сделан.
-- *Чужие контейнеры под управление.* Ограничение существует потому, что редактор файлов заперт в
-  `DOCKGE_STACKS_DIR` (защита от обхода пути). Запрет действительно избыточен; предложено явное
-  усыновление стека по `composeStack.ConfigFiles` со списком разрешенных путей. Отложено
-  сознательно: нужна продуманная модель доступа, а не флажок.
-- *Понятность настроек MCP в целом.* Переименование ключа сделано, разбор текстов раздела - нет.
-
-### 2026-09-17 - второй устный отчет по живому экземпляру: девять пунктов
-
-**Имя стека наследуется из compose.** Раньше `container_name` читался только на пути конвертации
-`docker run`, а вставленный compose оставлял поле пустым. Теперь имя подставляется и при вставке,
-и подстановка выключается первым же нажатием в поле - человек правит, а не борется. Имя сервиса
-намеренно не подставляется: оно есть всегда, и стек назывался бы сам собой. Если контейнер не
-назван, поле пустое и продолжить нельзя - это прежнее поведение, и оно сохранено осознанно.
-
-**Состояние развертывания перестало быть зажатым.** Пока идет команда, карточка создания
-расширяется до 820px: в колонке шириной с поле ввода список сервисов и время читались как
-обрезанные. Шапка слоя переносится, имя сервиса больше не держит колонку в 200px. В блок добавлена
-шапка хода: пульс, время и кнопка обрыва - `abort()` существовал в коде, но до него нельзя было
-дотянуться из интерфейса.
-
-**Бирка "только что" стала знаком.** Строка нового стека и так подсвечена целиком; слово рядом
-ничего не добавляло и молча устаревало. Осталась галочка с подписью для экранного чтения.
-
-**Поле .env свернуто по умолчанию.** Экран открывают при людях, и значения не должны появляться
-на нем сами. Раскрытие - по кнопке, отдельно для каждого стека и заново после перехода. При
-создании стека поле открыто: скрывать там нечего.
-
-**Предпросмотр обновления перестал висеть.** `readImageUpdates` опрашивал образы подряд, и каждый
-мог потратить 20 секунд в `buildx imagetools inspect` плюс еще 20 в запасном `manifest inspect`.
-Стек из шести недоступных образов ждал минутами и выглядел зависшим. Теперь опрос идет по четыре
-образа сразу, а предел одного вызова снижен до 8 секунд. Заголовок назван "Ожидаемые правки"
-вместо "Что сделает обновление", строка ожидания - "Проверяем реестр" вместо "Проверить".
-
-**Появление хода и окна вывода ускорено.** Полоса выезжает за `--motion-fast`/`--motion-base`
-вместо `--motion-base`/`--motion-slow`, окно вывода - за `--motion-fast` вместо 300 миллисекунд
-Bootstrap. Окно открывают, чтобы читать, а не чтобы смотреть, как оно выезжает.
-
-**Значок в строке сервиса совпал с действием.** Кнопка рисовала терминал, а вела в журнал. Теперь
-терминал открывает оболочку и гаснет для остановленного контейнера, журнал ушел под три точки.
-
-**Оболочка bash доступна из интерфейса.** `docker compose exec <сервис> <оболочка>` - это и есть
-`docker exec -it`, и backend принимал `bash` с самого начала, но интерфейс всегда просил `sh`.
-Теперь у каждого сервиса пара кнопок одной вещью: `sh` обычным выбором и `bash` рядом. Если в
-образе bash нет, `assertShellExists` отвечает отказом до открытия сессии.
-
-**Файловый менеджер - не сделан, и вот почему.** Вопрос был о полноценном доступе ко всем файлам
-контейнера. Наружный менеджер уперся бы в то, что редактор файлов заперт в `DOCKGE_STACKS_DIR` -
-это не ограничение интерфейса, а барьер обхода пути, и снимать его ради удобства нельзя.
-Внутренний менеджер означал бы чтение и запись внутри контейнера из браузера, то есть ровно то,
-что запрещено правилом "никаких событий, дающих браузеру произвольные команды". Обе вещи требуют
-продуманной модели доступа, как и усыновление чужих стеков, и стоят в одном ряду с ним.
-
-Проверки: 334 модульных теста, ESLint, `tsc --noEmit`, сборка фронтенда и 28 визуальных эталонов.
-Шесть снимков переутверждены партией после разбора каждого расхождения: свернутый .env на четырех
-и пара кнопок оболочки на двух.
-
-### 2026-09-18 - главная: фильтр снимается, установка стала одной командой
-
-**Главная.** Числа в шапке ("Требуют внимания 9") были ссылками и всегда ставили фильтр заново;
-кнопки в списке слева переключателями были всегда. Теперь число смотрит на текущий `filter` в
-адресе и при повторном нажатии ведет на список без фильтра, с подсветкой и `aria-pressed`.
-Таблица контейнеров приходит по сети позже остальной страницы и возникала рывком - добавлено
-проявление на `--motion-base` с отменой под `prefers-reduced-motion`. Кнопка "Повторить" убрана
-из сообщения "ждем первое наблюдение": наблюдение приходит по времени, страница сама перечитывает
-данные каждые тридцать секунд, и кнопка обещала ускорение, которого нет. В остальных случаях
-(агент недоступен, запрос не прошел, Docker молчит, данные устарели) она осталась.
-
-**Установка одной командой.** `install.sh` в корне: проверяет систему, Docker и плагин compose,
-предлагает поставить Docker официальным скриптом, спрашивает каталог установки, каталог стеков и
-**порт** (и отказывается от занятого), пишет `.env`, собирает образ, поднимает панель с `--wait`,
-печатает адрес в сети и одноразовый код установки, читая его изнутри контейнера - на хосте файл
-`0600` и принадлежит root. Повторный запуск (`--update`) читает ответы из существующего `.env` и
-только пересобирает. Sudo берется лишь там, где действительно нужен: член группы `docker` и свои
-каталоги проходят без него. Чужие контейнеры скрипт только считает и говорит, что не тронет их.
-
-**Хосту больше не нужен Node.** В `docker/Dockerfile` появилась ступень `build_frontend`: `vite`
-собирает фронтенд внутри образа, и `frontend-dist` попадает в `release` оттуда, а не с машины
-сборщика. Из `.dockerignore` убран `frontend` и добавлен `frontend-dist`, чтобы локальная сборка
-не подменяла образную. Из `update-dockge.ts` по той же причине убраны `npm ci` и
-`npm run build:frontend` - обновление это `git pull --ff-only`, проверка конфигурации и
-пересборка.
-
-**Языки.** В переключателе остались только полностью переведенные: английский и русский. У
-остальных девяти каталогов было от 111 до 130 ключей из 777 - панель наполовину на своем языке,
-наполовину на английском, что не выбор языка, а поломка. Файлы остались в `lang/`, а тест
-`i18n-catalogue` теперь требует ровно соответствия: полный каталог обязан быть в меню, неполный -
-обязан отсутствовать. Допереведут - вернется сам, и забыть об этом нельзя.
-
-**Проверено.** `npm run check` - 334 из 334. Установщик прогнан целиком дважды (чистая установка и
-`--update`) на отдельном порту и в отдельных каталогах, панель отвечала `200`, код установки
-печатался; тестовый проект и образы после проверки удалены, чужие контейнеры на машине не
-затронуты.
-
-### 2026-09-18 - стек, который собирает свой образ, наконец пересобирается
-
-Вопрос из практики Dockge 1: правки не применялись, потому что панель не звала `up --build`.
-Проверено на живом примере - дефект был и здесь. `Stack.control` звал
-`compose up -d --remove-orphans`, а `compose` берет уже лежащий образ как есть: после правки
-Dockerfile контейнер продолжал выдавать старое содержимое. Убедился командой: `up -d` после
-изменения файла оставил `v1`, `up -d --build` дал `v2`, а повторный `--build` без правок ничего
-не пересоздал - слои пришли из кеша.
-
-**Что сделано.** `hasBuildServices` в `common/compose-status.ts` отвечает, объявляет ли стек хоть
-один `build`. Развертывание и запуск такого стека идут с `--build`. Обновление делает
-`pull` (собираемые сервисы он пропускает сам, проверено), затем `build --pull` - только так
-обновляется базовый образ из Dockerfile, - и потом `up -d`. Стек с обычным образом из реестра
-работает как раньше, без лишней сборки.
-
-**В интерфейсе.** Предпросмотр обновления у такого стека показывал пустой список образов и молчал
-о причине. Теперь ответ содержит признак сборки, и предпросмотр говорит, что образы собираются из
-Dockerfile и будут пересобраны, а строка шагов называет пересборку.
-
-**Проверено.** `npm run check` - 336 из 336. Тест на аргументы команд разделяет три случая:
-собираемый стек при развертывании, обычный стек при развертывании и порядок `pull` - `build --pull`
-- `up` при обновлении.
-
-### 2026-09-18 - в образе не было git: стеки из Git в production не работали
-
-Вопрос был про приватные репозитории и про то, нужна ли `gh`. Ответ на него нашелся хуже, чем
-ожидалось: в production-образе нет ни `git`, ни `ssh`. `docker/Base.Dockerfile` ставит `curl`,
-`ca-certificates`, `gnupg`, `unzip`, `dumb-init` и клиент Docker - и все. Проверено запуском:
-`git: not found`. То есть в собранной панели не работал ни один сценарий с Git: ни клонирование
-стека, ни `behind`, ни сравнение с веткой, ни применение обновления. Локально этого не видно -
-разработка идет в контейнере с примонтированным репозиторием и хостовым окружением... и там
-`git` тоже отсутствует, просто эти пути не вызывались.
-
-**Исправлено.** `git` и `openssh-client` добавлены в `docker/Base.Dockerfile` и, отдельно, в
-`release`-ступень `docker/Dockerfile`: базовый образ публикуется вручную и редко, а панель должна
-работать из сегодняшней сборки. Когда база выйдет с этими пакетами, apt в release ничего не
-сделает. Проверено на собранном образе: git 2.39.5, OpenSSH 9.2.
-
-**Заодно записано, как панель вообще ходит в Git** (`backend/stack-git.ts`): `GIT_TERMINAL_PROMPT=0`,
-`GIT_CONFIG_GLOBAL=/dev/null`, `credential.helper=` пустой, `core.sshCommand=ssh -oBatchMode=yes`,
-протоколы ограничены `http/https/ssh`, а токен в адресе репозитория отбивается проверкой
-`validateGitRepository`. Значит приватный репозиторий работает ровно одним способом - SSH-ключ без
-парольной фразы, примонтированный в контейнер, плюс `known_hosts`. В `docker-compose.yml` появился
-закомментированный `/root/.ssh:/root/.ssh:ro`, в README - раздел про это. `gh` не нужна нигде:
-панель говорит с Git, а не с API GitHub.
-
-### 2026-09-18 - установщик: ни одной ветки, из которой нет выхода
-
-Разбор `install.sh` по одному вопросу: где сценарий встает, где врет и где нельзя вернуться назад.
-
-**Врал.** Повторный запуск с `--port` печатал новый адрес, а `.env` не трогал: панель оставалась на
-старом порту, а ссылка в конце не отвечала. Теперь явно названный параметр переписывает строку в
-`.env`, а адрес в конце берется из того, что демон действительно опубликовал (`compose ps`), а не из
-того, что просили. Смена каталога стеков или данных сопровождается предупреждением, что старые файлы
-на месте не окажутся сами.
-
-**Вставал.** `--update` не знал, где находится: при установке в свой каталог он ставил вторую копию в
-`/opt/dockge2`. Каталог теперь определяется по расположению самого скрипта. Ветка бралась всегда
-`main` - теперь из самого чекаута, иначе установка с `--branch` при обновлении уезжала не туда.
-Прерванный `git clone` оставлял непустой каталог, который следующий запуск отвергал: добавлен `trap`,
-убирающий за собой только то, что скрипт сам и создал.
-
-**Решал за пользователя.** Признаком неинтерактивности был `[ ! -t 0 ]`, но вопросы читаются из
-`/dev/tty`. При `curl | bash` stdin занят скриптом, и все `confirm` молча отвечали "да" - включая
-установку Docker и пересборку работающей панели. Теперь терминал ищется там же, где задаются вопросы,
-а без терминала сценарий останавливается и просит `--yes` вместо согласия за человека.
-
-**Молчал.** `.env` пишется с правами `0600`; когда каталог принадлежит root, а docker доступен без
-sudo, `docker compose` этот файл не читал и брал значения по умолчанию из `docker-compose.yml` -
-другой порт, другой каталог стеков, ни слова. Владелец файла теперь приводится к тому, кто запускает
-docker, а перед сборкой выполняется `compose config --quiet`.
-
-**Не давал вернуться.** Ответы показываются списком: Enter - продолжить, номер - переспросить пункт,
-`q` - выйти, пока ничего не изменено. Неверный порт или относительный путь больше не убивают сценарий,
-а спрашиваются заново; занятый порт предлагает ближайший свободный. Каталоги работающей установки из
-меню не меняются - сказано почему.
-
-**Объяснял одинаково любую беду.** Сбой сборки и неподнявшийся контейнер теперь разделены и названы:
-место на диске, отказ реестра, состояние контейнера и последние строки лога. Перед пересборкой
-работающий образ получает имя `dockge2:rollback-<дата>`, и при неудаче печатаются две команды
-возврата - на прежний коммит и на прежний образ. Локальные правки в чекауте не сбрасываются и не
-прячутся: обновление только fast-forward, а когда не может - говорит об этом и не трогает ничего.
-
-**Проверено дополнительно.** Старый Compose без `--wait-timeout` (флаг с 2.17) больше не выглядит как
-больной контейнер, свободное место под сборку проверяется заранее, к `ufw` добавлен `firewalld` и
-напоминание про облачный файрвол, Podman распознается и честно помечается как непроверенный.
-
-**Как проверялось.** Заглушка `docker` и локальный репозиторий в отдельном каталоге: чистая установка,
-обновление из своего каталога, отказ клонирования с уборкой, непустой чужой каталог, разошедшаяся
-ветка, отказ сборки, неподнявшийся контейнер, интерактивное меню с неверным портом и относительным
-путем, выход по `q`. Ни один контейнер на машине не создавался и не трогался.
-
-### 2026-09-19 - установщик: второй проход, каждое утверждение воспроизведено
-
-Разбор вчерашней версии `install.sh` с проверкой каждого замечания на заглушке `docker` и `sudo`
-до того, как оно попало в план. Все шесть подтвердились, одно уточнилось.
-
-**Ломалось обновление.** Первая установка от root оставляет `.env` с правами root:0600. Пользователь
-из группы docker, запуская `--update --port 8080`, получал `awk: cannot open ... Permission denied`
-и код 2 без объяснения: файл читался напрямую, а не через sudo. Хуже того, нечитаемый `.env` для
-скрипта означал "пустой": каталог стеков подставлялся `/opt/stacks`, каталог данных -
-`<install>/data`, и оба создавались через sudo, хотя их никто не выбирал. Теперь содержимое берется
-через `sudo cat`, а владелец файла приводится к запускающему до любых правок, не после.
-
-**Меню обещало не то.** В режиме обновления подсказка говорила "4 to change the port", но пункт 3
-принимался и переписывал `DOCKGE_DATA_DIR` на новый пустой каталог - панель поднималась с пустой
-базой. Закрыт так же, как пункты 1 и 2, с указанием, как это сделать намеренно.
-
-**Врал про ветку.** После подсказанного `git checkout <commit>` следующий `--update` печатал
-"Now at X on main", хотя чекаут стоял на коммите. Теперь detached HEAD - остановка с командой возврата
-на ветку; fast-forward поверх него не делается.
-
-**Копил образы.** Каждое обновление добавляло `dockge2:rollback-<дата>` по несколько сотен МБ и
-предлагало убирать руками. Остается один, предыдущий; снимаются только теги с префиксом установщика,
-и только после успешного старта.
-
-**Мелочи.** Заранее созданный пустой каталог пользователя после неудачного клона больше не удаляется -
-только очищается. Проверка `ufw` и `firewalld` ищет порт как слово, а не подстроку (порт 500 находился
-в строке про 5001). Таймаут ожидания у `update-dockge.ts` поднят с 60 до 180 секунд, как у
-установщика: healthcheck начинается через 60 секунд и повторяется каждые 60, минуты заведомо мало.
-README выровнен.
-
-**Стенд теперь в репозитории.** `test/install/run.sh`, `npm run test:install`, шаг в CI: заглушки
-`docker` и `sudo`, локальный origin из двух коммитов, 19 сценариев и 87 проверок - чистая установка,
-без терминала, обновление с уборкой тегов, `--port` на обновлении, нечитаемый `.env`, обновление
-несуществующего, неудачный клон в свой и в чужой пустой каталог, непустой чужой каталог, разошедшаяся
-ветка, detached HEAD, локальные правки, сбой сборки, неподнявшийся контейнер, старый Compose без
-`--wait-timeout`, занятый порт, интерактивное меню через `script(1)`: отказ пунктов 1-3 на
-существующей установке, выход по `q`, повторный вопрос при относительном пути и неверном порте.
-shellcheck на уровне style чист по обоим файлам. Ни один контейнер не создавался.
-
-### 2026-09-19 - Git и Docker: одно состояние, одна проверка, один вызов git
-
-Разбор связки: что в паре Git и Docker действительно работает, что только показывается и что
-дублируется. Работает больше, чем казалось, но интерфейс говорил о состоянии тремя разными
-способами, а один из них был недостижим.
-
-**Состояние стало одним словом.** `common/stack-source.ts` решает, как называется каталог:
-`local`, `unreadable`, `edited`, `behind`, `editedBehind`, `clean`, `unchecked`. Строка списка,
-панель источника и инспектор берут это слово оттуда и не могут разойтись. Раньше строка списка
-считала отставание сама, панель - по своим условиям, а инспектор по третьим.
-
-**Нулевое отставание больше не выдается за проверку.** После клона `behind` равен нулю, потому что
-origin с этой машины никто не спрашивал, а не потому, что изменений нет. Давность проверки берется
-из времени `FETCH_HEAD`: его пишет только `fetch`, ни `clone`, ни `push`. Если файла нет, панель
-говорит "удаленный репозиторий еще не проверен", а не "изменений нет". Ошибка возможна только в
-сторону занижения свежести, и это правильная сторона.
-
-**Убрано то, что не работало.** Поле `source` в `GitUpdatePreview` и `GitSaveResult` никто не читал -
-удалено из контракта. В строке списка ветка про "обновлений нет" стояла под недостижимым `v-else`:
-строка никогда не отображалась, но обещание в коде было. Четырнадцать строк перевода, на которые
-больше никто не ссылается, удалены из `en.json` и `ru.json` сразу.
-
-**Одно место вместо двух и трех.** `backend/git-command.ts` - единственный запуск git: очистка
-унаследованных `GIT_*`, запрет подсказок и системных конфигов, разрешенный список транспортов,
-отключение хуков и подмодулей. `backend/compose-args.ts` - единственная сборка аргументов
-`docker compose`, прежде написанная дважды со своей строгостью к `global.env` в каждой.
-`common/git-repository.ts` - единственное правило адреса: браузер и сервер решали по-разному, и
-кнопка включалась для адресов, которые сервер потом отвергал.
-
-**Сценарий цикла целиком.** `test/e2e/git-stack.spec.ts`: репозиторий-фикстура отдается по HTTP
-рядом с прогоном (`test/e2e/git-fixture.ts`), потому что локальный путь как remote сервер не
-принимает и принимать не должен. Стек заводится с экрана создания, список веток спрашивается у
-самого репозитория, проверка без новых коммитов говорит "файлы совпадают", новый коммит сравнивается
-по файлам, env-файл выбирается вслепую как возможный носитель секретов, compose берется из Git,
-env остается серверным, и панель после этого честно показывает "изменен на сервере". Контейнеры
-сценарий не запускает.
-
-**Как проверялось.** Lint, типы и 352 модульных теста прошли; эталонные снимки переутверждены одной
-партией после разбора каждого расхождения. Браузерный набор в этот раз не запускался: порты 5000 и
-5001 занял рабочий локальный экземпляр, а прогон с `reuseExistingServer` пошел бы в его каталоги.
-Серверная половина нового сценария проверена отдельно, напрямую через `StackGitWorkflow` по тому же
-HTTP-фикстуру: список веток, клон байт в байт, `unchecked` после клона, `clean` после проверки,
-скрытый env в сравнении, применение по файлам и `edited` с одним измененным файлом после него.
-Локаторы страницы сравнения, панели источника и экрана создания сверены на сцене визуальной приемки.
-
-
-## Дополнение 2026-09-11: соответствие Sites и MCP
-
-Статус на 2026-09-13: реализация выполнена 11 сентября, визуальная приемка открыта повторно. Исторические результаты проверок ниже не подтверждают завершение визуальной доводки.
-
-- [x] Визуальная приемка A6 и повторная доводка R0-R6 из аудита Sites (файл удален 2026-09-26): общий каркас, палитра, плотность, обзор/источник, создание, редактирование результата Git до записи и мобильная навигация. Заменено: эталон убран из дерева, приемку ведут снимки `test/visual/baseline/`, проходы 2026-09-15 и сведение страницы "Новый стек"; два оставшихся критерия перенесены в "Интерфейс и Docker-обзор: открытые задачи", пункт 5.
-- [x] Выполнить M0-M7 из плана MCP и ключей (файл удален 2026-09-26, контракт - `docs/mcp.md`): подключение своих ИИ-агентов, отдельные отзываемые ключи, роли и ограничения серверов/стеков, журнал и защита каждого вызова. Наблюдатель не получает действия записи ни напрямую, ни через сервер исполнения.
-- [x] Сохранить закрытую выдачу учетных записей, темы, uptime, конвертацию docker run, исходный текст Compose и различие сохранения/развертывания.
-
-Приемка 2026-09-11: 311 модульных проверок, 9 Docker-интеграционных и 18 браузерных сценариев прошли; сборка и проверка типов прошли. MCP M7 ограничен фактически проверенным SDK 1.30.0 / протоколом 2025-11-25 с Bearer. OAuth, stdio и конкретные настольные клиенты не реализованы; отдельный подписанный межсерверный канал не заменяет прежний браузерный канал агентов. Подробности: `docs/mcp.md`. Коммит и публикация рабочего окружения не выполнялись.
-
-
-## Дополнение 2026-09-20: правки по повторному ревью перед 0.0.6
-
-Выполнены все восемь замечаний повторного ревью 2026-09-20 (файл удален 2026-09-26) и обе группы
-языковых: Q01-Q05, UI01-UI03, L01-L08 и E01-E20. Что именно сделано и чем закреплено - в разделе
-"Что исправлено перед 0.0.6" самого отчета.
-
-Главное в решениях, а не в списке: граница операции теперь принадлежит операции, а не вызывающему
-коду - блокировка стека держится от чтения выбора до записи, остановка доходит до работающего
-раунда и до выполняемого запроса, а бюджет остановки перестал раздавать доли больше себя самого.
-Разрешение на уведомление об обновлении читается в одном месте на сервере, поэтому выключенный
-переключатель гасит новость везде сразу. Порог сложности из диагностического стал обязательным
-(`complexity: [ "error", 20 ]`), и к нему приведены запись файлов, восстановление после сбоя и
-заготовка визуальной сцены.
-
-В интерфейсе закрыт разрыв между компонентом и его состоянием: раскрытое меню считает сторону по
-свободному месту и прокручивается внутри себя, редакторы получили доступные имена, а приглушенное
-состояние приглушается насыщенностью цвета, а не прозрачностью всей ссылки.
-
-Язык правился в двух каталогах сразу: часть дефектов была в английском источнике. Род в строке
-прогресса решен формами по виду ресурса, подсказки фильтров стали самостоятельными сообщениями.
-Разделение причин отказа MCP по кодам осталось невыполненным - показывается общий текст.
-
-Проверки: lint, типы, полный набор модульных тестов с покрытием (88,06% строк, все пороги пройдены),
-сборка фронтенда и визуальный набор `--workers=1` с переутверждением эталонов одной партией после
-разбора каждого расхождения. Меню у нижней границы, доступные имена редакторов и контраст активного
-нулевого фильтра проверены в живом Chromium на сцене 390x640. Docker-интеграция, E2E и публикация
-образа не запускались.
-
-## Дополнение 2026-09-21: закрытие трех пунктов после независимой сверки
-
-Сверка отчета показала, что три пункта были закрыты частично, а заявлены полностью: отмена не
-доходила до сборщика статистики контейнеров (Q02), остановка во время чтения настройки не мешала
-уйти новому запросу к реестру релизов (Q03), а доступное имя редакторов появлялось не с первого
-показа, а с одной из следующих перерисовок (UI02).
-
-Решение одно на все три: состояние жизненного цикла перечитывается после каждого ожидания, а не
-только до него, и имя принадлежит самому компоненту, а не тому, кто его перерисовывает. Сигнал
-остановки теперь идет внутрь - в запись обхода и в сборщик стабильности, с проверкой перед каждым
-обращением к базе, включая шаг внутри открытой транзакции, где отмена откатывает запись и не
-выдается за отказ Docker. Имя редактора задано конфигурацией CodeMirror, поэтому оно есть с первого
-появления поля и следует за сменой файла.
-
-Граница честная: отмена прекращает работу на ближайшей проверке, а не мгновенно, и гарантию дает
-пара "раунд бросает работу по сигналу" плюс "владелец ресурсов ждет его в пределах бюджета".
-
-Отдельно нашелся пробел не в коде, а в проверках: рассылка новых настроек всем открытым вкладкам
-работала, но мутация ее не ломала ни одного теста. Теперь ломает - добавлен тест на то, что
-сохранение настроек уходит во все сессии, а не только в ту, что их меняла.
-
-Проверки: `npm run check` (537 тестов, 88,09% строк, все минимумы подсистем), сборка фронтенда и
-бюджет первой загрузки, визуальный набор `--workers=1` без переутверждения эталонов. Новые проверки
-сломаны мутацией рабочего кода и на ней падают. Подробности и замеры - в разделе "Закрытие Q02, Q03
-и UI02 после сверки" отчета повторного ревью (файл удален 2026-09-26).
-
-## Дополнение 2026-09-21: уборка рудиментов и закрытая дыра в контексте сборки
-
-Главное здесь не уборка, а то, что она нашла. `docker-compose.yml` предлагает положить файлы
-`DOCKGE_SSL_*` в `./certs` рядом с собой, то есть в каталог установки. Стадия release копирует
-контекст целиком (`COPY . .`), а `.dockerignore` каталог `certs` не исключал. Установщик собирает
-образ сам, когда в реестре нет готового, - значит на сервере с включенным HTTPS приватный ключ
-запекался бы в слой образа. Проверено сборкой: с подложенным `certs/probe.key` файл оказывался
-внутри образа, после правки `.dockerignore` его там нет. Заодно закрыты `docker-compose.override.yml`
-и `.claude`: и то, и другое принадлежит тому, кто развернул панель, а не образу.
-
-Сопутствующее. `.dockerignore` больше не обещает быть копией `.gitignore` - он шире, и теперь это
-написано прямо; из обоих файлов убран `/private` (каталога нет с самого форка), из `.dockerignore` -
-`.eslintrc.cjs` (удален при переходе на flat config). `output/` - каталог артефактов приемки -
-добавлен в `.gitignore`. Комментарии обоих файлов переведены на английский по конвенции проекта.
-
-Удалено как мертвое: `frontend/src/layouts/EmptyLayout.vue` (ни одной ссылки), семнадцать констант
-`CONSOLE_STYLE_*` в `backend/log.ts` вместе с экспортом остальных (упомянуты только внутри файла) и
-сорок семь ключей перевода, на которые нет ни одной ссылки в коде: часть от upstream Dockge
-(`ConsoleNotEnabledMSG1-3`, `reverseProxyMsg1-2`, `Docker Run`, `Convert to Compose`), часть от
-переделанных экранов (`familiar*`, `tally*`, `column*`, `stabilityDescription`). В `en.json` и
-`ru.json` стало по 796 ключей, в девяти частичных каталогах убрано по семнадцать.
-
-Сначала удалено было пятьдесят: поиск по тексту не видит ключа, который собирается в коде из
-частей. `availabilityWindow24`, `availabilityWindow168` и `availabilityWindow720` берутся как
-`` $t(`availabilityWindow${hours}`) ``, и селектор периода на панели стабильности стал показывать
-имя ключа вместо "24 ч". Нашел это визуальный набор, а не рассуждение: четыре эталона разошлись,
-и на снимке видно подставленное имя ключа. Ключи возвращены на свои места, список мертвых
-пересчитан с учетом всех префиксов динамической сборки, набор снова совпадает с эталонами. Из `build:docker`
-убран тег `ghcr.io/mazixs/dockge2:2` - наследие upstream с версией 2.x, у форка такой мажорной
-ветки нет. В `AGENTS.md` описание `npm run check` приведено к действительности: в него входит и
-`check-vue`.
-
-Убраны и лишние экспорты: `hasSequenceAt` в `common/compose-editor.ts` удален целиком - его никто
-не звал, - а у двадцати трех символов снято `export`, потому что они используются только внутри
-своего файла. Экспорт, которым никто не пользуется, читается как предложение им воспользоваться.
-
-## Дополнение 2026-09-21: история переписана
-
-Сканирование всех объектов истории, а не только рабочего дерева, нашло больше, чем ожидалось: путь
-рабочей копии `<workdir>` в четырех файлах старых планов и личный домен
-владельца `design-preview.example.invalid` в семи файлах `docs/design/`. В HEAD этого
-давно нет - файлы удалены или вычищены раньше, - но история хранит каждую версию.
-
-История переписана через `git filter-repo --replace-text` в отдельном зеркальном клоне: путь стал
-`<workdir>`, домен - `design-preview.example.invalid`. Почта автора оставлена по решению владельца:
-контактные сведения не приводятся в документации. Дерево HEAD после переписывания побайтно то же, что и до
-(`90b8eb43` в обоих случаях), все 494 коммита и их сообщения на месте, авторство сохранено.
-Переписанные `main` и пять тегов отправлены с `--force`; релизы GitHub остались на своих местах.
-
-Чего переписывание не дает: старые коммиты остаются доступными на GitHub по прямому SHA, пока их не
-соберет сборщик мусора на стороне сервиса. Из веток и тегов они недостижимы и в интерфейсе не
-видны, но ссылка вида `/commit/<старый sha>` пока открывается. Ускорить это может только обращение
-в поддержку GitHub с просьбой убрать недостижимые объекты после force-push. Резервная копия прежней
-истории снята перед операцией.
-
-## Дополнение 2026-09-21: релиз 0.0.6
-
-Работа закрыта тремя коммитами: исправления ревью вместе с русской локализацией, уборка рудиментов
-вместе с закрытой дырой в контексте сборки и подъем версии. Тег `v0.0.6` запустил релизный
-workflow: образ собран под `linux/amd64` и `linux/arm64`, опубликован в `ghcr.io/mazixs/dockge2` под
-тегами `0.0.6` и `latest`, релиз на GitHub создан автоматически.
-
-Проверки на теге прошли не полностью: браузерный набор нашел два теста, которые сверялись со
-старыми английскими формулировками. Карточка результата теперь говорит "The local versions you keep
-will still differ from the versions in Git", а подпись доступности - "Data collected for 2 days of
-the selected period"; экраны ведут себя как прежде, устарели именно ожидания. Оба теста приведены к
-новым строкам, весь набор из 43 тестов зеленый, и следующий прогон CI на `main` зеленый целиком.
-
-Вывод на будущее: `npm run check` не запускает ни `test:e2e`, ни интеграцию с Docker, поэтому
-правка текста интерфейса не видна в нем вообще. Перед тегом нужен `npm run test:e2e` - это
-единственная проверка, которая читает готовые предложения панели так, как их читает человек.
-
-
-## 2026-09-21: container controls and interface fixes
+- Recreating a container does not delete bind mounts or named volumes.
+- In `docker-compose.yml` the data directory (`/app/data` inside) and the stacks directory (the same
+  path inside and outside) are mounted from the host, so the data physically outlive the container.
+- `./data` must never be deleted by Git commands; in production keep it outside the checkout, for
+  example in `/var/lib/dockge/data`. A release installation is not a Git checkout: `install.sh`
+  places the release files, `.env` and the updater state in the installation directory
+  (`/opt/dockge2` by default), and the data directory is `<dir>/data` unless `--data-dir` names
+  another (`docs/installation.md`).
+- The Compose file uses a published image, so `git pull` by itself does not update the code inside
+  the image; the fork's code is built and published by CI first, and the server is updated after
+  that. Now: `release.yml` builds and publishes the image on a `v*` tag, installations pull it by the
+  digest in the signed release descriptor, and a failed download never falls back to a build.
+- Implement a local `npm run update-docker` with `--dry-run`, a check for a clean working copy and
+  argument-based runs of the allowed commands; do not run it from the UI. Replaced:
+  `npm run update-docker` is `extra/update-dockge.sh`, an optional entry point that hands over to
+  `install.sh --update` and the same updater; an update started from the web interface was allowed on
+  2026-09-25, for the verified updater only.
+
+### A scalable interface and the dashboard
+
+- The owner added a separate direction, not critical yet: update the interface and prioritise the
+  work by IC (`Impact × Confidence`), because the current navigation suits a small number of stacks
+  but scales badly with many containers.
+- For StackList plan the grouping agent -> stack -> service -> instance, paged or compact output,
+  search by endpoint, stack, service, image and labels, filters by status, and safe mass actions only
+  for allowed Compose services. Status: item 1 of "Interface and Docker overview: open tasks".
+- Show the relations between services: `depends_on`, networks, ports, volumes and secrets. First a
+  read-only view of the relations; editing goes through the explicit Compose editor, and opening the
+  panel does not change the YAML.
+- When no agent is selected and the main area is open, show one global overview: the number of
+  online, stopped and attention agents; running, attention, exited and unknown stacks and containers;
+  the time of the last update; and the list of problem endpoints.
+- Add availability and stability metrics: the percentage over an explicit 24 hour window with a
+  switch to 7 and 30 days, the number of observations, `UNKNOWN`, last seen and the reasons for
+  degradation. With too little history show "not enough data", not 100%.
+- Compute historical availability from server observations kept for 30 days; do not count a one-shot
+  worker that exited cleanly in the denominator of long-lived services, and never count `ATTENTION`
+  or `UNKNOWN` as healthy.
+- Build on the current Bootstrap/SCSS tokens and the existing `DockerStat`; add a virtualisation
+  library only after measuring a list of 500 and 2000 rows. Measured: no virtualisation, the list is
+  paged by 50 rows per server group (journal, 2026-09-26, "list, containers outside the stacks, the
+  panel's own stack").
+
+### Overview and control of the server's containers
+
+- Check that containers can be discovered in any directory through `docker ps --all --format json`
+  and the Docker Compose labels, not only under `DOCKGE_STACKS_DIR`.
+- Keep three modes apart: the current `managed-only` for controlling Compose stacks; `all-readonly`
+  for an overview of all containers; `all-control` for controlling external or standalone containers
+  after a separate permission.
+- Recommended safe default: keep `managed-only` control and never turn global control on
+  automatically. The global read-only inventory is a separate setting; do not change the scope of
+  what existing installations see silently.
+- Show containers without an accessible Compose file, with an inaccessible `config_files` or from
+  another unmounted directory as external or standalone, and do not promise them Compose operations.
+- The key of a row is `endpoint + containerId`, not the container name; do not merge identical
+  names on different agents.
+- Check the actions `start/stop/restart/exec/delete/kill` on external containers against the
+  capability, the endpoint and a confirmation; `exec` must not take an arbitrary command through a
+  new UI without a separate model of shell access.
+
+Decided on 2026-09-26 (journal, "list, containers outside the stacks, the panel's own stack"): the
+source of a container comes from its labels only (managed, external-compose, standalone, unknown).
+External projects are always shown, without an `all-readonly` switch, and the switch is not
+planned. `all-control` is the owner setting `containerControl`, per server, off by default and
+turned on with the password; it lets operators start, stop and restart external-compose and
+standalone containers. Delete, kill and exec wait for their own access model (item 2 of "Interface
+and Docker overview: open tasks").
+
+### The panel's own container and the main console
+
+- Check the panel's own container against the real `docker-compose.yml` and Dockerfile: image, tag
+  and digest, healthcheck, restart policy, the user of the process, the Docker socket, the bind mounts
+  of `/app/data` and the stacks directory, the Docker CLI and Compose CLI, and that the data survive a
+  recreation.
+- Show the control plane as a separate card with health, uptime, image, restart count, last seen
+  and mount status. Do not let the general container button delete the panel itself or run
+  `down -v`. Done on 2026-09-26: a read-only card in Settings -> About, and the server refuses down,
+  delete, start, restart, deploy and update on the panel's own stack (`stackIsPanel`).
+- Keep the main Dockge console off by default and state plainly that through the Docker socket the
+  user gets practically host-level control. The decision "do not add turning it on from the UI" was
+  reversed on 2026-09-24: an owner turns the console on in the security settings with the password,
+  and `DOCKGE_ENABLE_CONSOLE` is no longer read (see the journal). Only owners open it unless an
+  owner lets operators in (`consoleOperators`).
+- For a restart of the panel itself, warn that the UI goes away for a moment and run only a safe
+  operation; update the image through a separate Git/Compose CLI, not through an arbitrary browser
+  shell. Replaced: restarting the panel's own stack is refused and stopping it stays, with a warning
+  (2026-09-26); the image is updated by the signed updater, from the host or from Settings -> About
+  (2026-09-25).
+
+### Docker run to Compose
+
+- The dependency `composerize@1.7.6` was used in `backend/socket-handlers/main-socket-handler.ts`;
+  first run a corpus audit rather than replace it formally. Replaced by a converter of our own on
+  2026-09-26 after the corpus, see the journal ("docker run converter of our own").
+- Check the conversion of ports, mounts, env and env-file, restart, network, healthcheck, user,
+  capabilities, devices, labels, `--init`, entrypoint and command; unsupported options must give a
+  warning, not disappear silently.
+- Fix the data-losing operation `split("\\n").slice(1)`: remove only the known top-level `name`,
+  and only if the generator really added it. Done on 2026-08-27 (`stripGeneratedProjectName`); the
+  code went with `composerize` on 2026-09-26.
+- After conversion, parse the YAML and run `docker compose config --quiet` in an isolated directory
+  without starting containers. Show the generated text in a preview with the warnings and save it
+  only after an explicit action.
+- Do not add `networks: {}`, `version`, privileged options or other settings "for looks" when the
+  original command did not have them; a change of meaning must be visible to the user.
+
+### Brand and version
+
+- The owner's request at the time: the public name and the repository are `Dockge 2`, and new
+  released versions must not go back to major 1. The code then named the package `dockge`, version
+  `1.5.0`, and the release scripts used `louislam/dockge:1`; this was to change through a separate
+  compatibility map, not a global string replacement. Done on 2026-09-16: the package is `dockge2`,
+  the repository and the image are `mazixs/dockge2` (the image at `ghcr.io/mazixs/dockge2`).
+- Preliminary decision of the plan: the visible name is `Dockge 2`; the technical `dockge`,
+  `DOCKGE_*`, API events and upstream references stay until the migration and the project's own
+  Docker registry are checked. Now: the name is written "Dockge2", and in the interface
+  `BrandMark.vue` draws it on every screen (journal entry of 2026-09-15 on the third pass over the
+  live instance). The `DOCKGE_*` variables and the event names stay; upstream references were
+  removed on 2026-09-16 except the fork's attribution, the MIT notice, a real third-party image in a
+  template and the origin of `extra/healthcheck.go`.
+- The first stable version is `2.0.0`; then `2.0.1`, `2.1.0`, `3.0.0`; a release candidate is
+  `2.0.0-rc.1`, a build `2.0.0+build.1`. The forms `2`, `2.1` and `2.0.1.1` are not used. Replaced on
+  2026-09-19 (see "Global constraints"): numbering starts at `0.0.1`, `2.0.0` stays reserved for the
+  first release declared stable, and candidates are `X.Y.Z-rc.N`.
+- Synchronise `package.json`, the lockfile, the frontend version constant, Git tags, Docker tags,
+  `compose.yaml`, README, favicon and icon, and GitHub Actions; do not publish the new fork under the
+  upstream tag `:1`. Done (see "Brand and version" in the checklist); the root `compose.yaml` was
+  removed on 2026-09-16, and the production configuration is `docker-compose.yml`.
+- Update the icon and the visual style as a separate P3 task once the name is settled; check the
+  favicon and PWA, the light and dark themes, contrast, alt text and accessible labels, and that no
+  asset is stretched. The icon was replaced by the fork's own on 2026-09-19 (`frontend/public/icon.svg`,
+  with the PNG sizes and `favicon.ico` rendered from it; git history).
+
+The open tasks of this direction, with acceptance criteria, are in "Interface and Docker overview:
+open tasks" below.
+
+### Stack backups: recipe, volumes, snapshots (backlog, 2026-09-15)
+
+The owner asked on 2026-09-15 whether containers could be backed up and tied to snapshots, so that
+a stack could be rolled back. The same message said that the task is large, needs disk space and
+control, and therefore goes to the backlog rather than into the current work.
+
+**The problem, refined.** A "copy of a container" is the wrong object: a container is disposable,
+and `docker commit` and `docker export` give a snapshot of a layer without the volumes, not
+reproducible and of unclear origin. These commands are not used. The value splits into three parts,
+and those are what must be copied:
+
+- **the recipe** - `compose.yaml`, the active env files, the secrets; they lie as files in the stack
+  directory and take almost no space;
+- **the data** - named volumes and bind mounts; all of the size and all of the real value are here;
+- **the version** - the digest of the image, not the tag: without it a rollback would bring up
+  something other than what was captured.
+
+**Control is the main design decision.** Backups must be a property of the stack, not a global
+setting: the management node and a couple of containers running Telegram bots do not need copies,
+and they must not be made to pay for them in disk space. Three levels per stack: no copies (the
+default for a new stack), the recipe only, the recipe and the volumes (turned on explicitly, with a
+size estimate before the user agrees).
+
+**The state of Dockge itself is a low priority.** It is the control plane: if it is down, the
+stacks keep running, and any other instance can bring them up from the same files. For its own
+database a `VACUUM INTO` snapshot without stopping the server is enough; it needs no backlog task of
+its own.
+
+**Open questions; do not start the implementation without answers:**
+
+1. Consistency of the volume of a running service. The options: stop the stack for the snapshot
+   (correct, but downtime), a snapshot on the fly (fast, with a risk of torn data), or a dump by the
+   service's own means before the snapshot. The hardest part of the task.
+2. Restoring. A copy without a tested restore is pointless; restoring must be an action in the
+   interface, not an instruction.
+3. Space and rotation: a budget per stack, the number of snapshots kept, the behaviour when the disk
+   fills. Filling the disk with copies is a way to bring down every stack at once.
+4. Security: the copy contains the secrets, so it gets the same `0600` permissions and, preferably,
+   encryption. Hooks around a snapshot are the most dangerous place of the task: the constraint "no
+   events that let the browser run arbitrary git, shell or Docker commands" applies here too.
+5. The form of the snapshot manifest: what exactly is written next to the data so that a rollback
+   is reproducible (image digests, file names, the version of the manifest schema).
+
+**Footholds in the current code:** the stack files with the allow-list of names
+(`common/stack-files.ts`); the Git workflow `clone` / `preview` / `apply` (`backend/stack-git.ts`),
+which works inbound today, as a source, and would have to be rethought as a receiver of recipe
+snapshots; the reading of local and remote image digests (`common/image-digest.ts`). The stack model
+has no volumes at all - no inventory, no sizes, no distinction between a named volume and a bind
+mount; this is a new capability, not an extension of an existing one.
+
+**Status:** backlog. No decision taken, no decomposition; do not start the implementation.
+
+### Interface languages: translation and RTL (backlog, 2026-09-16)
+
+The owner asked on 2026-09-16 to lead the project mainly in English and to keep a set of languages
+from the most widely spoken in the world. The set is approved and already cut down in the code; the
+rest is work on content, and it goes to the backlog.
+
+**Done and closed.** `languageList` was cut down to eleven languages: English, Russian, Simplified
+Chinese, Spanish, Arabic, French, Portuguese, Indonesian, Urdu, German, Japanese. 22 catalogues that
+are not on the list were deleted, along with two phantoms (`mag`, `mai`) whose selection threw an
+exception. `test/frontend/i18n-catalogue.test.ts` keeps the list and the files from drifting apart
+again. Later only the fully translated English and Russian were left in the menu; the catalogues of
+the other nine stay in `frontend/src/lang/` until they are translated (the comment on `languageList`
+in `frontend/src/i18n.ts`).
+
+**Order and choice before sign-in (2026-09-24).** The switcher lists English first, Russian second,
+and the rest by name in English collation: sorting by the browser's locale put "Русский" above
+"English" in a Russian browser. The language is also chosen on the sign-in screen, next to the theme
+(`LanguagePicker`), so that a reset choice does not leave the sign-in form in a foreign language.
+English is the default: the browser language is no longer taken into account, and a first run,
+cleared storage or a stored code that the menu does not offer open the interface in English.
+Russian and the rest are an explicit choice only.
+
+**Task 1: completing the translations. The volume is measurable.** Measured on 2026-09-16:
+`en.json` had 750 keys, Russian was complete, and the other nine were upstream Dockge leftovers at
+14-17%, that is about 120 translated strings and 630 English ones passing for the locale, about 5700
+strings of translation for all nine. Measured again on 2026-09-27: `en.json` has 1208 strings, Russian
+is complete, and the other nine hold 87-105 strings each (7-9%), about 10,000 strings for all nine.
+Within the set the order logically follows the number of speakers: Chinese, Spanish, Arabic, French,
+Portuguese, Indonesian, Urdu, German, Japanese.
+
+**Task 2: Hindi (`hi`) and Bengali (`bn`).** There are no catalogues for them at all. Stub files
+were deliberately not added: a menu item that gives a screen entirely in English is a promise the
+product does not keep. Add them together with a real translation, not before. The gap is recorded
+in `frontend/src/lang/README.md`.
+
+**Task 3: RTL. Separate work, and it is not about Arabic.** The `dir` attribute switches correctly,
+but `rtlLangs` is empty while `ar` and `ur` are not in the menu; they go back there together with a
+translation. The layout is not ready for it: on 2026-09-16 there were 70 physical CSS declarations
+(`margin-left`, `padding-right`, `left:`, `right:`), no `[dir="rtl"]` rules and two logical
+properties; counted again on 2026-09-27, 69 physical declarations, one `[dir="rtl"]` rule (in
+`StackList.vue`) and no logical properties. Arabic and Urdu would give right-to-left text inside a
+left-to-right layout. Urdu is in the required set, so the question is not whether to take Arabic but
+whether to do RTL. The work: move the declarations to logical properties (`margin-inline-start` and
+so on), add an RTL run to the visual acceptance and re-approve the references in one batch.
+
+**Open question; do not start task 1 without an answer.** Who translates. Machine translation of
+interface strings without a native speaker gives what there is now: a screen that looks translated.
+The options: accept translations through pull requests from native speakers (slow, free, quality
+can be checked), order them (fast, costs money, needs a glossary of Compose terms), or keep English
+as the only complete language and say so honestly in the interface.
+
+**A small item that can be taken at any time:** `en.json` had 13 keys that no component asks for
+(`addFirstStackMsg`, `notAvailableShort`, `addNetwork`, `Remember me`, `newUpdate`, `rmCode`,
+`rmRfCode`, `envVarCode`, `pasteAnywhereHint`, `tallyRunning`, `tallyAttention`, `tallyStopped`,
+`listUpdatedAgo`); delete them together with the translation, so that nothing dead is translated.
+Closed on 2026-09-26, when 13 unused keys were removed (journal, "technical debt from the reviews and
+audits, closed for 0.0.14"). Of the keys listed here only `newUpdate` is left, and it is in use.
+
+**Status:** backlog. The set of languages is approved; the content has not been started.
+
+### Documentation in English (backlog, 2026-09-16)
+
+The owner's decision of 2026-09-16: the project is led mainly in English, but partial Russian is
+acceptable and is not a clean-up task of its own.
+
+Translated and closed on 2026-09-16: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md`,
+`CLAUDE.md`, `docs/authentication.md`, `docs/mcp.md`, `frontend/src/lang/README.md`. CI and `.github`
+contain no Cyrillic.
+
+What was left then, with its measured volume:
+
+- `docs/design-system.md` - 155 lines, 81 KB of dense prose with exact pixels and token names; to be
+  translated as a separate careful task, since a specification with a garbled value is worse than a
+  correct Russian one. Translated on 2026-09-27.
+- `docs/plans/` - this journal and the decomposition of current work, not product documentation.
+  The finished plans and `docs/design/` were deleted on 2026-09-26. A translation of the journal was
+  not planned then; this plan was translated on 2026-09-27 all the same.
+- About 2000 lines of Russian comments and test names, mostly in `frontend/src` and `test/e2e`.
+  Mechanical work; do it along the way when a file is edited, not as a separate pass. Counted on
+  2026-09-27: about 2250 lines outside the catalogues contain Cyrillic, about 1770 of them comments;
+  the rest are test names, fixture texts, messages of development scripts such as
+  `extra/seed-review.ts`, and test patterns that match the Russian interface on purpose.
+  `docker-compose.yml` keeps its Russian comments: its SHA-256 is one of the vendor files the updater
+  recognises in `extra/updater/main.go`, so even an edited comment changes what the updater accepts.
+- `test/visual/scene.ts` draws the references with `locale = "ru"`. Switching it to English would
+  take re-approving all 40 references (28 desktop, 12 phone) in one batch. Not decided.
+
+**Status:** backlog, low priority. The documentation, including `docs/design-system.md` and this
+plan, was translated on 2026-09-27; only comments in code remain in Russian. The owner said partial
+Russian is acceptable.
+
+### Interface and Docker overview: open tasks (backlog, moved 2026-09-26)
+
+Moved from the deleted product-dashboard plan (Tasks 3, 5, 6, 7, 9); the state was checked against
+the code on 2026-09-26.
+
+1. **A scalable list and the relations of services.** Done in 0.0.14, see the journal, 2026-09-26,
+   "list, containers outside the stacks, the panel's own stack". One thing is open: mass
+   start/stop/restart - only by agreement, for chosen managed stacks, with a preview and a result
+   per stack; not done without agreement.
+2. **Containers outside `stacksDir`.** Done in 0.0.14, same entry. Open: delete/kill/exec for
+   external and standalone containers - only after a separate access model.
+3. **The panel's own container.** Done in 0.0.14, same entry.
+4. **Corpus audit of `docker run` -> Compose.** Done in 0.0.14: a corpus of 51 fixtures, and
+   `composerize` replaced by a converter of our own, see the journal, 2026-09-26, "docker run
+   converter of our own".
+5. **The final UX, accessibility and performance check.** Done in 0.0.14, see the journal,
+   2026-09-26, "the final UX, accessibility and performance check", together with the English server
+   refusals found on the way.
+6. **Renaming an agent.** Done in 0.0.14: a button in the agent's row on Settings -> Agents.
+
+### Operational acceptance (backlog, 2026-09-26)
+
+Moved from the deleted reports on the self-update and on performance of 2026-09-22. Do not announce
+minimum memory requirements until this passes.
+
+- **A small host.** A dedicated VPS with 1 vCPU and 1 GiB: installing and updating the published
+  image, 30 minutes of screening, then a 24 hour soak, three remote agents, a real suspension of a
+  hidden tab by the OS, backpressure of the logs with several viewers, the peak RSS with parallel Git
+  previews at the limit, retaining-path snapshots in the browser. Locally only the 30 minute screen
+  under `MemoryMax=1G` has passed (147-187 MiB idle, a peak of 261 MiB). The soak length is fixed in
+  `extra/performance-audit.ts` (30 minutes); 24 hours need a parameter.
+- **Updating on a real host.** A power cut or SIGKILL and a full disk during the cutover; a host
+  reboot after a successful and after a failed update - whether the identity of the installation and
+  the recovery status survive. The injections in `extra/updater/engine_test.go` check the decisions
+  of the journal, not the durability of the file system, Docker and SQLite. The release gate runs
+  arm64 only under QEMU.
+- **Production deployment.** Bind mounts, SQLite backups, the Docker credential helper, TLS, a
+  reverse proxy, an image rollback - on a dedicated host, not on the test bench.
+- **The host's Compose in the gate (2026-09-27).** The GitHub runner `ubuntu-24.04` (image
+  20260920.314.1) carries Docker Compose 2.38.2, while the panel image, the review VPS and the
+  development machine have 5.5.1. So the release gate checks only the mixed case: a host on 2.38 and
+  the helper of the web update on 5.5. It was on 2.38 that CI and the gate caught `memswap_limit` and
+  `create_host_path`. A host on 5.5, as after an install from Docker's repository, never passes
+  through the gate; only local runs and the VPS see it. The lower bound `minCompose` 2.20.0 is not
+  checked at all. Proposal: a second pass of `docker.sh`, `managed.sh` and `unmanaged.sh` with the
+  5.5.1 plugin pinned by sha256 in `$DOCKER_CONFIG/cli-plugins`, keeping 2.38 as the old host. The
+  cost is a longer gate. Not done until the owner decides.
+
+### Visual audit of 2026-09-27 (backlog)
+
+A static audit of the reference screenshots (1280 and 390 px, both themes), the markup of the
+stack, create, Git comparison and panel update screens, the motion styles, the visual tests and the
+state matrix, against the [Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines/blob/main/command.md).
+No live browser run took place, so the speed, smoothness and interruption of transitions are not
+assessed; the screenshots show one still frame of invented data. The audit file itself was not kept:
+its findings are below.
+
+Preliminary score 14 of 20, with no blocker on the screens checked. Accessibility 2 of 4 (visible
+focus and worded states, but a long command is not announced before its result, and a Git apply
+error stays above the reader's position); motion performance 3 (short `transform` and `opacity`
+transitions, one global `transition: all`); adaptivity 2 (the files tab grows to 2944 px on a phone,
+the overview table hides columns without a hint, the empty phone overview hides stack creation);
+themes and contrast 4; consistency 3. The risk lies in feedback after long operations, phone states
+and unverified transitions, not in the palette.
+
+Screenshots cover only part of the states. Seen in references: the overview (running, failed,
+stopped; both themes and widths), a stack's overview, files and log (both widths) and terminal
+(1280), the first step of creating from Git (both widths), the Git choice for three files (1280),
+the panel update ready, running and rolled back (1280) and running (390), the sign-in form (1280).
+Read from markup and tests only, not accepted visually: loading, empty, stale data, unavailable
+Docker, no history, hundreds of stacks and long names on the overview; a stack's load error,
+viewer role, active and failed command, save conflict; the second create step, pasting Compose,
+waiting, refusal and success; the Git result check, apply, refusal, unknown outcome and success;
+a refused dry run, the password prompt, cancel, an unknown result and recovery required on the
+panel update; the 2FA code, a wrong password, a setup error and mismatched passwords.
+
+Findings, in the order the audit proposes:
+
+1. **A Git failure can stay out of view** (P2; `StackGitChanges.vue`, `NewStack.vue`). After
+   choosing versions for several files, checking the result and applying, a refusal or an unknown
+   answer appears at the top of a long page while the owner is at the buttons at its bottom; the
+   buttons are disabled by `Boolean(failure)`, with no scroll or focus move to the message. The same
+   holds for a refused create from Git, whose message appears above the second step's form.
+   `role="alert"` helps a screen reader, not a sighted owner. Done when: the refusal is visible next
+   to the current action, or focus and scroll move to it; refusal and unknown outcome read
+   differently; a repeat apply is not offered after an unknown outcome. Check at 390 px and with the
+   keyboard.
+2. **A long command is not announced before its result** (P2; `StackProgress.vue`). The name and
+   count of the current step change visually, but the only `role="status"` sits on a hidden line
+   filled only on `outcome`, so a screen reader hears nothing for minutes, and an empty status does
+   not tell waiting from a frozen page. Done when: one calm live region announces the start, each
+   significant step and the result, without every frame or second, and says what the visible text
+   says.
+3. **Setup errors are not tied to the fields** (P2; `Setup.vue`). Mismatched passwords or a refused
+   one-use setup code go to a toast only; the fields get no error and focus stays on submit.
+   Done when: the text stands next to the field, is linked with `aria-describedby`, and focus moves
+   to the first field in error; the server's answer to a wrong setup code is checked separately.
+4. **The empty phone overview offers no way to create a stack** (P2; `Dashboard.vue`,
+   `StackList.vue`, `StabilityDashboard.vue`). On a first visit without stacks the list is closed,
+   and its create button and empty state are inside it; the main area says there is nothing to watch
+   yet. On a desktop the same button is visible in the side column. Done when: the empty overview
+   shows one create action to a user who may manage stacks, and an explanation without a disabled
+   button to a viewer.
+5. **Hidden columns of the phone overview table are not marked** (P2; `StabilityDashboard.vue`,
+   `phone-light/dashboard.png`). At 390 px the table has a minimum width of 670 px and scrolls
+   sideways; name, state and part of the uptime show, restarts and the availability history do not,
+   and nothing says the area scrolls. The history is what the overview is opened for. Done when: the
+   sideways scroll is marked, or a compact phone view shows availability and restarts without hidden
+   columns. Check at 390 px, with touch and with the keyboard.
+6. **Secondary settings crowd out the files on a phone** (P2; `Compose.vue`,
+   `StackFilesEditor.vue`, `phone-light/stack-files.png`). The files tab is 2944 px tall in an
+   844 px window: after Compose and `.env` come the full file selection form, the secrets and the
+   source details, all of equal weight, with the secret actions about two screens down. Done when:
+   Compose and `.env` stay at hand, and the secondary groups open on request or through a short
+   navigation inside the tab; at 390 px the way to choose a file and to a secret needs no search
+   through a long page; saving a file stays clearly apart from deploying.
+7. **The empty state grows its action by 20% on hover** (P3; `main.scss` `.action:hover`,
+   `EmptyState.vue`). The wrapper scales to `1.2` with `transition: all`, while other actions only
+   change colour and background; the button can cover neighbouring text, and `transition: all` also
+   catches future properties. Done when: the wrapper does not scale, the button itself gives the
+   feedback, and the animated properties are listed.
+8. **The visual acceptance does not cover motion and part of the phone states** (P2;
+   `test/visual/design.spec.ts`, `test/visual/state-matrix.spec.ts`). Every reference is taken with
+   `animations: "disabled"`; phone references skip the Git comparison and the ready and rolled-back
+   update; the state matrix is about the overview and the list. The `.update-expires` mask is a test
+   artefact, not a defect, but it hides that line. Done when: separate browser checks run with
+   motion on and with reduced motion (a tab switched in the middle of a transition, an error and a
+   repeat, long texts), the Git comparison and the update result are checked at 390 px, and the
+   references stay deterministic.
+
+Closed on 2026-09-27: **the update overlay's step marker pulsed too often for a long wait**
+(`PanelUpdateOverlay.vue`). It flipped its background every 240 ms (`--motion-slow`, `alternate`)
+for the whole update, repainting each time. The segmented bar chosen that day replaced it: the
+current segment sweeps a `transform`-only highlight once per 1.3 s and stands still under
+`prefers-reduced-motion: reduce`. A recording of a long live step is still to be made.
+
+Already sound: states are worded, with colour as a second signal; both themes use one token set,
+a separate colour for Git changes, a shared focus ring and the system colour scheme; tab transitions
+are short and move `opacity` and `transform`, and reduced motion is handled globally; create,
+overview and files have phone references, and the stack screen keeps its state and actions on the
+first screen.
+
+Order of work: items 1-3; then 4-6; then 7; then item 8 and a repeat of the audit in a live
+browser.
+
+### Technical debt from reviews and audits (closed 2026-09-26)
+
+Every item of the review of 2026-09-20 and the audit of 2026-09-19 is closed in 0.0.14: what was
+done, and the decisions not to do something with their reasons, are in the journal, 2026-09-26,
+"technical debt from the reviews and audits, closed for 0.0.14". The list of items before closing is
+in the history of this file.
+
+## Current state
+
+As of 2026-09-27:
+
+- **Version.** `package.json` is at 0.0.14. Published releases: 0.0.1 to 0.0.14 (the tags 0.0.9 and
+  0.0.11 have no release) and the prereleases 0.0.14-rc.3 and rc.4; rc.1 and rc.2 stopped at the
+  release gate. 0.0.14 passed its release gate on 2026-09-27 and is `latest`.
+- **Branch.** Work happens on `main`, the only branch locally and on GitHub.
+- **Checks, by level.** `npm run check`: ESLint, `tsc --noEmit`, `vue-tsc` with `strictTemplates`,
+  unit tests under c8 with the coverage floors. `npm run test:install`: the Go updater and
+  healthcheck tests and the release, bootstrap and privacy contracts; no container is touched.
+  `npm run test:docker-integration`: a real Docker Compose. `npm run test:e2e`: Playwright with a real
+  Chromium and real containers. `npm run test:visual`: reference screenshots in the pinned Playwright
+  image. Also `npm run check:bundle`, `npm run lint:sh`, and `npm run test:performance`, which is run
+  by hand.
+- **CI.** `ci.yml` runs on a push or pull request to `main`, unless only Markdown, HTML or `docs/`
+  changed. Job "Node.js" on 24.21.0 and 22.23.2: on both, tests with coverage and floors and the
+  frontend build; on 24.21.0 only, lint, `check-ts`, `check-vue`, shellcheck, the bundle budget and
+  `test:install`. Further jobs: Docker Compose integration, browser end to end, and reference
+  screenshots inside the image the references are approved in. `json-yaml-validate.yml` checks the
+  syntax of JSON and YAML files. Dependabot updates actions and npm weekly, npm with cooldowns.
+- **Coverage floors.** `.c8rc.json`: 70% for lines, statements, functions and branches.
+  `extra/check-coverage.ts`: line floors per subsystem - access and sessions 80, stack files 80,
+  container state 85, agent transport 70, interface state 90; a group without a measured file fails.
+  `extra/check-bundle.ts`: the first load within 780 KiB (250 KiB gzipped), each lazy chunk within
+  480 KiB (160 KiB gzipped).
+- **Release path.** `release.yml` runs on a `v*` tag that matches the version in `package.json`. It
+  runs `npm run check`, `test:install`, the build and the bundle budget, Docker integration and e2e;
+  builds the amd64 and arm64 image once; writes the release descriptor `release.json` and signs it
+  and the updater binaries with Cosign under the identity of the workflow; runs the install, the
+  managed upgrade from the previous release and the unmanaged import on both architectures (arm64
+  under QEMU); signs the image, tags it with the version and creates the GitHub release (a prerelease
+  when the version has a `-`), with notes from `docs/releases/<version>.md`; verifies the public
+  assets, and only then `extra/release/promotion.mjs` moves `latest` - never to a prerelease and never
+  backwards. Installations pull the image by the digest of the signed descriptor
+  (`docs/self-updates.md`).
+- **Open work** lives in the backlog sections of "Requirements" and in the unticked items of the
+  checklist below; the journal keeps the history.
+
+## Implementation plan
+
+Finished subordinate plans are folded into the lines below and were deleted from the tree on
+2026-09-26 (how to read one is in "How this file is kept"). "Item N" refers to "Interface and Docker
+overview: open tasks".
+
+- [x] Upstream fixes #997, #979, #950 and #991 with the full set of checks; a safe CLI from Git to
+  Docker Compose with a dry run (later replaced by `update-dockge.sh` and the Go updater).
+- [x] Console, statuses, Compose files and Git deployment: paste into the terminal, a separate
+  `sh`/`bash` shell session, the `ATTENTION` status with the worker and init rules, the main Compose
+  file, env files, `.secret` and Compose secrets, preserving the source YAML with an explicit `-f` and
+  `config --quiet`, browser and Docker tests in CI.
+- [x] The UX baseline, the blocking Vue I18n error, the choice of the "Familiar Dockge" direction.
+- [x] The contract of the global overview, the dashboard without a selected agent, the availability
+  and stability history for windows up to 30 days (kept 31 days, `backend/observations.ts`).
+- [x] Brand and version: an image namespace and addresses of our own, numbering from `0.0.1` (now
+  `0.0.14`), publication only through `release.yml`, checked by `test/install/release.test.mjs`; the
+  update check looks at the releases of this repository and is off by default.
+- [x] A scalable list and the relations of services: search by image and server, `?q=` in the
+  address, paged output, read-only relations. Mass actions are not agreed and stay in item 1.
+- [x] Containers outside `stacksDir`: classification by labels, standalone containers in the list, a
+  container page, control by the owner's setting. Item 2.
+- [x] The panel's own container: identified by its ID, down, delete and recreate refused, a card in
+  "About". Item 3.
+- [x] Renaming an agent in the interface. Item 6.
+- [x] Corpus audit of `docker run` -> Compose: a corpus of 51 fixtures checked with
+  `docker compose config`, `composerize` replaced by a converter of our own. Item 4.
+- [x] The final UX, accessibility and performance check: 2000 containers and 300 stacks under CPU x4,
+  the state matrix in `test/visual/state-matrix.spec.ts`, Lighthouse accessibility 100 on six
+  screens, server refusals moved to catalogue keys.
+- [x] Better Auth: a separate audit and the migration after Stack/Compose/YAML were stable.
+- [x] Strict TypeScript in Vue SFCs: every component with a script is `lang="ts"`, `vue-tsc` with
+  `strictTemplates` is in `npm run check`, and `test/frontend/sfc-type-check.test.ts` catches a
+  return to JavaScript.
+- [x] Migration of vue-i18n from the Legacy API mode to the Composition API mode.
+- [x] Readiness for the production test: a green e2e, the brand and addresses without upstream, a
+  fixed tag, a clean image, the static cache, the README section on deployment; CI green, a fresh
+  clone passes `npm run check`.
+- [ ] Backlog: operational acceptance - a small host, updating through failures on a real host,
+  production deployment, Compose 5.5 on the host in the gate. Stated in "Operational acceptance".
+- [ ] Backlog: findings of the visual, motion and state audit of 2026-09-27. Stated in "Visual audit
+  of 2026-09-27".
+- [x] The technical debt from the reviews and audits of 2026-09-19 and 2026-09-20 is closed in
+  0.0.14, see the journal, 2026-09-26.
+- [ ] Backlog: interface languages - completing the nine catalogues (7-9% on 2026-09-27), adding
+  Hindi and Bengali, and RTL for Arabic and Urdu separately. Stated in "Interface languages"; do not
+  start before the question of who translates is answered.
+- [ ] Backlog: the rest of the move to English - only comments in code remain; the documentation,
+  `docs/design-system.md` and this plan included, was translated on 2026-09-27. Low priority; partial
+  Russian is accepted.
+- [ ] Backlog: stack backups - copying the recipe, the volumes and the image digests, with levels per
+  stack. Stated, with the open questions, in "Stack backups"; do not start the implementation before
+  the question of volume consistency is answered.
+
+## Decision journal
+
+### 2026-08-26: upstream pull requests and one plan
+
+- The owner clarified that upstream pull requests need not be rejected: we do not own the main
+  repository and can integrate useful changes into our own branch. #997 and #979 are integrated;
+  #950 and #991 are adapted to the current architecture and tests.
+- Every further requirement and joint decision is kept in this file. The upstream fixes got a
+  separate plan (deleted on 2026-09-26 with the other finished plans).
+
+### 2026-08-26: updating the Docker deployment
+
+- `git pull --ff-only` followed by `docker compose up --pull always --wait --wait-timeout 60` is a
+  separate, safe CLI scenario; `--force-recreate` is optional.
+- The automatic scenario never runs `down -v`, `volume prune`, `git reset --hard` or
+  `git clean -fdx`.
+- Git and Docker updates are not started from the browser's Socket.IO API. Replaced on 2026-09-25
+  for the panel's own update: an owner updates the panel from the web interface through the verified
+  updater.
+- Bind mounts keep the data, but production data is better kept outside the Git checkout.
+
+### 2026-08-26: Better Auth
+
+- The move to Better Auth is a separate migration, not mixed with dependency and `Stack` changes.
+- Better Auth covers authentication, sessions, 2FA and the basic CSRF, cookie and rate-limit
+  mechanisms. Authorisation, agent authentication and registry secrets are designed separately.
+- Minimal configuration: no OAuth, SSO, organisations, SCIM or passkeys until a requirement asks for
+  them.
+
+### 2026-08-26: console, statuses, env and secrets, Compose from Git
+
+- The owner made `Ctrl+V`, `Ctrl+Shift+V` and paste from the right-click menu mandatory in the
+  container console: without them, debugging with AI needs a separate terminal. Decision: an
+  explicit "Paste" menu item, the `paste` event and an xterm key handler, tested in a real browser.
+- `Switch to sh` only changed a route parameter and reused the existing PTY. Decision: a separate
+  shell session, the old one detached, and an allow-list of `sh` / `bash`.
+- The owner asked not to call a stack `inactive` or "dead" when only some services are missing or
+  show `N/A`. Decision: aggregation by service and a separate `ATTENTION` naming the problem
+  instances.
+- The owner asked for `.secret`, for named env files (`.env.product`, `.env.dev`) and for choosing
+  the main YAML. Decision: a typed file configuration, safe names inside the stack directory, and
+  the CLI `--env-file`, the service `env_file` and Compose secrets kept apart.
+- The owner reported that deploying from Git breaks YAML and adds `networks: {}`. Decision: the
+  editor stops rewriting YAML, `-f` becomes explicit, and a safe Git adapter comes later. The
+  canonical output of Compose is never saved back.
+
+### 2026-08-26: a scalable interface, the dashboard, global Docker and the brand
+
+- The owner added a P2/P3 direction: an interface that stays convenient with many agents, stacks and
+  containers, prioritised by IC. IC is `Impact × Confidence`, each 1-5; effort and security risk are
+  stated separately.
+- With no agent selected, the main area shows a global dashboard: agents, stacks and containers by
+  state, the last update, problem endpoints, and availability with its window and sample count.
+- Availability comes from a server history of observations kept 30 days, not from the current list.
+  `UNKNOWN` is not success, and no history gives "not enough data".
+- Large lists get grouping `agent -> stack -> service -> instance`, search, filters, compact paged
+  output and a read-only view of `depends_on`, networks, ports, volumes and secrets.
+- `composerize@1.7.6` is not replaced without a corpus check; parameters must survive, unsupported
+  flags are warned about, and the Compose CLI validates the result. Replaced on 2026-09-26: after
+  the corpus, `composerize` gave way to a converter of our own.
+- An audit of the panel's own container is added: health, uptime, image, mounts, the Docker socket,
+  restart and update, and no dangerous self-delete. The main console stays off by default: turning
+  it on means practically host-level control.
+- Containers outside the stacks directory may be shown, but inventory and control are separate
+  settings. The default is managed-only control; all-readonly is turned on separately, all-control
+  needs a capability and a confirmation.
+- The owner asked for the public name Dockge 2 and numbering from major 2. Decision: the display
+  name is `Dockge 2`, the first stable version `2.0.0`; the technical `dockge`, `DOCKGE_*` and the
+  upstream image stay until there is a compatibility map and our own registry. Changed on 2026-09-19
+  (see "Global Constraints"): the first publication came out as `0.0.1`, and `2.0.0` is kept for the
+  first release declared stable.
+
+### 2026-08-26: the plan checked before implementation
+
+- The code confirmed that tasks 1-4 of the upstream plan were not done and that its references
+  matched the checkout, so it was accepted without rework. Work happens in the main directory of
+  this repository, not in a separate `dockge2-review` copy.
+- The `Stack` constructor and `isManagedByDockge` must not fail on the names of external Compose
+  projects: an internal `safePath` returns undefined instead of throwing. The strict barrier stays
+  for every file and Docker operation.
+- Octal restoration also covers items of YAML sequences, because in issue #990 `tmpfs.mode` sits
+  inside the `volumes` list. Its YAML 1.1 side effect quoted `yes` / `no`; replaced on 2026-08-27 by
+  restoring the source text at node positions.
+
+### 2026-08-26: ATTENTION statuses and a blocking vue-i18n bug
+
+- Stack status no longer comes from the aggregated line of `docker compose ls`: the list uses one
+  `docker ps --all --filter label=com.docker.compose.project`, the stack page
+  `docker compose ps --all` with Health and ExitCode.
+- A one-shot life cycle needs an explicit marking. An unmarked `exited(0)` next to a running service
+  gives `ATTENTION` with a reason, not `RUNNING`. This replaces the earlier wording from upstream
+  #806 ("running + exited(0) = RUNNING"), because the owner asked not to guess which services are
+  one-shot.
+- The home page did not render: vue-i18n 11 removed `$tc`. It became `$t(key, n)`, checked against
+  the real library.
+
+### 2026-08-26: stack files, env sets and secrets
+
+- The choice of stack files (main Compose file, ordered env files, active env, secret bindings) is
+  stored in the `setting` table under the key and type `stackFiles`, so no schema migration was
+  needed. The general settings screen cannot overwrite it.
+- One Compose file needs no choice. With several, the fallback is deterministic
+  (`compose.yaml` -> `docker-compose.yaml` -> `docker-compose.yml` -> `compose.yml`, then sorted),
+  and the UI asks for a choice.
+- Every Compose command gets an explicit `-f` and `--env-file` in the configured order; missing env
+  files are left out so the command does not fail. `global.env` stays the first source.
+- `getStack` returns only a secret's name, size, date and bindings;
+  `revealSecret` / `saveSecret` / `deleteSecret` require the current password. Secret files are
+  written with `0600`; on Windows a warning says the permissions come from the directory.
+- The label of a one-off secret does not turn into `environment`. A binding appears only through an
+  explicit action, which adds the top-level `secrets` and `services.<name>.secrets` to the chosen
+  file.
+- Reading the file choice does not fail without the database, because the files on disk are the
+  source of truth.
+
+### 2026-08-26: `main` as the main branch
+
+- The owner decided that the fork's main branch is `main`, not `master`.
+- `npm run update-docker` pulls `origin/main` by default; `--branch=<name>` accepts only a safe ref
+  name, so it cannot carry Git options, a path or shell syntax. Replaced later by `update-dockge.sh`
+  and the Go updater (see "Current state").
+- The remote part (pushing `main`, changing the default branch on GitHub, deleting `origin/master`)
+  needs explicit permission. At the time of writing `origin/master` still held the old state.
+
+### 2026-08-27: the source YAML kept intact
+
+- The damaged YAML and `networks: {}` came from the `jsonConfig` watcher rebuilding the file from
+  the JS model on service updates and from `NetworkInput` always initialising `networks`. Both are
+  fixed.
+- Write rule: the source text changes only on an explicit edit by the user, in the text editor or
+  through a structural action. Loading a stack, refreshing its status and opening its page never
+  touch the file.
+- The structural editor is offered only when it can rebuild the file without losing meaning. With
+  `include`, anchors, aliases, merge keys or custom tags only text mode remains, with an
+  explanation.
+- A structural edit is a targeted diff against the source document, so untouched parts keep their
+  comments, quotes, style and octal notation.
+- Every `up` is preceded by `docker compose config --quiet` with the chosen files; an error means no
+  start. The canonical output of `config` is never saved.
+- A single stack is updated from Git by the local CLI `npm run deploy-stack`, which requires a clean
+  directory and runs no dangerous commands. There is still no browser API for Git. Later the
+  interface got a Git flow of fixed events - check, compare, apply (see `docs/git-stacks.md`); no
+  event runs arbitrary git.
+
+### 2026-08-27: the container console and Playwright
+
+- Paste failed because the interactive terminal listened only to `onKey`. With `onData`, native
+  paste is the main path; the Clipboard API serves the menu item.
+- Playwright is a development dependency: nothing else checks paste with a real Clipboard API, a
+  real xterm and a real container, and the plan forbids faking those boundaries. A separate CI job
+  installs only Chromium.
+- The E2E environment starts its own backend and frontend and seeds a temporary data directory and a
+  container. It ran with `disableAuth`; replaced the same day with the move to Better Auth, when the
+  seed began creating an owner who signs in.
+- The shell is part of the terminal's identity. The interactive terminal event accepts only
+  `sh` / `bash` and checks the service and the shell first. `terminalLeave` closes a session left
+  without clients.
+
+### 2026-08-27: an independent review and fixes
+
+- The day's commits were reviewed by a different model (Sonnet 5), under the rule that the review
+  comes from a model other than the one that wrote the code, and the full report was requested
+  without filtering.
+- Blocker: editing an existing stack wrote to the historical `compose.yaml` / `.env` instead of the
+  chosen files, and deploy used the wrong `-f`. `save()` now always loads the saved choice first.
+- Killing `docker exec` leaves the shell running inside the container. `Terminal.end()` cancels the
+  line and sends `exit`, then kills a session that ignores it.
+- Secret values are redacted from `docker compose config` errors (`Stack.redactSecrets`): nothing
+  guarantees that Compose will not quote one.
+- Docker integration tests live in `test/docker/`, out of the unit run.
+
+### 2026-08-27: a review by four Opus agents and fixes
+
+Four independent agents reviewed security, the status logic and YAML editor, the terminals, and test
+reliability. What was confirmed and fixed:
+
+- **Security.** The path barrier covers a symlinked stack directory and the synchronous reads, and
+  writes go through `O_NOFOLLOW`, so a file cannot be swapped between check and write. Service
+  start, stop and restart go through `getComposeOptions` and `assertServiceExists`, which rejects
+  values starting with a hyphen: a browser value in the service name position used to pass Compose
+  flags (`--remove-orphans`, `--build`) and widen the action to the whole stack. The general
+  settings screen accepts only allow-listed keys (`pickGeneralSettings`), and `setStackFiles` limits
+  its array sizes. Every remaining Docker call has a timeout and an output limit, and agent proxy
+  errors reach the client.
+- **Terminals.** A client can leave, write to or resize only a terminal it belongs to. A container
+  session ends when the server finds it without clients, so a closed tab no longer leaves it
+  running. A reconnect during the grace period gets a new session, not the dying one. `end()` also
+  sends EOF. Known limit: an interactive application inside the container can outlive the session,
+  because Dockge does not kill processes inside the container, so as not to hit other sessions. A
+  multi-line paste into the restricted console is cut to its first line with a warning, because one
+  Enter ran every pasted line.
+- **Statuses and YAML.** A `created` service next to a running one gives `ATTENTION`; a stack where
+  nothing ever started stays `CREATED`. A stack of only one-shot tasks does not show `EXITED` while
+  a task runs. `missingInstance` is reported only for a stack that is up. Update also recreates
+  containers of stacks in `ATTENTION`. An unavailable Docker gives `UNKNOWN` instead of the last
+  green statuses. Octal restoration puts the source text back at node positions without YAML 1.1. A
+  structural write is refused when the model does not match the current text, and only removing a
+  network that existed at load counts as removal.
+- **Tests.** Tests that could not fail were fixed and the missing cases added. The Docker suite
+  fails in CI when its environment variable is not set.
+- **Coverage.** `backend/terminal.ts` and the Docker socket handler are no longer excluded from
+  coverage. Line coverage fell from 85% to 78.8% against the 70% floor; the difference is gaps that
+  had not been measured.
+
+Left open as separate tasks, all five closed the same day (next entry): comments inside lists lost
+on an array edit; the first structural edit normalising indentation and line endings; numeric map
+keys duplicated on an edit; statuses diverging with `COMPOSE_PROJECT_NAME` in an env file;
+`ATTENTION` mixing degradation with complete failure, so a stack that is down had no start button.
+
+### 2026-08-27: the review debts closed
+
+- The structural editor diffs a sequence item by item, so comments on untouched items survive.
+  Numeric map keys are edited in place. The indentation is taken from the source and CRLF is
+  restored, so the first structural edit no longer reformats the file.
+- The start button appears whenever no container is running, even under `ATTENTION`. The stack list
+  is sorted alert-first. The dashboard counts `unknown`, so an unavailable Docker no longer looks
+  like four zeros.
+- A stack's containers are matched by the label `com.docker.compose.project.working_dir`, not only
+  by project name, so `COMPOSE_PROJECT_NAME` in an env file no longer gives "active" in the list and
+  "unknown" on the stack page.
+
+### 2026-08-27: the vue-i18n migration and small frontend debt
+
+- vue-i18n runs in Composition API mode (`legacy: false`, `globalInjection: true`): the Legacy API
+  is deprecated in 11 and removed in 12, and its warning was printed on every page load.
+- Components do not read i18n internals; the language list comes from `availableLanguages()` in
+  `frontend/src/i18n.ts`. `<i18n-t>` uses `scope="global"`.
+- `currentLocale()` works without `localStorage` / `navigator`, so a unit test checks the real i18n
+  configuration. A browser test covers changing the language and keeping it after a reload.
+- The browser console on the home page, the stack page and `/console` is free of Vue and intlify
+  warnings.
+
+### 2026-08-27: backward compatibility dropped before 2.0.0
+
+- The owner lifted the requirement to stay compatible with old data and the old schema: there have
+  been no releases and there are no installations.
+- For authentication this means the old `user` table, bcrypt hashes, the browser JWT and the
+  `login` / `loginByToken` events are removed outright instead of migrated. Less code is less attack
+  surface.
+- Stack files (compose, env, secrets) are outside this rule: they belong to the user, and their
+  format stays file-based.
+
+### 2026-08-27: authentication on Better Auth
+
+- People sign in through Better Auth 1.7.2: a server session in an `httpOnly`, `SameSite=Lax`
+  cookie, valid for 7 days and renewed daily, `Secure` only under HTTPS. JWT, `localStorage` and
+  bcrypt are gone, with their dependencies.
+- Exactly one account can exist: a second registration is rejected, so a panel exposed to the
+  internet does not let a stranger register. `npm run reset-account` deletes the account and its
+  sessions and leaves stacks, settings and agents alone. Superseded later: public signup stays off,
+  but the owner creates other users with roles, revokes access and resets passwords (see
+  `docs/authentication.md`).
+- The Socket.IO handshake checks the session cookie; there is no authentication event on the socket.
+  A dangerous action is confirmed through `auth.api.verifyPassword` with the cookie of the same
+  socket, so another session cannot confirm it.
+- The `twoFactor` plugin provides TOTP and backup codes. Confirming the code rotates the session, so
+  the dialog reconnects the socket.
+- In development, CORS for `/api/auth/*` and Socket.IO answers only `trustedOrigins`; a preflight
+  from another origin gets 403.
+- E2E runs with authentication on: the seed creates an owner and `global-setup` signs in once, so
+  browser tests follow the same path as a real installation.
+- Markup left the translation strings: `<strong>` in `disableauth.message1/2`, printed as text by
+  `<i18n-t>`, became slots.
+
+### 2026-08-27: authentication reviewed by three agents, and fixes
+
+Three independent Opus reviewers (backend security, frontend flow, test honesty) made more than 60
+remarks. The main ones, by weight:
+
+- Sign-in failed on any address but `localhost` with 403 `INVALID_ORIGIN`, shown as a wrong
+  password. An origin is now accepted when it matches the host the browser itself requested, is
+  listed in `DOCKGE_TRUSTED_ORIGINS`, or comes as `X-Forwarded-Host` with `DOCKGE_TRUST_PROXY` on.
+- A forged `X-Forwarded-For` bypassed the attempt limit, and without a proxy the limit locked out
+  the owner. Our middleware overwrites `x-dockge-client-ip` with the connection address, and the
+  limiter reads only that.
+- Whether to show the setup screen is read from the database on every connection
+  (`shouldShowSetup()`). A backup code is told apart from a TOTP code (`isTotpCode`) and checked by
+  its own endpoint.
+- A revoked session drops its socket within the 10 second loop (`dropRevokedSessions()`).
+- Password confirmation over the socket allows 5 attempts a minute per account, because
+  `verifyPassword` through `auth.api` has no limit. The lockout is short on purpose, so a stolen
+  session cannot lock the owner out for long.
+- In `disableAuth` mode the password is checked against the owner's hash directly
+  (`verifyAccountPassword`); secrets could never be used there before.
+- A resubmitted 2FA form sends only the code. Changing the password and turning 2FA off reconnect
+  the socket. The SPA no longer reloads on every reconnect.
+- The sign-in limit is 10 a minute per client, so that browser tests and a person with a typo do not
+  hit 429.
+- The database file gets `0600`, and `sslKeyPassphrase` stays out of the debug log.
+
+Known limits, accepted deliberately: up to 10 seconds between revoking a session and dropping its
+socket; a TOTP code can be reused within its 30 second window (better-auth behaviour); session
+tokens are stored in SQLite in the clear, so a copy of the database file is a compromise, and the UI
+cannot rotate the secret; installing an older Dockge is not supported, since compatibility is
+dropped before 2.0.0.
+
+### 2026-08-27: the design system fixed
+
+- The owner chose the "list and inspector" frame and the order of work: the paste screen first, then
+  the rest. This followed four directions, four layouts of the "Control desk" direction and two
+  independent reviews: a heuristic design review scored 22/40, and browser measurements found four
+  contrast failures, 38 targets smaller than 24 px and no mobile layout.
+- The system is `docs/design-system.md` plus `frontend/src/styles/tokens.scss` (both themes) and
+  `fonts.scss` (local IBM Plex with Cyrillic). `vars.scss` carries the same values, so old `.dark &`
+  rules do not diverge from new components.
+- Checkable beats described: `test/frontend/design-tokens.test.ts` computes contrast from the tokens
+  and fails if text drops below 4.5:1, a state below 3:1, blue starts to mean a state, or touch
+  targets shrink.
+- One font family in three weights. IBM Plex Sans Condensed from the mockups is dropped: it has no
+  basic Cyrillic (only `cyrillic-ext`). xterm uses the shipped IBM Plex Mono instead of an unshipped
+  `'JetBrains Mono'`.
+- Rejected: a common 50rem radius ("pills"), a gradient on the accent, and the old accent `#74c2ff`,
+  on which white text fails the threshold.
+- Order of the next layers: the paste screen as a route -> list and inspector instead of StackList
+  and the stack page -> a bottom dock for terminals and logs -> removing the old `.dark &`
+  rules -> empty states and the first run. Replaced on 2026-09-13: the bottom dock was removed, and
+  files and the log became tabs of the stack page.
+
+### 2026-08-27: the stack creation layer in code
+
+- `CreateStackSheet` opens over the list from the header button, from `Ctrl+V` anywhere outside an
+  input field, or by dropping `compose.yaml` into the window. It replaces the "Docker Run" block of
+  the home page.
+- A command is recognised by its content and converted in the same field. The original text is kept
+  and brought back by a button, because setting the value from code breaks the browser's native
+  undo.
+- The conversion report judges by the converter's real output, and the screen shows only the flag
+  without which the service will not work; the rest are behind a button. Replaced on 2026-09-26: our
+  own converter names every flag in its report.
+- The handler used to cut the first line of the converter's output, which held its warning, and
+  leave `name: <your project name>` in the user's file. Now only the generated name line is removed
+  (`stripGeneratedProjectName`).
+- A new stack is marked "just now" in the list for a minute instead of a toast.
+- A failed configuration check keeps the layer open with the Docker Compose text, and the file stays
+  on disk as a draft.
+- Deliberately not done: abort, which needs a server handler that stops `compose up`, and progress
+  per container. Both came on 2026-08-30: `abortCompose` and the state of each service while the
+  command runs.
+
+### 2026-08-28: list and inspector instead of the stack page
+
+- A list row opens `/stack/<name>`: `StackInspector.vue` shows the state, one control group (Start
+  or Stop, Restart, Update, and "More" with the compose file, `down` and delete), one attention line
+  with its reason, the services table with per-service actions and a collapsed "Links and networks"
+  row. The list stays beside it: two objects on screen, as `docs/design-system.md` requires.
+- `/compose/<name>` became a full-width file editor without the lifecycle, delete, the attention
+  reason or container cards: one action lives in one place, not two. Replaced on 2026-09-13:
+  `/compose/<name>` redirects to the Files tab of the stack page.
+- Russian plurals: `russianPluralRule` in `i18n.ts`, the index capped by the number of forms in the
+  message. vue-i18n had applied the English rule ("2 сервисов").
+- Our styles use `@use`, since Sass is removing `@import`. Two `@import`s stay: Bootstrap reads
+  `!default` overrides only from the file's scope and is itself written with `@import`. Warnings from
+  `node_modules` are silenced by `silenceDeprecations` in the Vite config.
+
+### 2026-08-28: a bottom dock for output
+
+Replaced on 2026-09-13: the dock was removed; stack output moved to the "Logs" tab and, on
+2026-09-14, shells to the "Terminal" tab. What still holds:
+
+- Each session has its own terminal name from the shared helpers, so `sh` and `bash` do not share a
+  PTY.
+- Hidden sessions use `v-show`, not `v-if`: unmounting `Terminal` sends `terminalLeave` and would
+  kill the shell.
+- `joinCombinedTerminal(stackName)` mirrors `leaveCombinedTerminal`. It takes only a stack name, and
+  `Stack.getStack` rejects anything that is not a stack directory, so no command passes through it.
+
+### 2026-08-28: the interface brought to the design system
+
+- **Blue no longer means state.** `statusColor()` returned Bootstrap variants, so "running" was the
+  blue of interactive elements. `statusStateName()` replaced it, and every state is drawn by one
+  component, `StateChip.vue` (a `--state-*` dot plus a word), instead of three different ways.
+- **Themes are not duplicated.** The ten `.dark &` rules and a 190-line block are gone; one table
+  maps each `--bs-*` variable to a token. It cannot live on `:root`: dark tokens are on `body.dark`,
+  and on `:root` it resolved to light values and turned dark-theme headings almost black. The one
+  exception under a theme selector is three Bootstrap variables with an embedded SVG.
+- **Components carry no colours of their own.** `ArrayInput`, `ArraySelect` and `NetworkInput`
+  used `$dark-bg2` unconditionally and were dark in the light theme; they and the remaining screens
+  moved to tokens.
+- **`--surface-console` is the same in both themes:** CodeMirror and xterm highlighting is drawn
+  for a dark background, and on white the red YAML keys failed the contrast threshold. The dimming
+  under a layer is the `--scrim` token, since `backdrop-filter: brightness()` barely worked in the
+  light theme.
+- The services table is a panel that scrolls inside itself instead of running off a narrow screen.
+  Buttons have one style definition, in `main.scss`.
+- The external network toggle is a `button role="switch"` with `aria-checked`; a tab's close cross
+  is not inside the tab button, because a button inside a button cannot be reached by keyboard; the
+  create layer traps focus and returns it to the button that opened it.
+- `test/frontend/design-tokens.test.ts` guards the system: a colour literal (`#rrggbb`, `rgba()`)
+  in a component's styles fails, and so does a theme-selector block holding anything but `--bs-*`
+  variables with an embedded asset.
+- Left for later: a diff before writing for the network toggle.
+
+### 2026-08-28: the list row and the inspector brought to the mockup
+
+The build had the frame of the agreed mockup ("Pasted and deployed", 2026-08-27) but not its
+content: the row showed only a dot and a name.
+
+- **The server sends what the row needs.** `summariseServices()` in `common/compose-status.ts`
+  judges each service from the same host-wide `docker ps`: unreadable output stays "unknown", a
+  declared service without a container is "stopped", exit code 137 is "attention".
+  `backend/stack-source.ts` reads the directory's Git source without network access and caches it
+  for a minute, or the 10 second cron would run git over every stack. Credentials are stripped from
+  the address, because the interface shows it.
+- **The row** got the agent, a source chip ("Git · in sync", "Git · -2", "local"), service chips
+  with "+N" and an updates column. Hidden services are named in a tooltip: silent truncation is not
+  allowed. Replaced on 2026-08-31: these columns moved to the work area.
+- **Filters** are buttons with `aria-pressed`, counted over the whole list, or a button would change
+  its own number when pressed. The filter lives in the address, so the header's "needs attention"
+  counter leads straight to that slice. Search matches service names too: the owner remembers
+  "gotenberg", not the stack it is in.
+- **The layout followed "Frame 1"** of the mockup, a wide list and a 400 px inspector. Replaced on
+  2026-08-31 by a 320 px navigator.
+- **The inspector** got origin chips (agent and directory, service count, image registries from
+  `common/image-source.ts`, the source), the reason with "Logs of <service>" and "Restart <service>"
+  buttons, memory use from `docker stats`, uptime, and the age of the state ("N s ago").
+- **No invented data:** where no image check existed, the updates column showed a dash saying so
+  (the registry check came on 2026-08-30). Availability waited for stored observations (next entry).
+
+### 2026-08-28: availability without lies
+
+- **A change is stored, not a sample.** `stack_observation` (migration `2026-08-28-1200`) gets a
+  row only when a stack's state differs from the last one recorded. A row per 10 second tick would
+  be millions of rows a month with no new fact in them. History is kept 31 days and cleaned at most
+  every six hours.
+- **The cron records, not the list broadcast.** The list is built only while a signed-in client is
+  connected, so recording from `sendStackList` would measure how long the owner watched the screen.
+  `observeStacks()` runs from the cron regardless of sockets.
+- **`computeAvailability()`** in `common/availability.ts` is a pure function with these rules:
+  under half an hour of observation is "not enough data", with how much was observed; a clean full
+  window is "no incidents · 24 h", not "100%"; one long outage is one incident; a gap in
+  observations reduces coverage and never counts as healthy; a stopped stack gets a duration
+  ("stopped N ago"), not a share; `ATTENTION` and `UNKNOWN` are never healthy.
+- **Windows** are 24 h, 7 d and 30 d through `stackAvailability`, and the server accepts only these:
+  an arbitrary number would let a client order a scan of the whole history. A partly observed window
+  says so ("Data collected for 2 days of the selected period"), or the percentage would look
+  complete.
+- **Running time is in the interface language.** `common/docker-time.ts` parses Docker's "Up About a
+  minute" into milliseconds; a phrase that does not parse is not shown.
+- **`frontend/src/format.ts`** formats percentages and durations the same everywhere and takes the
+  language explicitly, or the panel would write "94,2%" or "94.2%" depending on the machine.
+- Left as a known limitation: no availability for an agent's stacks, whose lists reach the client
+  socket, not the server cron.
+
+### 2026-08-28: matching the mockup by picture
+
+The owner said it still did not look like the mockup. The mockup and the build were captured in one
+browser and compared in one picture: the difference was in character, not data.
+
+- The row became one line with the state word in hidden text and the dot's tooltip, so names line up
+  as in the mockup; availability in words and the attention bar kept colour from being the only
+  signal. Replaced on 2026-08-31 (two-line navigator) and by 2026-09-15, fourth pass (the rail row
+  carries a state chip).
+- The list is a flat area with a divider, not a card with a shadow, so rows read as a table.
+- `AttentionStrip.vue` above the list names the problem stacks with their reason and leads to
+  `?filter=attention`. After the home page was rebuilt no screen used it; it returned on the
+  overview on 2026-09-15 (second pass).
+- A dense header with the tabs "Stacks", "Console", "Settings", "N need attention" and "updated N s
+  ago", counted from the arrival of the list, not from a render timer.
+- The dock was always visible, with "+ session". Replaced on 2026-09-13: the dock was removed.
+- "Update" became the inspector's primary action ("Update from Git" when Git is behind); service
+  actions appear on hover and on focus.
+- The mockup's "Containers" and "Agents" tabs were not built: no screens stand behind them, and
+  empty ones were not invented.
+
+### 2026-08-30: updates, abort, empty states and the local setup
+
+- **Update preview.** `stackUpdatePreview` answers what is known before a run: the working copy
+  (lag, uncommitted edits) and the registry's answer per image. "Update" opens the preview and a
+  second button runs it: the design document forbids mixing the two states.
+- **Compare like with like.** On the containerd store an image `Id` is the manifest digest, so
+  comparing it with the config digest called a fresh image outdated. Local `RepoDigests` are
+  compared with `docker buildx imagetools inspect`; without buildx a fallback covered
+  single-platform images only, and the rest stayed "unknown". Replaced on 2026-09-24: the registry
+  API is asked directly, since the published image has no buildx; on 2026-09-17 images were polled
+  four at a time with an 8 second limit per call.
+- **Abort** ("Stop"): `abortCompose` ends only the stack's own compose terminal, whose name the
+  shared helper builds, so it cannot close anyone else's session. The per-service run block shown
+  with it was replaced on 2026-09-14 by the run strip and the "State" column.
+- **Empty states** are one component, `EmptyState.vue`: an empty list offers to create a stack, a
+  filtered one to clear the filter. The disabled console pointed to an environment variable; since
+  2026-09-24 an owner turns it on in Settings.
+- **Running the project:** `docker-compose.yml` for production (`restart: unless-stopped`),
+  `docker-compose.local.yml` for development (no restart, ports 5000 and 5001, `node_modules` in its
+  own volume), `local.sh`, which recreates only its own compose project, and `.env.example` with
+  every variable.
+- **`npm ci --ignore-scripts` in `docker/Dockerfile`:** node-gyp for better-sqlite3 failed, because
+  the base image has neither python nor a compiler. The packages ship prebuilt binaries
+  (`better-sqlite3/prebuilds`, `node-pty-prebuilt-multiarch/prebuilds`).
+
+### 2026-08-31: the layout rearranged so the work has room
+
+The owner found the interface uncomfortable: the list was smeared across 1600 px while the
+inspector with the actions was squeezed into 400 px. This overrides the "Frame 1" proportions: the
+mockup was drawn before the panel had anything to do.
+
+- **A 320 px navigator**, two lines per stack: the name with a state dot and a meta line. The row's
+  columns moved to the work area, where images, ports and usage have room. The meta line with
+  availability went by 2026-09-15 (fourth pass): the rail row carries a state chip.
+- **The work area takes the rest, capped at 1100 px,** with tables as wide as their content: a
+  full-width table put usage 700 px away from the name.
+- **The empty work area held the create brief** (`CreateStackSheet` in an `inline` mode, one logic
+  in a different shell) instead of counters and a button that duplicated the header. Later entries
+  show the home page rebuilt around the stability overview (2026-09-15) and a separate "New stack"
+  page (2026-09-16).
+- **Two availability captions lied:** "99.9% · 0 incidents", where a stop lowered the share (now the
+  percentage alone, explained in a tooltip), and "100%" for a share below one (the percentage rounds
+  down, because there was downtime).
+
+### 2026-09-13: files and logs became tabs, the bottom dock removed
+
+The owner said the files led away to another page and the log popped up from below and got in the
+way. The chosen option: no bottom panel at all.
+
+- **Overview, Files and Logs are tabs of one stack page.** Their routes render the same
+  `StackInspector.vue`, so the router reuses the instance and only the work area changes. A static
+  path segment outranks a parameter in route scoring, as it already did for `git`.
+- **`/compose/<name>[/<agent>]` redirects** to the Files tab, so old links keep working;
+  `Compose.vue` has an `embedded` mode without its own header and tabs.
+- **`TerminalDock.vue` was deleted** with `$root.openStackLogs`, `openContainerShell` and
+  `dockHasLogs`. Sessions survive a move between tabs of the same stack (`v-show`, so `Terminal`
+  does not send `terminalLeave`) but not to another stack: an open stack shows its own log. The
+  shared `StackSessions.vue` was replaced on 2026-09-14 by separate Logs and Terminal tabs.
+- **The files panel uses `v-if`,** so polling and editor state are destroyed. Unsaved edits are
+  asked about in the inspector's `beforeRouteUpdate` / `beforeRouteLeave`, delegated to the embedded
+  `Compose`: in-component guards fire only on the route component.
+- **xterm in a hidden tab fits itself to a garbage size,** so showing the log refits it.
+
+### 2026-09-14: logs and files brought to the mockup
+
+The owner showed mockup frames of the log, the files and the Git comparison; the first two were
+brought to the third. The rules come from `source.css` of the frozen mockup export (removed from the
+tree later, see 2026-09-26: documentation cleanup), expressed in our tokens; the mockup is never
+imported into the application.
+
+- **One grid on every tab:** `inspector-grid`, the main column plus a 265 px source panel on the
+  right.
+- **The log is a card** whose header states the connection in words (`StateChip`): a local stack
+  watches its own socket, an agent's stack that agent's status. The caption says whether the shown
+  session takes input, because output and a shell look alike.
+- **`ResizeObserver` watches the console area**, since the old xterm grid overlapped the caption
+  after a resize; the area clips its content so a lagging canvas does not cover text.
+- **Files are file cards:** the name in monospace, an "On server" mark, copy and the editor actions
+  in the header, and the caption "Source text, comments included". The env file looks the same.
+
+### 2026-09-14: the log separated from the container terminal
+
+The owner: the log is for output and errors; a bash or sh shell is something else and belongs in its
+own tab after the log.
+
+- **Four tabs:** Overview, Files, Logs, Terminal, all on the same `StackInspector.vue`.
+- **`StackJournal.vue` is stack output only** and never takes focus: it accepts nothing, and focus
+  would lead the keyboard away from the page. Its caption says so ("The stack log is read only").
+- **`StackTerminals.vue` holds container shells:** session tabs with close, a caption that commands
+  run inside the container, and a choice of service instead of a black rectangle while no shell is
+  open.
+- **"Open shell" in a service menu leads to the Terminal tab** and gives it input. The row's logs
+  button still led to the log; changed on 2026-09-17, when the row's terminal icon opens a shell and
+  the log moved under the three-dot menu.
+- Both panels stay mounted on other tabs: the log would restart its output and the terminal would
+  lose its shells.
+
+### 2026-09-14: command progress shown on the stack page
+
+The owner asked where the output of start and restart (`[+] Running 2/2`,
+`✔ Container ... Removed`, `[+] Pulling 13/13`) is shown. In Dockge 1 it is a console under the
+action buttons, and it stayed there.
+
+- **Progress sits under the stack header, above the tabs** (`StackProgress.vue`), visible from any
+  tab and covering nothing. A window over the page was rejected: it hides what the command was run
+  for and blocks moving to another tab meanwhile.
+- The panel opened by itself and closed only with its button. Replaced the same day by steps, then
+  by the run strip (entries below).
+- **One output, one terminal.** Only the Files tab listened to the progress terminal, so the overview
+  never showed the output. The embedded editor no longer creates it (two terminals with one name
+  take lines from each other) and reports deployments with `run-start` / `run-end`. Actions on one
+  service write into the same terminal.
+- The root class avoids `.progress`: in Bootstrap that is a 1rem loading bar, and it squashed the
+  console into a strip.
+
+### 2026-09-14: progress speaks in steps, the terminal waits its turn
+
+The owner: "the terminal puts people off, but the terminal is needed for the work". As in Ubuntu,
+the terminal does not appear until the person calls it or an error happens.
+
+- **Steps instead of output.** `common/compose-progress.ts` parses the stream into resources: kind
+  (container, network, volume, image), name, verb, seconds. Compose redraws its block in a TTY, so
+  lines merge per resource and the last word wins. An unknown verb is plain output; image layer
+  lines are skipped.
+- **The xterm buffer is read, not the socket:** the buffer already holds the redrawn screen, and
+  wrapped lines rejoin by `isWrapped`. Parsing runs on `onWriteParsed` with a 120 ms delay. The
+  terminal stays mounted, since it is bound to the socket by name.
+- **Motion answers an event, never decorates:** a row slides in when a resource comes up, a running
+  step breathes, the result appears as a tick or a cross, a thread fills by compose's own count.
+  Under `prefers-reduced-motion` endless animations stop and the state stays in the icon and the
+  word.
+- The output opened by itself on a failed step. Replaced the same day: the full output is a window
+  that never opens by itself (next entry).
+- The run block on the overview was removed as a worse duplicate, with the keys `serviceQueued`,
+  `serviceWaitingHealth` and `serviceHealthy`.
+
+### 2026-09-14: the table tells the state, progress is one line, output is a window
+
+The owner: "what if this showed the active status of start and restart, and on errors you press a
+button and a window with the full start log pops up? so the panel does not get in the way every
+time, since the status is basically duplicated". The duplication was real, but partial: the table
+has no networks, volumes, image pulls, total time or abort, and the Files, Logs and Terminal tabs
+have no table. So the duplicated part went to the table and the rest shrank to one line.
+
+- **The "State" column reads the compose steps** while a command runs: the chip says "creating",
+  "starting" or "started" and its dot breathes. The colour follows the step: in progress is
+  attention, done is running (stopped for "stopped" and "removed"), failed is failure.
+  `TAIL_DELAY` (4 s) after the end the word returns to the Docker reading, or the table would lie
+  about what happened after the command.
+- **Compose names containers, not services.** A step matches the container name from `docker ps`,
+  then `container_name` from the file, then compose's own `<stack>[-_]<service>[-_]<number>`. An
+  image pull matches by service name and yields to a container step.
+- **The run strip** (`.run-strip`): the result mark, the command, the current step, the step count,
+  seconds, abort ("Stop"), "Show the output", close. It leaves by itself 4 s after a success; after a
+  failure it stays red and names the failed step. The wrapper is `display: contents`, so an empty
+  strip leaves no hole in the page column.
+- **The full output is a Bootstrap modal** with permanent markup (as `Confirm.vue`), so its terminal
+  never unmounts or loses the socket; the grid is fitted on `shown.bs.modal`. It never opens by
+  itself, even on a failure: the person presses the button, as the owner asked. "Last command output"
+  in the stack's "More" menu reopens it.
+- The verbs live in `frontend/src/progress-labels.ts`, shared by the strip and the services table.
+  `StateChip` has a `busy` flag; under `prefers-reduced-motion` the dot stops and the word stays.
+
+### 2026-09-14: one panel anatomy on the Files, Logs and Terminal tabs
+
+The owner: "look at the files, the logs and the terminal ... the design seems very inconsistent".
+Measurements confirmed it: headers of 49, 35 and 33 px in three styles, two icon families, `h4`
+headings next to names in headers, a shadow on one panel only, radius 10 against 7, mixed button
+sizes, Bootstrap palette badges, a `select multiple` next to checkboxes, a red delete button in every
+row, two names for one action, a 50vh console over a quarter of an empty page.
+
+- **One anatomy** in `main.scss`: `.panel` (border, panel radius, no shadow), `.panel-bar` (control
+  height, outline icon, name, `.panel-meta` on the right, `btn-sm` actions), `.panel-body`,
+  `.panel-console`, `.panel-foot`. The Compose and env files, "File selection", "Secrets",
+  "Containers", "Extra", "Networks", "General" on stack creation, the log, the terminal and the
+  source all use it; the per-component copies were deleted.
+- **The header carries the name.** No `h4` above forms; a panel's save button sits in its header and
+  is enabled only when there is something to save. Header icons are outline `InterfaceIcon`s.
+- **A list inside a panel is rows** divided by thin lines, not nested cards. The services that
+  receive a secret are chosen with checkboxes, like env files. Delete is a red word on a normal
+  button (`btn-normal.btn-danger-text`).
+- **One word, one action.** The terminal button is "Open shell", as in the service menu ("+ session"
+  and `sessionNew` are gone). The log header is "Logs of <stack>", after the tab.
+- **The console grows to the bottom of the page:** `.work-column` is a flex column, and the Logs and
+  Terminal tabs take `flex: 1`. All tabs share the `tab` motion.
+
+### 2026-09-15: pass over every screen - one grid, one control, a phone without sideways scroll
+
+The owner asked to go through the whole design and make it convenient and beautiful. Every screen
+was checked in both themes at 1440 px and 375 px on the test scene.
+
+- Global overview: one table per server with columns named once, each stack a group inside it; a
+  table per stack repeated the headings and the columns did not line up.
+- The console takes its colours from tokens: xterm's own pure black left a seam in the light theme.
+  Text keeps off the panel border, because lines pressed against it read as cut off.
+- `ThemePicker` is one form control with a `compact` flag. The account menu is grouped (stacks,
+  settings, then theme and sign-out): a theme picker among the links read as one more link.
+- One call to action per frame: "Open shell" appears in the terminal panel header only once a
+  session exists; before that the service picker in the panel body is the only offer.
+- Phone: the stack tab bar scrolls by itself instead of the page, and tab icons go below 480 px,
+  because the name matters more.
+- **Env files became reachable.** The owner asked how to edit env at all: the env panel existed only
+  in edit mode, so `.env` could not even be opened, and no env file could be created. Modelled as a
+  hierarchical state machine of the tab (`Add` / `Manage{View, Edit{Structured, Text-only}}` plus an
+  orthogonal `processing` region): a child state was creating an entity instead of changing
+  behaviour, so the panel moved up to the level of compose and the mode only disables it. When
+  reading it is shown only if the active file exists, or the screen would promise a missing file; an
+  empty file says so in words, because an empty black box read as a failed load.
+- **Adding an env file is its own step.** "Add env file" calls the existing `saveEnvFile`, whose
+  server checks already refuse non-env names, `..`, absolute paths and symlinks. Create, include in
+  substitution and open stay three steps: in edit mode `saveFileSelection` does not reread the texts,
+  so a combined action would show the new name over the old text and save that text into the new
+  file. While the selection is unsaved the form is closed ("Save the file selection first."): an
+  unfinished transition blocks the next one.
+- **Truncation shows what it hides**, as the owner required when allowing it. `v-ellipsis-title`
+  sets `title` only while the text is really cut, since a tooltip repeating visible text is noise,
+  and reads `innerText`, since a media query hides parts of some labels on the phone.
+- **Reference screenshots.** The owner: "keep a reference; treating every prompt as the reference is
+  bad practice". `npm run test:visual` compares 28 committed references (nine screens in both themes,
+  five of them also on a phone). Approval is a separate command, `npm run test:visual:approve`: a
+  screenshot updated together with a change stops being a reference. The suite has its own
+  configuration, apart from E2E, which needs Docker and would fail it for unrelated reasons. No
+  socket, a fixed clock, an explicit theme and no animations keep the frames deterministic.
+- **Two console defects seen only live.** xterm measures the cell width once, on open, and could
+  measure the fallback font before IBM Plex Mono loaded; the terminal now opens after
+  `document.fonts.load` (limited to three seconds on 2026-09-16). A fit requested before opening
+  bound a `FitAddon` to nothing and left the shell wider than its panel; the fit now waits for the
+  terminal.
+- **A live instance for review.** The test scene answers with fixtures and misleads both ways: on 14
+  September it showed a failure that did not exist, because it returned one shared inventory object
+  where a real socket delivers a fresh copy. `extra/seed-review.ts` lays out four edge-case stacks in
+  `.tmp/review` (inside the project, ignored). The owner is created by the interface's own handler
+  with a random password, then `disableAuth` turns sign-in off, so no password is typed into a
+  browser; only images already present locally are used. It found both console defects, and a file
+  on disk that fails the allowed-name list and silently vanished from the files screen
+  (`SAFE_SEGMENT` rejects Cyrillic by design; the screen could not say so).
+
+### 2026-09-15: second pass on a live instance - one state vocabulary, one attention box
+
+On a live instance with real containers, where mismatches show because elements stand side by side.
+
+- A disabled button has no fill in any variant, only a thin border and a muted label: a blue
+  disabled primary promised weight it did not have. Bootstrap's opacity is cancelled, because it made
+  the label's contrast depend on what lay beneath.
+- `.panel-title` sets its own size instead of taking it from the tag (22 px next to 14 px).
+- The settings column is limited to 720 px: at 1440 px half a screen separated a label from its
+  field.
+- After a failed read the MCP section shows the cause and a retry. It used to render a form of
+  defaults, and "Save" would have written them over the real settings.
+- A file whose name fails the allowed-name list is shown with the reason and what to do, instead of
+  vanishing. The list itself is not relaxed.
+- A zero in the state counts is muted: an orange "0 Needs attention" read as a warning.
+- One state vocabulary: the abbreviations in the Russian services table are gone, and stack, service
+  and container name a state with the same words.
+- A state chip's capitalisation is a `::first-letter` rule in `StateChip.vue`, not a second set of
+  strings: the same words stand mid-sentence in the progress line, and doubling the catalogue for
+  case is not worth it.
+- Attention is drawn by one box in `main.scss`; the copies on the home page and the stack page had
+  already diverged.
+- `AttentionStrip.vue` is back on the global overview, above the state counts; nothing had imported
+  it since the home page was rebuilt. The counts count containers, the strip names stacks with
+  reasons.
+- The sign-in card is centred under the header. In the reference scene `/login` and `/setup` no
+  longer sit next to the stack rail, a layout the application never has, and one stack is in
+  `ATTENTION` so that the state reaches a screenshot.
+
+### 2026-09-15: third pass - room for output, one brand mark, one checkbox
+
+- A page that is one console fills the work area to the bottom (at least 280 px): a height in rows
+  left a quarter of the screen empty, half on a tall monitor.
+- The console header names the server (the own host or the agent's display name): "Console" above
+  "Console" said nothing, and on an agent it hid whose machine it is.
+- Deleting the last active owner is disabled, with the reason in the caption: the server refuses it
+  anyway (`authLastOwner`).
+- The MCP section tells a refused access from a failed read. `/api/mcp` requires a real session even
+  with sign-in off, so a local instance got 403 and advice about the owner password. A 403 has its
+  own reason and no retry, which would return the same answer.
+- `.form-check` is one rule in `main.scss` after the Bootstrap import, where it wins by order; the
+  per-screen copies are gone. Bootstrap's float with a negative margin pushed the box past the panel
+  edge in settings rows.
+- The editor box keeps room for six lines, so an empty file still reads as a place to write.
+- The brand is one component, `BrandMark.vue`, in the header, on first run, in About and, for the
+  first time, on sign-in, as the design system promised. It read "dockge2" in one place and "Dockge"
+  in another, and first run lost the generation number. The number is a share of the font size
+  (73%), not a scale token, so the proportion holds at every size.
+- A count in a panel header stands further from the buttons than they from each other, or it read as
+  a button's label. A server name takes a capital in the agent list but not mid-sentence in the stack
+  header.
+- The review seed writes `disableAuth` with type `general`, the only type Settings reads; the
+  security screen showed "Disable Auth" off while sign-in was off.
+
+### 2026-09-15: fourth pass - the phone and state markers
+
+At 390 px, and wherever an element shows its own state: where am I, what is selected, where to press.
+A script checked fourteen routes for sideways scroll, elements past the right edge, truncated text
+without a tooltip and touch targets under 30 px.
+
+- The rail marks the open stack on all its tabs (`.active` and `aria-current="page"`): the tab routes
+  are siblings of the overview, so `router-link` marked the stack only there.
+- A long name in the rail gets `v-ellipsis-title`; the tooltip on the whole row, which repeated the
+  visible text, is gone.
+- The services table header stands above the scroll area, not in the `caption`: on the phone the
+  count, check time and column menu slid away with the table. A caption stays for screen readers.
+- On a narrow screen the attention strip puts its action on its own line: in three columns a reason
+  had ten characters, and words broke in half.
+- The phone stack drawer has one scroll area instead of three, so a finger no longer lands in a
+  random one, and the create button under the list is visible again.
+- Small controls grow to the touch height on a narrow screen, and the external network toggle's
+  target is the full control height.
+- The current dropdown item is a soft accent like the rail and settings; a solid fill read as hover.
+- Every stack menu item has an icon; "Update images" had none, and the left edge went in steps.
+- A failed MCP read uses the same box as a disabled console: the title names the state, the hint the
+  cause, and a retry stands only where it can help.
+- The sign-in panel is "Signing in" instead of "Advanced": its one button is about signing in.
+
+### 2026-09-15: fifth pass - keyboard, contrast, heading structure
+
+Tab order on fourteen routes, the contrast of every visible text on its actual background in both
+themes, and the heading structure of fifteen screens.
+
+- The log no longer traps focus. xterm took focus on opening any terminal and caught Tab, so the
+  keyboard could not leave the log output. Only terminals one types into take focus; output has
+  `disableStdin` and gives Tab to the browser. A container shell keeps Tab for completion.
+- The console and the editor draw a focus ring on their box: xterm's input is a hidden one-pixel
+  field and `cm-content` has no border. On the console it is an `::after` layer, because xterm's
+  canvases cover an outline.
+- A state is text, so it needs 4.5:1, not 3:1: states stand as words next to counts, in the
+  stability verdict and in the Git edit line. `--state-running` gave 4.36, and 3.78 on the sunken
+  surface. Four states and `--text-faint` moved a few units in lightness; the test checks 4.5:1 for
+  six states and four text tokens on five surfaces.
+- A panel header is a heading (`h2`, the service name `h3`); it was `h2` in Settings and a `span` in
+  the work area, and the new stack page went from `h1` to `h4`. The look comes from `.panel-title`,
+  not from the tag.
+
+### 2026-09-15: stack backups go to the backlog
+
+A question about PostgreSQL inside Dockge ended as a requirement for backups. PostgreSQL is
+rejected: Dockge is a control plane, and its database holds users, settings, agents and status
+history, not the truth about stacks, which lies in the stacks directory and in Docker itself. An
+embedded database server would add a second storage system, a bootstrap paradox (a stack with the
+database starts what it is meant to store), `pg_upgrade` between major versions, a new secret, and
+the loss of "copy the directory, move the instance". SQLite stays.
+
+The owner on backups: they must be manageable and enabled per stack, because a control node or a
+couple of containers with Telegram bots do not need them; the task needs design, system logic and
+disk space, so it goes to the backlog.
+
+- What is copied is the recipe, the data and the image version, not the container; `docker commit`
+  and `docker export` are not suitable. Recorded before implementation in "Stack backups" under
+  Requirements and in "Implementation plan". Points to build on: `common/stack-files.ts`,
+  `backend/stack-git.ts`, `common/image-digest.ts`; the code has no model of volumes.
+- Status: no decision, no decomposition, do not start. The first question is the consistency of a
+  running service's volume.
+- Small items proposed earlier and never agreed stay unaccepted: a warning about a network data
+  directory in the README and `docker-compose.yml`, and a snapshot of the panel's own database with
+  `VACUUM INTO`.
+
+### 2026-09-15: readiness for production tests
+
+The owner asked how ready the current state is for tests in production; it was checked by running
+things, not from memory.
+
+**Green.** Lint, strict types, unit tests, Docker integration and the visual suite. The production
+backend serves the built frontend itself, the database and `bootstrap-token` are created `0600`, the
+image builds (753 MB) and comes up healthy, and without the Docker socket the panel degrades with
+warnings instead of failing.
+
+**Red.** `npm run test:e2e`: 13 of 40 failed on a clean bench. The tests were at fault, with
+selectors gone stale after the redesign, except one failure that was behaviour: choosing another
+stack closed the log tab and returned to the overview. Until fixed there is no browser safety net,
+and the CI `e2e` job on `main` is red.
+
+**Fixed during the check.**
+
+- `emptyOutDir: true` in `frontend/vite.config.ts`: the build directory lies above the Vite root, so
+  Vite never cleaned it, and each build added a bundle to the old ones, 1833 files and 284 MB in the
+  image. After the fix, 183 files and 5.0 MB.
+- `familiarOverview` became "Global overview": two English links, to the global overview and the
+  stack tab, were both "Overview", the same to the ear and to a screen reader.
+- `express` and `npm audit fix` closed two `qs` advisories, 0 vulnerabilities in production
+  dependencies. `npm audit fix --omit=dev` removes the dev dependencies from `node_modules`, so
+  `npm install` is needed after it.
+
+Status: ready for an internal test in a container on one's own machine, not for production tests by
+other people. Mandatory before those: e2e, since without it there is no gate, and the upstream brand
+and addresses, since whoever installed by the README would not get this fork. Also open: the
+upstream base image, `extra/seed-review.ts` (which sets `disableAuth`) inside the image, hashed assets
+not served as immutable, and stale plan checkboxes. All were handled the next day (below).
+
+### 2026-09-16: the production readiness plan carried out
+
+Queues 1-3 of `docs/plans/2026-09-16-prod-readiness-fixes.md` (deleted with the other finished plans
+on 2026-09-26).
+
+- **e2e green**, and no check was weakened: each new selector proves the same property as the old
+  one, and language-dependent text is matched by a regular expression over both languages, not by a
+  fragment of the English string. The container terminal test types with a delay: xterm lost the
+  order of characters typed instantly, and the failure looked like a bash error.
+- **A tab change no longer recreates the inspector.** `<router-view :key="$route.path">` recreated the
+  inspector on every tab change, since all stack tabs are one component on different paths: an open
+  container shell died and the log was reread from scratch. Stack tabs are keyed by the stack's
+  identity; the server address stays in the key, because it changes the whole data source.
+- **The update command was silently useless.** It ran `docker compose pull`, but the image was built
+  locally and nothing was published. It became `git pull --ff-only`, `npm ci` and a frontend build,
+  `docker compose config --quiet` before the restart, and `docker compose up -d --build --wait`, so
+  it does not leave an undefined state. Changed on 2026-09-18: the frontend is built inside the
+  image, and `npm ci` and the build left the update. The command was later replaced by
+  `update-dockge.sh` and the Go updater (see "Implementation plan").
+- **Brand and addresses.** `package.json` is `dockge2` 2.0.0 with images `mazixs/dockge2` (replaced
+  on 2026-09-19: the first publication is `0.0.1`, and `2.0.0` waits for the first stable release).
+  The docs and `.github` templates point to this repository. The root `compose.yaml` is deleted: it
+  installed `louislam/dockge:1` and shadowed the documented `docker-compose.yml`. The version check
+  reads this repository's releases instead of upstream's and is off by default: it is an outgoing
+  request the administrator did not ask for.
+- A deliberate deviation from the literal criterion that `grep -ri louislam` finds only the licence:
+  the fork attribution and the original MIT notice, the real third-party image
+  `louislam/uptime-kuma:1` in a template, and the code origin link in `extra/healthcheck.go` stay.
+  Erasing them would hide the fork's origin and break a working template.
+- **State recorded.** The work since 31 August, uncommitted until then, was split into commits by
+  meaning and tagged `v2.0.0-rc.1`; the production test runs from the tag. Nothing was pushed.
+- **Own base image.** `docker/Dockerfile` builds from `mazixs/dockge2:base` and
+  `mazixs/dockge2:build-healthcheck`, built once locally from the recipes already in the repository,
+  so the release build no longer depends on someone else's namespace. Replaced on 2026-09-19:
+  `docker/Dockerfile` builds everything itself from the official `node` and `golang` images, with
+  no base image of our own.
+- **Image cleaned.** `.dockerignore` excludes docs, tests, CI and developer files, and above all
+  `extra/seed-review.ts`, which starts a server with authentication off.
+- **Static cache.** `/assets/` is served `immutable, max-age=1y`, since the names carry the hash, and
+  `index.html` `no-cache`; otherwise a browser could open old markup pointing at deleted bundles after
+  an update.
+- **Plan checkboxes reconciled.** Tasks 0, 1, 2, 4 and 8 of the product-dashboard plan are checked
+  against their acceptance criteria; 3, 5, 6, 7 and 9 stay open with what is not closed in each,
+  which is more honest than checking everything from the journal. They moved to "Interface and
+  Docker overview: open tasks" on 2026-09-26.
+- **README on production deployment:** data on a local disk and outside the Git copy, `PUID`/`PGID`,
+  a reverse proxy with `DOCKGE_TRUST_PROXY` and `DOCKGE_SECURE_COOKIES`, the update command, rollback
+  to the previous image tag.
+
+Not done: the production test on a clean host. There is none, and some steps (a host reboot, TLS
+behind a real proxy) cannot be reproduced on the working machine.
+
+### 2026-09-16: production test from the tag - nine steps and two defects
+
+As far as it can be reproduced without a clean host: a local bare repository as `origin`, a clone of
+the tag inside the project with its own port, data and stacks directories, and the real project name
+`dockge2`, or the update command would update the wrong panel. No password was typed into a browser.
+
+**Passed:** install by the README (healthy in 17 seconds); first run with `0600` files and the owner
+created with the one-use code; a stack converted from `docker run` and deployed; the stack log across
+a restart; secrets behind the password, metadata only in the list; a hand edit on disk read back; the
+update from a detached HEAD in 28 seconds with the owner and stacks intact; rollback to the previous
+image; and a TLS proxy (nginx, self-signed) with a `__Secure-` cookie, websocket, deploy and a
+service shell through it, and a foreign origin refused. The data files belong to root, because the
+process runs as root; `PUID`/`PGID` affect only stack files, as the README says.
+
+**Two defects, fixed.**
+
+1. `package-lock.json` still said `dockge` 1.5.0, so the first `npm install` by the README dirtied
+   the working copy, and the update refuses a dirty copy on purpose, so that `git pull --ff-only`
+   does not stop halfway. A deployment made exactly by the README could not be updated by the
+   documented command. The lockfile is regenerated as a clean install makes it.
+2. The socket.io handshake compared `Origin` with the `Host` the process sees, which a reverse proxy
+   rewrites: the HTTPS page opened, the websocket was refused and the panel stayed "connecting"
+   forever. No setting helped; the only way out was `DOCKGE_WS_ORIGIN_CHECK=bypass`, removing the
+   protection instead of configuring it. The handshake now uses the trusted origins of the
+   authentication requests (the requested address, the public URL, the extra origins, and proxy
+   headers only from a trusted proxy).
+
+**Documentation.** The README promised that the previous image stays under its tag. It does not:
+`DOCKGE_IMAGE` is one fixed tag, and `docker compose up --build` moves it to the new image, leaving
+the old one unnamed. The rollback section now says to name the image before updating, and a working
+nginx fragment is added.
+
+**Not done.**
+
+- A host reboot: the machine is a working one. Checked indirectly: `unless-stopped`, and Docker
+  starts at boot.
+- Recovery after a process crash is not proven: Docker treats `docker kill` as a manual stop, so the
+  policy does not fire, and a SIGKILL from inside does not kill PID 1 in its own namespace. Another
+  way of checking is needed.
+- An install by someone who did not write the code: the real production test, left to the owner.
+
+**Incident.** A substring `grep` during the recovery check matched a container of an unrelated
+project on the same machine, and it was killed with the test containers; it was restarted with
+`docker start`. Rule: select containers by exact name or a project filter, never by substring.
+
+### 2026-09-16: the work goes to the repository, which would have released on its own
+
+The task: merge everything into `main`, make versions and addresses lead to this fork, release
+nothing, and make the tests runnable from the repository.
+
+- **The main finding.** `nightly-release.yml` ran on a nightly schedule and published images to
+  Docker Hub and ghcr: "release nothing" would have broken by itself the first night after the push.
+  The schedule is removed, only a manual run is left; no other workflow publishes anything. The
+  workflow itself was removed on 2026-09-25; `release.yml` on a `v*` tag is the only publisher.
+- **Release path.** `build:docker` also tagged a stable build `beta` and `nightly`, one image posing
+  as three lines. `update-version.ts` committed with `commit -a`, picking up whatever lay in the
+  working copy, set a lightweight tag without `v` and ignored the exit code, so a failed commit was
+  tagged as a good one; it now commits only `package.json`, tags annotated with `v` and notices a
+  failure. `mark-as-nightly.ts` replaced the version all over the README; it touches only the
+  manifest now.
+- **Types for `extra/`.** The release and update scripts were never type-checked, and an error there
+  shows only to whoever tries to update the panel. `extra/` is in `tsconfig.json` now.
+- **CI on Linux only.** The panel drives Docker through the host socket and runs `docker compose`; it
+  cannot work on Windows or macOS and the README does not promise them, so a red run there says
+  nothing. `tsconfig.json` is excluded from `json-yaml-validate`: it is JSONC, and its comments
+  explain the settings and are worth more than that check.
+- **Ignore files.** `certs` and `docker-compose.override.yml` are ignored: they appear for anyone who
+  deployed by the README.
+- **Addresses.** Every product address leads to this repository. Upstream mentions stay on purpose:
+  attribution, the MIT licence, quotes of upstream issues in historical plans, a real third-party
+  image and a code origin link.
+- **Documentation before publication.** The repository is public, and the first push would publish
+  all of it. The design notes held absolute paths of the author's machine and the name of an
+  unrelated project next to the test stacks; both were removed, the meaning of the notes kept.
+- **Default branch.** `main` was pushed and made the default instead of `master`, which stood at the
+  fork point: a clone by the README would have given upstream code of version 1.5.0. No tags,
+  releases or images were published.
+- **The first real CI found three things invisible locally**, each a real defect:
+  1. `json-yaml-validate` on `tsconfig.json`, above.
+  2. Docker integration. A test starting a whole panel with `NODE_ENV=production` failed because the
+     backend exits without `frontend-dist/index.html` and the CI job had no frontend build; locally
+     one was left from earlier runs. The test also discarded the child's output, which now goes into
+     the error. Two tests waited for a one-shot container with `compose wait`, which in Compose 2.38
+     (CI) answers `no containers for project` for an exited container and in 5.5 (local) does not; a
+     run without `-d` waits by itself in both.
+  3. Browser tests: the first container terminal did not appear within 15 seconds. Not a flake: the
+     terminal waited for its font without a limit, and on a cold profile the font did not arrive in
+     time; on a slow link a user would wait at an empty box forever. The wait is limited to three
+     seconds, and a late font recalculates the grid itself.
+- GitHub CI is not a copy of the local machine: all three defects showed only there, and the font wait
+  was a product defect, not a test one.
+- **Confirmed.** Every job is green. A `git clone` of the public repository lands on `main`, `npm ci`
+  leaves no change, and `npm run check` passes: the tests run from the repository.
+
+### 2026-09-16: the owner's spoken report on the live instance - 28 items
+
+- **The first screen waited in silence.** Availability and stack details were read stack by stack,
+  28 sequential round trips on five stacks; they run in parallel now, with errors still handled per
+  stack. The empty state no longer claims there are no stacks while the list is on its way: skeleton
+  rows show until the first answer.
+- **Stability metrics are links** to the stack list with the filter set; filters for running and
+  unknown were added. "Unknown" is explained: after 90 seconds without a fresh observation the state
+  is not considered known.
+- **The Russian interface spoke English in eight places, not three**: untranslated words and six
+  keys missing from the catalogue, where `$t()` prints the key name in every language. Two guard
+  tests check every `$t("...")` in `frontend/src` and every `msg:` of the socket handlers against
+  `en.json`; the old tests compared catalogues with each other and missed this class by
+  construction. The Docker handler's messages moved to `msgi18n`, and an unknown key gives a clear
+  error instead of its name.
+- **2FA showed the backup codes before anything was entered.** The codes are held back until a
+  successful verification, and closing the dialog mid-setup says the setup was abandoned. Better
+  Auth without `skipVerificationOnEnable` did not turn the second factor on before `verifyTotp`
+  anyway, so no one could be locked out, but the interface misled.
+- **A migration container counted as a stopped service.** A service is one-shot also when another
+  depends on it with `condition: service_completed_successfully`, an unambiguous statement that it
+  runs and exits.
+- **The folder scan was silent.** It shows progress and reports how many stacks it found.
+- **The "New stack" page matches its reference**, agreed on a standalone mockup on the real tokens
+  (`docs/design/`, deleted on 2026-09-26) before the code: a 560px card centred in the work area, a
+  step track above the source choice, the tabs as a full-width segmented switch, the main action
+  filled with the accent, and `docker run` recognition stated plainly.
+- **The branch is no longer typed from memory.** `gitListBranches` runs `git ls-remote --heads` on a
+  button, not while typing, because it is a network request to someone else's address. The address
+  goes through `validateGitRepository`, the call through the guarded `git()` wrapper, and the event
+  is operator-only. Until the list is requested the field stays a plain input, so a private
+  repository without access does not block the form.
+- **One rule for the type scale.** There were 74 uses of 12px against 89 of 14px, with no line
+  drawn. 12px stays only where 14px physically does not fit, a number in a badge and initials in a
+  circle; the other 95 uses moved to the 14px step, so a hint is no smaller than its field.
+- **Settings named for what they hold.** "General" held one setting and read like a neighbour of
+  "Dockge Agents"; it is now "Server address". "Shared .env" became "Variables for every stack", with
+  an explanation of which `.env` overrides which. The cascade of sections was deliberately left
+  alone. About drew the browser tab icon, an opaque green square over the theme; it uses the header's
+  outline now. A user's role and access are a pair of badges.
+- **MCP keys carry the product prefix** (`dg2_`), and keys issued earlier are still accepted:
+  revoking a key is the owner's decision, not a side effect of a rename.
+
+**Left, and why.**
+
+- A ~8px strip on the right: `html { scrollbar-gutter: stable; }` with a transparent scrollbar
+  track, a deliberate trade-off against the layout jump when scrolling appears; it needs a live pass,
+  not a blind fix. Closed on 2026-09-26: the gutter was removed.
+- Interface jitter on restart: needs a live run with a real container.
+- A hello-world test container for a full pass: not done.
+- Other containers under control. The limit exists because the file editor is locked into
+  `DOCKGE_STACKS_DIR`, a path traversal barrier. The ban is excessive, and the proposal is an explicit
+  adoption of a stack by `composeStack.ConfigFiles` with a list of allowed paths. Deferred on
+  purpose: it needs a thought-out access model, not a checkbox.
+- Clarity of the MCP settings as a whole: the key prefix is done, a review of the section's texts is
+  not. The MCP settings were reworked on 2026-09-24.
+
+### 2026-09-17: the second spoken report on the live instance - nine items
+
+- **The stack name comes from compose.** `container_name` was read only when converting `docker run`;
+  it now also fills the name on a pasted compose, and filling stops at the first keystroke in the
+  field, so the person edits instead of fighting. The service name is deliberately not used: it always
+  exists, and the stack would name itself. With no named container the field stays empty and the next
+  step is blocked, as before and on purpose.
+- **The deployment state is not cramped.** While a command runs the create card widens to 820px: in a
+  column as wide as an input the services and times read as cut off. The block gained a progress
+  header with a pulse, the time and an abort button: `abort()` existed but could not be reached from
+  the interface.
+- **The "just now" badge became a check mark** with a label for screen readers: the new row is
+  highlighted anyway, and the word added nothing and silently went stale.
+- **The `.env` field is collapsed by default.** The screen is opened in front of other people, and
+  values must not appear on it by themselves. It is revealed by a button, per stack and again after
+  navigating away; when a stack is created it is open, since there is nothing to hide. Amended on
+  2026-09-24: "Edit" reveals the values at once.
+- **The update preview no longer hangs.** Images were checked one after another, each spending up to
+  20 seconds in `buildx imagetools inspect` and 20 more in the fallback `manifest inspect`, so a stack
+  of six unreachable images looked frozen for minutes. Four images are checked at once and one call
+  is limited to 8 seconds. The heading is "Expected changes" instead of "What the update will do",
+  the waiting line "Checking the registry" instead of "Check". Replaced on 2026-09-24: the registry
+  API is asked directly.
+- **Progress and the output window appear faster**, on the shorter motion tokens instead of
+  Bootstrap's 300 ms: the window is opened to be read, not to watch it slide in.
+- **The service row icon matches its action.** The button drew a terminal and led to the log. The
+  terminal now opens a shell and is disabled for a stopped container; the log moved under the three
+  dots.
+- **bash from the interface.** `docker compose exec <service> <shell>` is `docker exec -it`, and the
+  backend accepted `bash` from the start, but the interface always asked for `sh`. Each service has a
+  pair of buttons acting as one control, `sh` as the usual choice and `bash` beside it; without bash
+  in the image, `assertShellExists` refuses before a session opens.
+- **A file manager: not done, and why.** The question was full access to every file of a container.
+  A manager outside the container would hit the lock of the file editor into `DOCKGE_STACKS_DIR`, a
+  path traversal barrier rather than an interface limit, which must not be lifted for convenience. A
+  manager inside would read and write inside a container from the browser, exactly what the rule "no
+  events that let the browser run arbitrary commands" forbids. Both need a thought-out access model,
+  like the adoption of other stacks, and stand in one row with it.
+
+### 2026-09-18: the dashboard filter turns off, installation becomes one command
+
+- **Dashboard.** A header count ("Needs attention 9") always set its filter again, while the list
+  buttons toggled. Pressed again, a count now clears the `filter` in the address, with
+  `aria-pressed`. Replaced on 2026-09-26: the counters are links, so the active one says
+  `aria-current`. The container table, which arrives late, fades in on `--motion-base`, and not at
+  all under `prefers-reduced-motion`. "Waiting for the first Docker observation" lost "Retry": the
+  observation comes in its own time and the page rereads every 30 seconds, so the button promised a
+  speed-up that does not exist. It stays for an unavailable agent, a failed request, a silent
+  Docker and stale data.
+- **Installation in one command.** `install.sh` at the root checks the system, Docker and the
+  compose plugin, offers the official Docker script, asks for the installation directory, the stacks
+  directory and a free port, writes `.env`, builds, starts with `--wait`, and prints the address and
+  the setup code, read inside the container because the host file is `0600` and owned by root.
+  `--update` reuses the answers in `.env` and only rebuilds. Sudo only where needed; other people's
+  containers are only counted and left alone.
+- **The host no longer needs Node.** A `build_frontend` stage builds the frontend inside the image;
+  `.dockerignore` excludes `frontend-dist`, so a local build cannot replace it. In
+  `update-dockge.ts` an update is `git pull --ff-only`, a configuration check and a rebuild, without
+  `npm ci` or a frontend build.
+- Replaced since: on 2026-09-19 `install.sh` downloads the published image and builds only when
+  there is none, and from 0.0.9 installs and updates verify a signed release and pull its image by
+  digest; `update-dockge.ts` was removed in 0.0.9 (see `docs/self-updates.md`).
+- **Languages.** Only the fully translated English and Russian stay in the switcher: the other nine
+  catalogues had 111 to 130 of 777 keys, and a half-English panel is a breakage, not a choice of
+  language. The files stay in `lang/`, and the `i18n-catalogue` test requires every complete
+  catalogue in the menu and no incomplete one, so a finished translation comes back by itself.
+
+### 2026-09-18: a stack that builds its own image is rebuilt
+
+The Dockge 1 complaint that edits did not apply without `up --build` held here too:
+`compose up -d --remove-orphans` in `Stack.control` reused the existing image after a Dockerfile
+edit. `hasBuildServices` in `common/compose-status.ts` tells whether a stack declares any `build`.
+Such a stack is deployed and started with `--build`; an update runs `pull` (which skips built
+services), then `build --pull` - the only way to refresh the Dockerfile's base image - then `up -d`.
+Stacks of registry images do not build. The update preview, which showed an empty image list with
+no reason, now says the images are built from a Dockerfile and will be rebuilt.
+
+### 2026-09-18: the image had no git, so Git stacks did not work in production
+
+The production image had neither `git` nor `ssh`, so clone, `behind`, comparison and applying an
+update all failed in a built panel; the development container lacked `git` too, but never called
+those paths. `git` and `openssh-client` went into `docker/Base.Dockerfile` and also into the
+`release` stage of `docker/Dockerfile`, because the base image is published by hand and rarely.
+Replaced on 2026-09-19: `docker/Dockerfile` builds everything itself from the official `node` and
+`golang` images, and `docker/Base.Dockerfile` is gone, so a fresh install depends on no image
+someone had to push.
+
+The panel runs git with `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_GLOBAL=/dev/null`, an empty
+`credential.helper`, `core.sshCommand=ssh -oBatchMode=yes` and only `http/https/ssh`, and
+`validateGitRepository` rejects a token in the address (`backend/stack-git.ts`). A private
+repository therefore needs an SSH key without a passphrase mounted into the container, plus
+`known_hosts`; `docker-compose.yml` got a commented-out `/root/.ssh:/root/.ssh:ro` and the README a
+section. `gh` is not needed: the panel talks to Git, not to the GitHub API.
+
+### 2026-09-18: the installer, no branch without a way out
+
+`install.sh` reviewed for where it gets stuck, lies, or allows no way back:
+
+- A repeat `--port` printed a new address but left `.env` alone. A named parameter now rewrites its
+  `.env` line, the final address comes from `compose ps`, and moving the stacks or data directory
+  warns that old files do not follow.
+- `--update` put a second copy in `/opt/dockge2` and always used `main`. It now takes the directory
+  from the script's location and the branch from the checkout. A `trap` after an interrupted
+  `git clone` removes only what the script created.
+- Under `curl | bash` every `confirm` silently said "yes" (`[ ! -t 0 ]` looked at stdin, the
+  questions read `/dev/tty`), including installing Docker and rebuilding a running panel. Without a
+  terminal the script now stops and asks for `--yes`.
+- With a root-owned directory and docker without sudo, `docker compose` could not read the `0600`
+  `.env` and silently used the defaults. The file now belongs to whoever runs docker, and
+  `compose config --quiet` runs before the build.
+- The answers are shown as a list to confirm, change by number or leave with `q` before anything
+  changes; a bad port or relative path is asked again, a busy port suggests a free one. The
+  directories of a running installation cannot be changed from the menu, and it says why.
+- Failures are named: disk space, a registry refusal, the container state and its last log lines.
+  The running image is tagged `dockge2:rollback-<date>` before a rebuild, and a failure prints the
+  commands back to the previous commit and image. Local edits are never reset or stashed: an update
+  is fast-forward only and otherwise touches nothing.
+- An old Compose without `--wait-timeout` (since 2.17) is not taken for a sick container, disk space
+  is checked first, `firewalld` joins `ufw` with a reminder about cloud firewalls, and Podman is
+  recognised but marked as untested.
+
+### 2026-09-19: the installer, a second pass with every claim reproduced
+
+Every remark was reproduced on `docker` and `sudo` stubs before it went into the plan; all six held.
+
+- `--update` by a `docker` group member over a root-owned `0600` `.env` failed with a bare `awk`
+  error, and an unreadable `.env` counted as empty, so sudo created `/opt/stacks` and
+  `<install>/data` that nobody chose. The file is read with `sudo cat` and its owner fixed before
+  any edit.
+- In update mode item 3 of the menu pointed `DOCKGE_DATA_DIR` at a new empty directory, so the panel
+  came up with an empty database. It is closed like items 1 and 2.
+- After `git checkout <commit>`, `--update` claimed "Now at X on main". A detached HEAD now stops
+  with the command back to a branch.
+- Only the previous `dockge2:rollback-<date>` image is kept (each is several hundred MB); only the
+  installer's own tags are removed, and only after a successful start.
+- A pre-created empty directory is emptied, not deleted, after a failed clone. The firewall check
+  matches the port as a word (500 matched 5001). `update-dockge.ts` waits 180 seconds, not 60, as
+  the installer does: the healthcheck starts after 60 seconds and repeats every 60.
+- `test/install/run.sh` (`npm run test:install`, in CI) runs these and the previous day's cases on
+  stubs and a local two-commit origin, the menu through `script(1)`; shellcheck at the style level
+  is clean.
+
+### 2026-09-19: Git and Docker, one state, one check, one git call
+
+- `common/stack-source.ts` names a directory `local`, `unreadable`, `edited`, `behind`,
+  `editedBehind`, `clean` or `unchecked`; the list row, the source panel and the inspector all use
+  it instead of three conditions of their own.
+- A zero `behind` after a clone means origin was never asked. The age of the check is the time of
+  `FETCH_HEAD`, written only by `fetch`; without it the panel says "The remote repository has not
+  been checked yet". The only possible error understates freshness, the right side to err on.
+- Dead parts removed: the unread `source` field of `GitUpdatePreview` and `GitSaveResult`, a list
+  row line under an unreachable `v-else`, fourteen unreferenced strings.
+- One place each: `backend/git-command.ts` is the only launch of git (inherited `GIT_*` cleared,
+  prompts and system configs off, transports allow-listed, hooks and submodules off);
+  `backend/compose-args.ts` the only builder of `docker compose` arguments, once written twice with
+  different strictness about `global.env`; `common/git-repository.ts` the only address rule, since
+  the browser enabled the button for addresses the server rejected.
+- `test/e2e/git-stack.spec.ts` covers the cycle against a fixture repository served over HTTP,
+  because the server does not and must not accept a local path as a remote: create, branches,
+  "Files match" without new commits, a per-file comparison of a new commit with the env file hidden
+  as a possible carrier of secrets, compose from Git with env kept, then "Edited on the server". It
+  starts no containers. It was not run that day: a working local instance held ports 5000 and 5001,
+  and `reuseExistingServer` would have used its directories.
+
+### 2026-09-11: Sites and MCP conformance
+
+Status on 2026-09-13: implemented on 11 September, visual acceptance reopened; the checks of that
+day do not confirm that the visual polish is finished.
+
+- Done: visual acceptance A6 and polish R0-R6 of the Sites audit (deleted 2026-09-26). Replaced:
+  acceptance runs on `test/visual/baseline/`, the passes of 2026-09-15 and the consolidated "New
+  stack" page; the last two criteria went to "Interface and Docker overview: open tasks", item 5,
+  done in 0.0.14.
+- Done: M0-M7 of the MCP and keys plan (contract in `docs/mcp.md`): own AI agents, revocable keys,
+  roles and server and stack limits, a log and a check on every call. A viewer gets no write action,
+  directly or through an executing server.
+- Kept: closed issuance of accounts, themes, uptime, docker run conversion, the Compose source text,
+  and saving distinct from deploying.
+- M7 covered SDK 1.30.0, protocol 2025-11-25 and Bearer only; OAuth, stdio and particular desktop
+  clients are not implemented, and the signed cross-server channel does not replace the browser
+  channel of agents. Replaced on 2026-09-24: protocol 2026-07-28 through
+  `@modelcontextprotocol/server` 2.1.0, with 2025-11-25 clients still served.
+
+### 2026-09-20: fixes from the second review before 0.0.6
+
+All remarks of the second review (deleted 2026-09-26) were done: Q01-Q05, UI01-UI03, L01-L08,
+E01-E20.
+
+- An operation owns its boundary: the stack lock is held from reading the choice to the write, a
+  stop reaches the running round and its request, and the stop budget no longer hands out shares
+  larger than itself.
+- Permission for the update notification is read in one place on the server, so turning it off
+  hides the news everywhere at once.
+- The complexity limit is mandatory (`complexity: [ "error", 20 ]`).
+- An open menu picks its side by free space and scrolls inside itself; editors have accessible
+  names; a muted state is muted by colour saturation, not by the opacity of the whole link.
+- Both catalogues were fixed, since some defects were in the English source; gender in the progress
+  line uses forms per resource type, filter hints are standalone messages.
+- Not done then: MCP refusal reasons by code. Closed on 2026-09-26: `/api/mcp` answers
+  `mcpOriginDenied` or `mcpOwnerRequired`. Docker integration, E2E and the image publication were
+  not run that day.
+
+### 2026-09-21: three items closed after an independent check
+
+Three items declared complete were partial: cancellation did not reach the container statistics
+collector (Q02), a stop during a settings read did not stop a new request to the release registry
+(Q03), and the editors' accessible name appeared only on a later re-render (UI02). The lifecycle
+state is now read again after every wait, not only before it, and a name belongs to the component,
+not to whoever re-renders it: the CodeMirror configuration sets it from the first render and follows
+a change of file. The stop signal reaches the sweep write and the stability collector with a check
+before every database call; inside a transaction it rolls the write back and is not reported as a
+Docker failure. Cancellation stops at the nearest check, not instantly: the round drops its work on
+the signal, and whoever owns the resources waits for it within the budget. A new test requires that
+saved settings reach every open session: breaking that broadcast used to fail no test. Each new
+check was shown to fail on a mutation of the working code.
+
+### 2026-09-21: removing leftovers, and a hole in the build context closed
+
+`docker-compose.yml` suggests `./certs` in the installation directory for the `DOCKGE_SSL_*` files,
+the release stage copies the whole context, and `.dockerignore` did not exclude `certs`: an image
+the installer builds itself would carry the HTTPS private key, as a build with a planted key showed.
+`certs`, `docker-compose.override.yml` and `.claude` are excluded now; they belong to whoever
+deployed the panel. `.dockerignore` is wider than `.gitignore` and says so; `output/`, the
+directory of acceptance artefacts, is ignored by Git.
+
+Dead code and forty-seven unreferenced translation keys were removed, and twenty-three symbols used
+only in their own file lost `export`: an export nobody uses reads as an invitation to use it. A text
+search first found fifty keys: it misses keys assembled in code, such as
+`` $t(`availabilityWindow${hours}`) ``, and the stability period selector showed a key name instead
+of "24 h" until the visual suite caught it. Dead keys are now counted with every dynamic prefix.
+`build:docker` no longer tags `ghcr.io/mazixs/dockge2:2`, an upstream leftover the fork does not
+have.
+
+### 2026-09-21: history rewritten
+
+A scan of every history object found the working-copy path in four old plans and the owner's
+personal domain in seven files of `docs/design/`, long gone from HEAD. The history was rewritten
+with `git filter-repo --replace-text` in a separate mirror clone, both replaced by neutral
+placeholders; the HEAD tree, all 494 commits, their messages and authorship are unchanged. The
+author's email stayed at the owner's decision; contact details are not given in the documentation.
+`main` and five tags were force-pushed after a backup; the GitHub releases stayed. Old commits stay
+reachable on GitHub by direct SHA until its garbage collection; only a request to GitHub support
+can speed that up.
+
+### 2026-09-21: release 0.0.6
+
+The `v0.0.6` tag published the image for `linux/amd64` and `linux/arm64` to `ghcr.io/mazixs/dockge2`
+as `0.0.6` and `latest`, with an automatic GitHub release. On the tag two browser tests failed on
+stale English wording, not on behaviour. `npm run check` runs neither `test:e2e` nor the Docker
+integration, so it does not see a change of interface text: run `npm run test:e2e` before a tag.
+
+### 2026-09-21: container controls and interface fixes
 
 - Restart recreates containers using the current Compose and env files; service restart leaves dependencies alone.
 - The service menu dismisses on outside pointer interaction and Escape, and offers an image update for that service.
@@ -1483,14 +2173,14 @@ the selected period"; экраны ведут себя как прежде, ус
 - Managed container names in the global overview link to their stack inspector, preserving the agent endpoint.
 
 
-## 2026-09-21: update settings
+### 2026-09-21: update settings
 
 - Separate automatic update checks, beta-release inclusion, an explicit manual check, and a quiet repository link.
 - A manual check works with automatic checks disabled and does not change that preference.
 - Report fresh success or failure, prevent duplicate in-flight requests, and broadcast successful scheduled checks to connected browsers.
 
 
-## 2026-09-21: deletion of broken stacks
+### 2026-09-21: deletion of broken stacks
 
 - Deletion no longer requires fixing YAML, project names or missing env files first.
 - When Compose validation fails, recover containers using their recorded working-directory labels and immutable IDs, including stopped containers. Never infer ownership from a project name alone.
@@ -1498,7 +2188,7 @@ the selected period"; экраны ведут себя как прежде, ус
 - A failed Docker query, stop or removal keeps the stack files. Deletion uses the shared operation progress and preserves failed/unknown outcomes on the current screen.
 
 
-## 2026-09-24: sign-in language and locked editors
+### 2026-09-24: sign-in language and locked editors
 
 - The sign-in screen offers the language next to the theme. English is the default: the browser language is ignored, and a first run, cleared storage or a stored code the menu no longer offers opens in English. The menu lists English, then Russian, then the rest by name, independent of the browser collation.
 - A stack's compose and env editors outside edit mode took paste, drop and cut: `vue-codemirror6` maps `disabled` to `EditorView.editable` only, while CodeMirror gates those events on `EditorState.readOnly`. The text stayed in memory, survived "Edit" and was saved with the next edit. Both editors now pass `readonly` as well.
@@ -1506,7 +2196,7 @@ the selected period"; экраны ведут себя как прежде, ус
 - `test/visual/editor-lock.spec.ts` covers paste, cut, drop and the unchanged address on the real `Compose.vue`, and that an unlocked editor still takes a paste.
 
 
-## 2026-09-24: MCP on the current protocol, easy to connect, fully logged
+### 2026-09-24: MCP on the current protocol, easy to connect, fully logged
 
 Measured against the MCP best practices checklist (the latest specification, SDK v2, Supabase MCP and our own tool-design research; deleted 2026-09-26, its refusals moved to `docs/mcp.md`).
 
@@ -1519,15 +2209,15 @@ Measured against the MCP best practices checklist (the latest specification, SDK
 - `docs/mcp.md` rewritten in English: quick start, client configurations, tools, rights, approval, reserved names, security including prompt injection through logs, reaching the endpoint (proxy, opt-in HTTP, SSH tunnel), troubleshooting by status code, the log, executing servers, limits, verification.
 - Not done, with reasons in `docs/mcp.md` ("Not implemented, and why"): OAuth 2.1, elicitation instead of owner approval, Server Cards, random boundaries around untrusted output.
 
-## 2026-09-24: env on edit, image update check without buildx
+### 2026-09-24: env on edit, image update check without buildx
 
 - "Edit" reveals the env values at once: a hidden value cannot be edited, and the second click on "Show" only got in the way. "Show" outside edit mode still reveals them read-only.
 - The update preview said "the registry did not answer" for every multi platform image in the published panel: the image has no buildx, and `docker manifest inspect` rebuilds an index instead of returning it, so its digest never matched. The registry API is now asked directly (one HEAD with every manifest type accepted, an anonymous token or the plain `docker login` entry, credentials only to an HTTPS realm); its digests match `buildx imagetools` byte for byte on ghcr.io and Docker Hub.
 - An unknown answer names its cause: refused access (private image or wrong name), no such tag, or no answer. A failed answer is kept for one minute instead of ten.
 
-## 2026-09-24: the owner turns the console on, role audit
+### 2026-09-24: the owner turns the console on, role audit
 
-- Reverses "включение из UI не добавлять" above, at the user's request. An owner turns the console on in Settings, Security, confirming with the password; turning it off needs no password and ends the open sessions. `DOCKGE_ENABLE_CONSOLE=true` still forces it on, and the setting then cannot turn it off. "false" cannot be a lock: the frozen `docker-compose.yml` always passes it.
+- Reverses the decision "do not add a switch in the interface" (see "The panel's own container and the main console"), at the owner's request. An owner turns the console on in Settings, Security, confirming with the password; turning it off needs no password and ends the open sessions. `DOCKGE_ENABLE_CONSOLE=true` still forces it on, and the setting then cannot turn it off. "false" cannot be a lock: the frozen `docker-compose.yml` always passes it.
 - No new privilege: an owner already reaches the host through compose (privileged services, host mounts).
 - One gate: `MainTerminal.state()` (variable or setting) and `MainTerminal.open()`, the only way to create the session. Each server decides for itself; an agent's console is turned on in the agent's own panel.
 - Role audit, by weight, with what was done the same day:
@@ -1540,13 +2230,13 @@ Measured against the MCP best practices checklist (the latest specification, SDK
   - Open: across agents every local user acts as the one stored agent account: remote secrets check that account's password, and the lockout counter is shared. Shells are separated by the header above, but the agent's own role and console setting apply to the agent account.
   - Open, by design: an operator deploys arbitrary compose, which reaches the host (privileged services, host mounts); keeping the console to owners does not change that.
 
-## 2026-09-24: `DOCKGE_ENABLE_CONSOLE` is no longer read
+### 2026-09-24: `DOCKGE_ENABLE_CONSOLE` is no longer read
 
 - Follows the entry above, at the user's request: the setting is the only switch. The variable forced the console on and hid the toggle, so an owner could not take the console back without editing `.env` and restarting.
 - No migration: an installation that ran with `DOCKGE_ENABLE_CONSOLE=true` comes up with the console off until an owner turns it on. The `--enableConsole` flag and the "forced" state of `checkMainTerminal` are gone; the gate is `MainTerminal.enabled()`.
 - The frozen `docker-compose.yml` still passes the variable and the updater still writes `DOCKGE_ENABLE_CONSOLE=false` into a new `.env`; both are harmless now.
 
-## 2026-09-25: updating the panel from the web interface
+### 2026-09-25: updating the panel from the web interface
 
 - Reverses "do not add a Socket.IO event that starts an update from the browser"
   (Task 6, step 2 of the upstream fixes plan, deleted 2026-09-26) at the user's request. That rule was written for
@@ -1595,7 +2285,7 @@ Measured against the MCP best practices checklist (the latest specification, SDK
 - The hint on Settings -> About is fixed with it: the command was relative, had no sudo or
   `--dry-run`, and sent legacy installations to the README although the guide is `docs/updating.md`.
 
-## 2026-09-26: review of the panel self-update
+### 2026-09-26: review of the panel self-update
 
 An independent review (`docs/plans/2026-09-26-hfsm-update-review.md`, deleted once closed)
 reproduced four defects; all four are fixed before 0.0.14 with a regression test each, and each
@@ -1616,13 +2306,13 @@ test fails without its fix.
 - Not done here, as the review suggests: a real version change through the helper with a failed
   target after its migration, on a separate environment - still the first cutover of 0.0.15.
 
-## 2026-09-26: documentation cleanup
+### 2026-09-26: documentation cleanup
 
 - Deleted from the tree: 22 finished plans, audits and reviews in `docs/plans/` and all of
   `docs/design/` (7 files, a 213 KB mockup among them). Their open items are now the backlog sections
-  "Интерфейс и Docker-обзор: открытые задачи", "Эксплуатационная приемка" and "Техдолг из ревью и
-  аудитов"; the checklist no longer points into deleted files. The header says how to read one from
-  history.
+  "Interface and Docker overview: open tasks", "Operational acceptance" and "Technical debt from
+  reviews and audits"; the checklist no longer points into deleted files. The header says how to
+  read one from history.
 - Rules moved to where they are read: MCP refusals to `docs/mcp.md`; the cache contract, rejected
   experiments and coverage floors to `docs/development.md`; dependency rules to
   `.github/CONTRIBUTING.md`; one-shot marking to `docs/faq.md`; editing rules to
@@ -1638,9 +2328,9 @@ test fails without its fix.
   invented data only. The 2026-09-22 privacy review found one gitleaks match in history, the RFC 6238
   test vector of a removed TOTP test, which is not a secret.
 
-## 2026-09-26: list, containers outside the stacks, the panel's own stack
+### 2026-09-26: list, containers outside the stacks, the panel's own stack
 
-Items 1, 2, 3 and 6 of "Интерфейс и Docker-обзор: открытые задачи", shipped in 0.0.14.
+Items 1, 2, 3 and 6 of "Interface and Docker overview: open tasks", shipped in 0.0.14.
 
 - The list searches the image of each service and the server name as well. The search text lives in
   `?q=` next to `?filter=`, and every link inside the list keeps both, so a narrowed list survives
@@ -1688,9 +2378,9 @@ Items 1, 2, 3 and 6 of "Интерфейс и Docker-обзор: открыты�
   search in the address, the attention filter by link, the keyboard, the phone, relations leading to
   a container page, and a standalone container stopped and started once the owner allows it.
 
-## 2026-09-26: docker run converter of our own
+### 2026-09-26: docker run converter of our own
 
-Item 4 of "Интерфейс и Docker-обзор: открытые задачи", shipped in 0.0.14.
+Item 4 of "Interface and Docker overview: open tasks", shipped in 0.0.14.
 
 - The corpus came first, as planned: `test/fixtures/docker-run/`, each fixture stating what must
   survive, what is reported and what must not be added. On the 39 initial fixtures `composerize`
@@ -1718,9 +2408,9 @@ Item 4 of "Интерфейс и Docker-обзор: открытые задач�
 - The event is renamed from `composerize` to `convertDockerRun`, the sheet waits for it 15 seconds,
   and it recognises `docker container run` as the server does. The input limit of the event stays.
 
-## 2026-09-26: technical debt from the reviews and audits, closed for 0.0.14
+### 2026-09-26: technical debt from the reviews and audits, closed for 0.0.14
 
-Every item of "Техдолг из ревью и аудитов". Where an item was decided rather than built, the reason
+Every item of "Technical debt from reviews and audits". Where an item was decided rather than built, the reason
 is here, so it is not reopened without a new one.
 
 - **Ack deadlines.** Every request the interface waits on goes through `emitAgentRequest` with a
@@ -1781,7 +2471,7 @@ is here, so it is not reopened without a new one.
   coming back as JavaScript. `Container.vue` now reads its compose page through one typed accessor
   that fails loudly outside that page instead of reading `undefined`.
 
-## 2026-09-26: the final UX, accessibility and performance check
+### 2026-09-26: the final UX, accessibility and performance check
 
 - **2000 containers, 300 stacks.** `npm run test:performance` on the synthetic fixture, a
   production build, CPU throttled four times. The filter's p95 is 137.1 ms over 5 cycles and
@@ -1821,7 +2511,7 @@ is here, so it is not reopened without a new one.
   same lookup unlimited. Sign-in, setup and TOTP keep their limits; `auth-boundaries.test.ts` reads
   the session 80 times from one address and fails on the 61st without the exemption.
 
-## 2026-09-26: 0.0.14 goes out as a release candidate first
+### 2026-09-26: 0.0.14 goes out as a release candidate first
 
 `v0.0.14-rc.4` is a GitHub prerelease. Every tag so far was stable, so the prerelease branch of
 `release.yml` has never run, and the update from the web interface needs a starting point that
@@ -1864,7 +2554,7 @@ pulls `--platform linux/<its own architecture>`, which it already required of th
 Reproduced in a `docker:28-dind` with the classic store: a pinned pull, then a plain one fails with
 the same message, and a pinned one passes again.
 
-## 2026-09-26: no reserved scrollbar gutter, a socket note that says what to do
+### 2026-09-26: no reserved scrollbar gutter, a socket note that says what to do
 
 The strip right of the header, left open on 2026-09-17 as a trade-off, is closed by removing
 `html { scrollbar-gutter: stable }`. The gutter came in with the redesign without a stated reason;
@@ -1881,7 +2571,7 @@ did not change.
 The Docker socket note in About now says why the risk exists, that it is not a fault, and what
 reduces it, with a link to the threat model instead of one sentence about root.
 
-## 2026-09-26: dependencies brought up to what the release age allows
+### 2026-09-26: dependencies brought up to what the release age allows
 
 Everything published by 2026-09-19 was taken, the edge `min-release-age=7` in `.npmrc` sets:
 better-auth 1.7.5, zod 4.6.5, yaml 2.9.1, type-fest 5.10.0, tsx 4.23.13, Vue 3.5.43, vite 8.3.0,
@@ -1915,7 +2605,7 @@ Held back, with the reason:
 - TypeScript 7: vue-tsc still cannot run on it;
 - @types/node 26: the types follow the Node 24 runtime.
 
-## 2026-09-27: 0.0.14-rc.4 before the stable tag
+### 2026-09-27: 0.0.14-rc.4 before the stable tag
 
 rc.3 passed its release gate, but the dependency update and the `issuer` migration above came after
 it, and only the gate has Compose 2.38, arm64 under QEMU and the update from the 0.0.13 release. A
@@ -1932,7 +2622,7 @@ fresh data directory starts without one either. The local checks ran on Node 24.
 (better-sqlite3, node-pty, esbuild, vue-demi, @parcel/watcher) but still runs them, and the native
 modules load from their prebuilds either way.
 
-## 2026-09-27: feedback on rc.4 from About
+### 2026-09-27: feedback on rc.4 from About
 
 The owner tried rc.4 on the review VPS and asked for four changes before the stable tag.
 

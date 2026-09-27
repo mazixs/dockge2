@@ -18,6 +18,7 @@
 | --- | --- |
 | [The Docker socket](threat-model.md) | Why the socket is root on the host, who reaches it through the panel, what limits it |
 | [Verified self-updates](self-updates.md) | The release contract and its trust root, cutover and recovery, the legacy import |
+| [Updating from the web interface](panel-update-statechart.md) | Its invariants, the updater's progress contract, the observer, the page's statechart |
 | [Release notes](releases/) | What changed in each release |
 
 ## Working on the source
@@ -27,10 +28,10 @@
 | [Development](development.md) | Running from source, the test suites, coverage floors, performance checks, cache rules |
 | [Contributing](../.github/CONTRIBUTING.md) | What kind of change is accepted and how to submit it |
 | [Security policy](../.github/SECURITY.md) | How to report a vulnerability |
-| [Design system](design-system.md) | Tokens and the current layout (in Russian) |
+| [Design system](design-system.md) | Tokens and the current layout |
 | [Translations](../frontend/src/lang/README.md) | Which languages, and how to translate |
 | [AGENTS.md](../AGENTS.md) | The project guide: scope, architecture, rules about the user's files |
 
 The running journal of decisions and the backlog is
-[the master plan](plans/2026-08-26-dockge2-master-plan.md), in Russian. `plans/` holds it and the
-decomposition of unfinished work; a finished plan is folded into the master plan and deleted.
+[the master plan](plans/2026-08-26-dockge2-master-plan.md). `plans/` holds it and the decomposition
+of unfinished work; a finished plan is folded into the master plan and deleted.

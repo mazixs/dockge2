@@ -1,26 +1,26 @@
-# Воспроизводимая сцена интерфейса
+# A reproducible scene of the interface
 
-Запуск: `npx vite --config test/visual/vite.config.ts`, адрес `http://localhost:5090`.
+Run: `npx vite --config test/visual/vite.config.ts`, address `http://localhost:5090`.
 
-Сцена использует настоящие Layout, Dashboard, StackInspector с его вкладками, Compose, StackJournal, StackTerminals, StackProgress, NewStack и StackGitChanges. Пять фиксированных стеков показывают работу, остановку, ошибку, локальные правки и обновление Git. Paperless повторяет имена сервисов, образы, порт и репозиторий макета Sites. Внешний Socket.IO и Docker не подключаются; любые операции отклоняются. Постоянная подпись отличает сцену от рабочего сервера. В промышленную сборку этот каталог не входит.
+The scene uses the real Layout, Dashboard, StackInspector with its tabs, Compose, StackJournal, StackTerminals, StackProgress, NewStack and StackGitChanges. Five fixed stacks show a running stack, a stopped one, a failure, local edits and a Git update. Paperless repeats the service names, images, port and repository of the Sites mockup. No external Socket.IO and no Docker are connected; every operation is refused. A permanent label tells the scene from a working server. This directory is not part of the production build. The scene speaks Russian.
 
-Вкладки стека держат одну сетку: главная колонка и панель источника справа. Журнал показывает только вывод стека, оболочки контейнеров живут во вкладке терминала; файлы, выбор файлов, секреты, журнал, терминал и источник - панели одной анатомии с шапкой одной высоты, именем со значком и подписью под телом; заголовков между панелями нет. Открытие оболочки из меню сервиса ведет во вкладку терминала и сразу отдает ей ввод.
+The tabs of a stack keep one grid: the main column and the source panel on the right. The log shows only the stack's output, and container shells live in the terminal tab. Files, file selection, secrets, log, terminal and source are panels of one anatomy, with a header of one height, a name with an icon and a caption under the body; there are no headings between the panels. Opening a shell from a service menu leads to the terminal tab and gives it the input at once.
 
-Ход команды показывается настоящей строкой: кнопки "Запустить", "Перезапустить" и действия строки сервиса печатают заранее записанный вывод compose в терминал прогресса - кадрами, с перерисовкой блока на месте, как это делает настоящий терминал. Строка разбирает его в шаги, стоит под шапкой стека и остается видной при переходе на другую вкладку, а колонка "Состояние" в таблице сервисов все это время говорит словами compose. Стек uptime-kuma всегда отвечает неудачей: на нем видно красную строку, красное состояние сервиса web и окно с полным выводом по кнопке "Показать вывод". Ни один контейнер при этом не трогается.
+The progress of a command is shown by the real line: the "Start" and "Restart" buttons and the actions of a service row print prerecorded compose output into the progress terminal, frame by frame, redrawing the block in place as a real terminal does. The line parses it into steps, stands under the stack header and stays visible on another tab, while the "State" column of the services table speaks the words of compose all along. The uptime-kuma stack always answers with a failure: it shows the red line, the red state of the web service and the window with the full output behind "Show the output". No container is touched.
 
-Вывод журнала и оболочка контейнера тоже фиктивные: строки журнала записаны заранее, а оболочка отвечает на ls, pwd, whoami и env локальным эхом. Ни одна команда не выполняется, первая же строка сессии об этом сообщает.
+The log output and the container shell are fake as well: the log lines are prerecorded, and the shell answers ls, pwd, whoami and env with a local echo. No command runs, and the first line of the session says so.
 
-## Эталонные снимки
+## Reference screenshots
 
 ```bash
-npm run test:visual           # сверить экраны с эталоном
-npm run test:visual:approve   # переутвердить эталон - только когда вид изменен намеренно
+npm run test:visual           # compare the screens with the references
+npm run test:visual:approve   # re-approve the references - only when the look was changed on purpose
 ```
 
-Спека `design.spec.ts` снимает девять экранов в светлой и темной теме на 1280 px и пять из них на телефоне 390 px. Эталоны лежат в `baseline/<прогон>/<экран>.png` и коммитятся: снимок без истории не с чем сравнивать. Первый прогон на новом экране записывает эталон и падает - это не ошибка, а требование посмотреть на записанное глазами.
+Both commands run in the pinned Playwright image (`run.sh`), the same one CI uses, so a machine needs Docker and nothing else. `design.spec.ts` takes fourteen screens in the light and dark themes at 1280 px and six of them on a 390 px phone. The references lie in `baseline/<project>/<screen>.png` and are committed: a screenshot without history has nothing to be compared with. The first run of a new screen records its reference and fails - not an error, but a request to look at what was recorded.
 
-Сцена детерминирована: сокета нет, время остановлено `page.clock.setFixedTime`, тема ставится явно, анимации выключены на время снимка. Поэтому расхождение означает правку разметки, токенов или шрифта. Эталон переутверждается осознанно и отдельной командой: снимок, обновленный заодно с каждой правкой, перестает быть эталоном и не ловит ничего.
+The scene is deterministic: there is no socket, the time is frozen by `page.clock.setFixedTime`, the theme is set explicitly, and animations are off while a screenshot is taken. A difference therefore means a change of markup, tokens or font. A reference is re-approved deliberately and by a separate command: a screenshot updated along with every change stops being a reference and catches nothing.
 
-Снимки сняты Chromium из Playwright на Linux. На другой системе отрисовка шрифта отличается, поэтому сверять эталон надо тем же браузером, каким он записан.
+The same configuration runs three more specs that check behaviour rather than pixels: `state-matrix.spec.ts` checks that every state of the overview and the list is named in words, `editor-lock.spec.ts` that a locked editor takes no paste, cut or drop, and `modal-lifecycle.spec.ts` that a dialog unmounted while it opens, is open or closes releases its element and backdrop.
 
-Проверять обзор `/stack/paperless`, файлы `/stack/paperless/files`, журнал `/stack/paperless/logs`, терминал `/stack/paperless/terminal`, сравнение `/stack/paperless/git` и создание `/new` в темной и светлой темах, на ширинах 390, 768, 1280 и 1440 px. Мобильный выбор стека закрывает список и переносит фокус. Меню сервиса, переключение вкладок, открытие сессии, строка хода команды и окно вывода проверяются здесь же. Эта сцена проверяет вид и переходы; сохранение и Docker проверяются отдельно настоящими E2E и модульными тестами.
+Check the overview `/stack/paperless`, the files `/stack/paperless/files`, the log `/stack/paperless/logs`, the terminal `/stack/paperless/terminal`, the comparison `/stack/paperless/git` and the create page `/new` in the dark and light themes, at widths of 390, 768, 1280 and 1440 px. Choosing a stack on a phone closes the list and moves the focus. The service menu, tab switching, opening a session, the progress line and the output window are checked here too. This scene checks the look and the transitions; saving and Docker are checked separately by real E2E and unit tests.
