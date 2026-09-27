@@ -94,10 +94,11 @@ test("file operation review is owner-only, apply is exact and hidden approval is
 });
 
 test("Git fetch waits for apply, preview is key-bound and deployment needs its own permission", async (context) => {
-    await withDatabase(async ({ stacksDir }) => {
+    await withDatabase(async ({ dataDir, stacksDir }) => {
         await createTestAccount();
         const server = { stacksDir,
-            config: { stacksDir } } as DockgeServer;
+            config: { dataDir,
+                stacksDir } } as DockgeServer;
         const directory = path.join(stacksDir, "demo");
         await mkdir(directory);
         await writeFile(path.join(directory, "compose.yaml"), "services: {}\n");

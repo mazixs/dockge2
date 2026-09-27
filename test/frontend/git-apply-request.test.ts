@@ -16,6 +16,7 @@ const context : Record<string, unknown> = {
     canApplyGitChoices,
     diffLineRows,
     EnvFromExample: {},
+    GitDeployKey: {},
     ATTENTION,
     CREATED_FILE,
     CREATED_STACK,

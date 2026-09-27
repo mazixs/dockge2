@@ -2799,3 +2799,29 @@ deployment. The installer refused the existing `.env`, and neither `--update`, `
   repeated. A first start that failed stays `recovery-required` and resumes with `--resume`.
 
 `TestAnInterruptedFreshInstallationCanBeRepeated` sends the signal right after `.env` is written.
+
+### 2026-09-27: deploy keys for private repositories
+
+A private repository needed an SSH key mounted into the container at install time, and the updater
+never changes the mounts of an existing installation. The owner chose keys created in the panel
+over mounting keys into an existing installation and over registry-style logins in the UI.
+
+- The panel creates an ed25519 key per repository (`backend/git-deploy-key.ts`) on request only and
+  shows the public line, its fingerprint and the host's deploy key page for GitHub, GitLab and
+  Bitbucket. The private half stays in `<data>/git-keys/` (`0700`, files `0600`) and never leaves
+  the server; an existing key is never replaced.
+- The key is found by the address (sha256 of it without a trailing `/` or `.git`), not by the
+  stack: on the New stack page the name comes after the branches, and a deploy key belongs to a
+  repository on every host that has them.
+- `GIT_SSH_COMMAND` passes only that key (`IdentitiesOnly`, `IdentityAgent=none`), so an agent or
+  the server's own keys cannot answer for another repository. A path ssh could misread is refused.
+- The host keys of the three hosts are pinned in `backend/ssh_known_hosts`, checked against the
+  published fingerprints (api.github.com/meta, docs.gitlab.com, bitbucket.org/site/ssh). The
+  system and the user's `known_hosts` still apply for other hosts.
+- A refusal is named: an unknown host key is `gitHostKeyUnknown`, a denied key `gitAccessDenied`;
+  the update check of an existing stack shows the key again on the latter.
+- Not done: the MCP tools and the `deploy-stack` command do not create keys (they use one that
+  exists); a deleted stack leaves its key, since another stack may use the repository.
+
+Checked against github.com, gitlab.com and bitbucket.org with a fresh unregistered key, no
+`~/.ssh` and a key path with spaces: all three accepted the pinned host key and refused the key.

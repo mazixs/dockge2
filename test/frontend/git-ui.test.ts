@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { canApplyGitChoices, diffLineRows } from "../../frontend/src/git-ui";
+import { canApplyGitChoices, deployKeyPage, diffLineRows } from "../../frontend/src/git-ui";
 
 test("Every preview file requires its own explicit choice before applying", () => {
     const files = [{ path: "compose.yaml" }, { path: ".env" }];
@@ -31,4 +31,15 @@ test("Edited decisions require an explicit draft and cannot reveal hidden or bin
         redacted: true }], { a: "edited" }, { a: "text" }), false);
     assert.equal(canApplyGitChoices([{ path: "a",
         binary: true }], { a: "edited" }, { a: "text" }), false);
+});
+
+test("A deploy key links to the page where the host adds it, only for a host it knows", () => {
+    assert.deepEqual(deployKeyPage("git@github.com:example/private.git"), { host: "github.com",
+        url: "https://github.com/example/private/settings/keys/new" });
+    assert.equal(deployKeyPage("ssh://git@GitLab.com/group/sub/app.git")?.url, "https://gitlab.com/group/sub/app/-/settings/repository#js-deploy-keys-settings");
+    assert.equal(deployKeyPage("github.com/example/private")?.url, "https://github.com/example/private/settings/keys/new");
+    assert.equal(deployKeyPage("git@bitbucket.org:team/app")?.url, "https://bitbucket.org/team/app/admin/access-keys/");
+    for (const unknown of [ "git@git.example.invalid:team/app.git", "https://github.com/example/private.git", "git@github.com:private", "git@github.com:owner/../x", "git@github.com:owner/a?b" ]) {
+        assert.equal(deployKeyPage(unknown), null);
+    }
 });

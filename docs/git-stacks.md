@@ -56,18 +56,44 @@ asks for a new one.
 
 ## Private repositories
 
-The panel talks to Git directly, never to the GitHub API, and authenticates in one way only:
+The panel talks to Git directly, never to the GitHub API, and authenticates with an SSH key only:
 
 - No prompt is ever shown (`GIT_TERMINAL_PROMPT=0`), credential helpers are disabled and the global
   Git configuration is ignored. A command that would ask for a password fails instead of hanging.
 - A token inside the repository address is rejected, so a secret cannot end up in the
   configuration, a list or a log.
-- That leaves an SSH key without a passphrase, plus a `known_hosts` entry for the Git host, mounted
-  into the panel container at `/root/.ssh`. The mount is set on
-  [installation](installation.md#ssh-keys-registry-logins-and-certificates).
 
-Without the key a private repository does not half work: the clone fails with the authentication
-error from Git, and the panel shows it as it came.
+### A deploy key from the panel
+
+Use the SSH address of the repository, such as `git@github.com:owner/repository.git`. Under the
+address on the New stack page the panel offers **Create a deploy key**. It generates an ed25519 key
+on the server and shows the public line and its fingerprint, with a link to the page where GitHub,
+GitLab or Bitbucket adds it. Add it there as a deploy key with read access only, then load the
+branches.
+
+- The key belongs to the repository, not to the stack: two stacks of one repository use the same
+  key, and it is found however the address is typed (with or without `.git`).
+- The private half is kept in the data directory, `git-keys/`, with `0600` permissions, and never
+  leaves the server. The panel never replaces an existing key: the repository already trusts it.
+- The key is used for that repository only; the server's own keys and an SSH agent are not offered
+  alongside it.
+- When an existing stack loses access, the update check says so and shows the key again.
+- Deleting a stack leaves the key in place. Remove the file from `git-keys/` and the deploy key from
+  the repository when the repository is no longer used.
+
+The host keys of github.com, gitlab.com and bitbucket.org ship with the panel. For another host,
+add its key to `known_hosts` in a mounted `/root/.ssh`; otherwise the panel reports that it does
+not know the host rather than trusting whatever answers.
+
+### A key of your own
+
+An SSH key without a passphrase, plus a `known_hosts` entry for the Git host, can also be mounted
+into the panel container at `/root/.ssh`. The mount is set on
+[installation](installation.md#ssh-keys-registry-logins-and-certificates). A deploy key created in
+the panel takes precedence over it for its repository.
+
+Without a key a private repository does not half work: the clone fails, and the panel says that the
+repository did not let the server in.
 
 ## From the command line
 

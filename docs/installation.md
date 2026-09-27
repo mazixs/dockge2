@@ -183,7 +183,7 @@ Put them in an override file:
 services:
   dockge:
     volumes:
-      # SSH key without a passphrase and known_hosts, for private Git repositories
+      # Your own SSH key and known_hosts; the panel can also create deploy keys itself
       - /root/.ssh:/root/.ssh:ro
       # docker login, for private registries
       - /root/.docker:/root/.docker

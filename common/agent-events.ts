@@ -2,7 +2,7 @@ import type { Availability } from "./availability";
 import type { ImageUpdate } from "./image-source";
 import type { StabilityOverview, StabilityWindow } from "./stability";
 import type { ContainerInstanceStatus, StackStatusIssue } from "./compose-status";
-import type { GitApplyInput, GitCloneInput, GitSaveResult, GitUpdatePreview } from "./types/stack-git";
+import type { GitApplyInput, GitCloneInput, GitDeployKey, GitDeployKeySource, GitSaveResult, GitUpdatePreview } from "./types/stack-git";
 import type { StackSource } from "./stack-source";
 import type { ContainerAction, ContainerDetails, StandaloneContainer } from "./types/container";
 import type { StackRelations } from "./types/relations";
@@ -164,6 +164,7 @@ export interface AgentRequestContract {
     // Git
     gitCloneStack : { args : [ payload : GitCloneInput ]; result : AgentResponse<GitSaveResult> };
     gitListBranches : { args : [ repository : string ]; result : AgentResponse<{ branches : string[] }> };
+    gitDeployKey : { args : [ source : GitDeployKeySource, create : boolean ]; result : AgentResponse<{ key : GitDeployKey | null }> };
     gitPreviewUpdate : { args : [ stackName : string ]; result : AgentResponse<{ preview : GitUpdatePreview }> };
     gitDiscardPreview : { args : [ stackName : string, previewId : string ]; result : AgentResponse };
     gitApplyUpdate : { args : [ payload : GitApplyInput ]; result : AgentResponse<GitSaveResult> };
@@ -267,6 +268,7 @@ const REQUEST_NAMES : Record<AgentRequestName, true> = {
     controlContainer: true,
     gitCloneStack: true,
     gitListBranches: true,
+    gitDeployKey: true,
     gitPreviewUpdate: true,
     gitDiscardPreview: true,
     gitApplyUpdate: true,

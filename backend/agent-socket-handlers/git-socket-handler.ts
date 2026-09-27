@@ -6,17 +6,33 @@ import { callbackError, callbackResult, checkLogin, type DockgeSocket } from "..
 import { Stack } from "../stack";
 import { StackConfig, emptyStackFileConfig, findEnvExample } from "../stack-config";
 import { StackGitError, StackGitWorkflow } from "../stack-git";
+import { GitDeployKeys } from "../git-deploy-key";
 import { spawn } from "../child-process";
 import { composeArgs } from "../compose-args";
 import type { AgentSocket } from "../../common/agent-socket";
 import type { AgentRequestContract } from "../../common/agent-events";
-import type { GitApplyInput, GitCloneInput, GitEnvExample, GitMessage, GitSaveResult } from "../../common/types/stack-git";
+import type { GitApplyInput, GitCloneInput, GitDeployKeySource, GitEnvExample, GitMessage, GitSaveResult } from "../../common/types/stack-git";
 import { classifyStackFile } from "../../common/stack-files";
 import type { StackFileConfig } from "../../common/types/stack";
 import { runInBackground } from "../background";
 import { log } from "../log";
 
 const workflows = new WeakMap<DockgeServer, StackGitWorkflow>();
+const deployKeys = new WeakMap<DockgeServer, GitDeployKeys>();
+
+/**
+ * Deploy keys of one server, kept in its data directory.
+ * @param server Server the stacks live on
+ * @returns Its keys
+ */
+export function getGitDeployKeys(server: DockgeServer): GitDeployKeys {
+    let value = deployKeys.get(server);
+    if (!value) {
+        value = new GitDeployKeys(path.join(server.config.dataDir, "git-keys"));
+        deployKeys.set(server, value);
+    }
+    return value;
+}
 
 /**
  * Names Compose reports as missing, read out of its own error text.
@@ -195,7 +211,9 @@ async function validate(directory: string, config: StackFileConfig, stacksDir: s
 export function getStackGitWorkflow(server: DockgeServer): StackGitWorkflow {
     let value = workflows.get(server);
     if (!value) {
-        value = new StackGitWorkflow({ validate: (directory, config) => validate(directory, config, server.stacksDir) });
+        const keys = getGitDeployKeys(server);
+        value = new StackGitWorkflow({ validate: (directory, config) => validate(directory, config, server.stacksDir),
+            deployKey: (repository) => keys.keyFile(repository) });
         workflows.set(server, value);
     }
     return value;
@@ -274,6 +292,30 @@ export class GitSocketHandler extends AgentSocketHandler {
                 const branches = await getStackGitWorkflow(server).listBranches(repository.trim());
                 callbackResult({ ok: true,
                     branches }, callback);
+            } catch (error) {
+                callbackError(safeError(error), callback);
+            }
+        });
+        // Only the public half ever leaves: the private key stays in the data directory
+        agentSocket.on("gitDeployKey", async (source: unknown, create: unknown, callback) => {
+            try {
+                checkLogin(socket);
+                const input = source as GitDeployKeySource | null;
+                if (!input || typeof input !== "object" || typeof create !== "boolean") {
+                    throw new StackGitError("gitDeployKeyInvalidParameters");
+                }
+                let repository: string;
+                if ("repository" in input && typeof input.repository === "string") {
+                    repository = input.repository.trim();
+                } else if ("stackName" in input && typeof input.stackName === "string") {
+                    repository = await getStackGitWorkflow(server).remote(Stack.getSafePath(server, input.stackName));
+                } else {
+                    throw new StackGitError("gitDeployKeyInvalidParameters");
+                }
+                const keys = getGitDeployKeys(server);
+                const key = create ? await keys.create(repository) : await keys.get(repository);
+                callbackResult({ ok: true,
+                    key }, callback);
             } catch (error) {
                 callbackError(safeError(error), callback);
             }

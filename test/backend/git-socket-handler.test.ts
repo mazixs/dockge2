@@ -16,11 +16,16 @@ function call(socket: AgentSocket, event: string, input: unknown): Promise<Recor
     return new Promise((resolve) => socket.call(event, input, resolve));
 }
 
+function call2(socket: AgentSocket, event: string, first: unknown, second: unknown): Promise<Record<string, unknown>> {
+    return new Promise((resolve) => socket.call(event, first, second, resolve));
+}
+
 async function handler(t: test.TestContext) {
     const stacksDir = await fs.mkdtemp(path.join(os.tmpdir(), "dockge-git-handler-"));
     t.after(() => fs.rm(stacksDir, { recursive: true,
         force: true }));
     const server = { stacksDir,
+        config: { dataDir: path.join(stacksDir, ".data") },
         sendStackList: () => undefined } as unknown as DockgeServer;
     const socket = { userID: "fixture-user",
         endpoint: "" } as DockgeSocket;
@@ -28,7 +33,8 @@ async function handler(t: test.TestContext) {
     new GitSocketHandler().create(socket, server, agent);
     return { socket,
         agent,
-        stacksDir };
+        stacksDir,
+        dataDir: path.join(stacksDir, ".data") };
 }
 
 const input = { name: "fixture",
@@ -284,7 +290,7 @@ test("invalid requests and unauthenticated sockets cannot start Git operations",
 });
 
 test("the central role gate reserves all Git content and mutations for trusted operators", () => {
-    for (const event of [ "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate", "createEnvFromExample" ]) {
+    for (const event of [ "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitApplyUpdate", "createEnvFromExample", "gitDeployKey" ]) {
         assert.equal(roleAllowsEvent("viewer", event, true), false);
         assert.equal(roleAllowsEvent("operator", event, true), true);
         assert.equal(roleAllowsEvent("admin", event, true), true);
@@ -306,4 +312,32 @@ test("listing branches reaches the remote only for a signed-in caller with a usa
     f.socket.userID = "";
     assert.equal((await call(f.agent, "gitListBranches", "https://example.invalid/repo.git")).ok, false);
     assert.equal(listBranches.mock.callCount(), 1);
+});
+
+test("a deploy key is shown by address or by stack, and only its public half leaves", async (t) => {
+    const f = await handler(t);
+    const repository = "git@github.com:example/private.git";
+    assert.deepEqual(await call2(f.agent, "gitDeployKey", { repository }, false), { ok: true,
+        key: null });
+    const created = await call2(f.agent, "gitDeployKey", { repository: `  ${repository}  ` }, true);
+    assert.equal(created.ok, true);
+    const key = created.key as { publicKey: string };
+    assert.match(key.publicKey, /^ssh-ed25519 /);
+    assert.doesNotMatch(JSON.stringify(created), /PRIVATE/);
+
+    await fs.mkdir(path.join(f.stacksDir, "fixture"));
+    const remote = t.mock.method(StackGitWorkflow.prototype, "remote", async () => repository);
+    assert.deepEqual(await call2(f.agent, "gitDeployKey", { stackName: "fixture" }, false), created);
+    assert.equal(remote.mock.callCount(), 1);
+
+    const refused = await call2(f.agent, "gitDeployKey", { repository: "https://github.com/example/private.git" }, true);
+    assert.equal(refused.ok, false);
+    assert.equal(refused.msg, "gitDeployKeyNeedsSsh");
+    for (const [ source, create ] of [[ null, false ], [{}, false ], [{ repository }, "yes" ], [{ stackName: 7 }, false ]]) {
+        assert.equal((await call2(f.agent, "gitDeployKey", source, create)).msg, "gitDeployKeyInvalidParameters");
+    }
+    assert.equal((await call2(f.agent, "gitDeployKey", { stackName: "../outside" }, false)).ok, false);
+    f.socket.userID = "";
+    assert.equal((await call2(f.agent, "gitDeployKey", { repository: "git@github.com:example/other.git" }, true)).ok, false);
+    assert.equal((await fs.readdir(path.join(f.dataDir, "git-keys"))).length, 2);
 });

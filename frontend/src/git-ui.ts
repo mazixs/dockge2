@@ -1,6 +1,32 @@
 // Правило адреса общее с сервером: кнопка включена ровно тогда, когда сервер
 // адрес примет. Реэкспорт, а не своя копия - копия уже расходилась с сервером
-export { isSafeGitRepository, stackNameFromRepository } from "../../common/git-repository";
+export { isSafeGitRepository, isSshRepository, stackNameFromRepository } from "../../common/git-repository";
+
+/** Where each public host keeps the deploy keys of a repository, by its path. */
+const DEPLOY_KEY_PAGES : Record<string, (path : string) => string> = {
+    "github.com": (path) => `https://github.com/${path}/settings/keys/new`,
+    "gitlab.com": (path) => `https://gitlab.com/${path}/-/settings/repository#js-deploy-keys-settings`,
+    "bitbucket.org": (path) => `https://bitbucket.org/${path}/admin/access-keys/`,
+};
+
+/**
+ * The page of the repository's host where a deploy key is added.
+ * @param repository SSH address, `git@host:owner/repo.git` or `ssh://git@host/owner/repo.git`,
+ *     or the `host/owner/repo` form a stack shows
+ * @returns The host and the page, or null for a host the panel does not know
+ */
+export function deployKeyPage(repository : string) : { host : string, url : string } | null {
+    const match = /^[^@/]+@([^:/]+):(.+)$/.exec(repository) ?? /^ssh:\/\/[^@/]+@([^:/]+)(?::\d+)?\/(.+)$/.exec(repository)
+        ?? /^([^@/:]+)\/(.+)$/.exec(repository);
+    const host = match?.[1]?.toLowerCase() ?? "";
+    const path = (match?.[2] ?? "").replace(/\/+$/, "").replace(/\.git$/, "");
+    const page = DEPLOY_KEY_PAGES[host];
+    if (!page || !/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+$/.test(path) || path.split("/").some(part => /^\.+$/.test(part))) {
+        return null;
+    }
+    return { host,
+        url: page(path) };
+}
 
 /** Require a reviewed choice for each file, including hidden files.
  * @param files Changed preview files

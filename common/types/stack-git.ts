@@ -54,6 +54,17 @@ export interface GitEnvExample {
     example: string;
 }
 
+/** The public half of a deploy key the panel created for a repository. */
+export interface GitDeployKey {
+    /** `ssh-ed25519 <key> dockge2`, the line to add to the repository */
+    publicKey: string;
+    /** `SHA256:...`, as the repository lists its keys */
+    fingerprint: string;
+}
+
+/** Whose key: the address typed on the New stack page, or the origin of an existing stack. */
+export type GitDeployKeySource = { repository: string } | { stackName: string };
+
 export interface GitSaveResult {
     stackName: string;
     saved: true;

@@ -74,6 +74,24 @@ export interface GitWorkflowOptions {
     validate: (directory: string, config: StackFileConfig) => Promise<void>;
     /** Test injection for a filesystem failure after earlier writes. */
     beforeWrite?: (fileName: string) => Promise<void>;
+    /** Private key the panel created for a repository, if any. */
+    deployKey?: (repository: string) => Promise<string | undefined>;
+}
+
+/**
+ * Why the remote refused, in the few cases that tell the user what to do.
+ * @param error Failure of the git process
+ * @returns Catalogue key
+ */
+export function remoteRefusal(error: unknown): string {
+    const stderr = String((error as { stderr?: unknown } | undefined)?.stderr ?? "");
+    if (/Host key verification failed/.test(stderr)) {
+        return "gitHostKeyUnknown";
+    }
+    if (/Permission denied \(publickey|Repository not found|could not read Username|Authentication failed|access denied/i.test(stderr)) {
+        return "gitAccessDenied";
+    }
+    return "gitRemoteOperationFailed";
 }
 
 /**
@@ -359,6 +377,20 @@ export class StackGitWorkflow {
         }
     }
 
+    /** A call that reaches the remote, with the repository's own key when there is one. */
+    private async network(dir: string, args: string[], repository: string): Promise<Buffer> {
+        const sshKey = await this.options.deployKey?.(repository);
+        try {
+            return await runGit(args, { cwd: dir,
+                allowLocalTransport: this.options.allowLocalTransport,
+                sshKey,
+                maxBuffer: MAX_BYTES,
+                timeoutMs: 60_000 });
+        } catch (error) {
+            throw new StackGitError(remoteRefusal(error));
+        }
+    }
+
     private async assertRepository(dir: string): Promise<void> {
         const stat = await fs.lstat(dir);
         if (!stat.isDirectory() || stat.isSymbolicLink()) {
@@ -462,7 +494,7 @@ export class StackGitWorkflow {
      */
     async listBranches(repository: string): Promise<string[]> {
         validateGitRepository(repository, this.options.allowLocalTransport);
-        const output = await this.git(os.tmpdir(), [ "ls-remote", "--heads", "--refs", "--", repository ]);
+        const output = await this.network(os.tmpdir(), [ "ls-remote", "--heads", "--refs", "--", repository ], repository);
         const names: string[] = [];
         for (const line of output.toString("utf-8").split("\n")) {
             const ref = line.split("\t")[1]?.trim();
@@ -495,7 +527,7 @@ export class StackGitWorkflow {
             await this.git(path.dirname(dir), [ "check-ref-format", `refs/heads/${input.branch}` ]);
             const stage = await fs.mkdtemp(path.join(path.dirname(dir), ".dockge-git-"));
             try {
-                await this.git(stage, [ "clone", "--no-checkout", "--single-branch", "--branch", input.branch, "--", input.repository, "repo" ]);
+                await this.network(stage, [ "clone", "--no-checkout", "--single-branch", "--branch", input.branch, "--", input.repository, "repo" ], input.repository);
                 const repo = path.join(stage, "repo");
                 const intended = await this.tree(repo, await this.commit(repo));
                 await writeTree(repo, intended);
@@ -534,6 +566,18 @@ export class StackGitWorkflow {
         });
     }
 
+    /**
+     * Address a stack updates from.
+     * @param dir Stack directory
+     * @returns The origin, as it was cloned
+     */
+    async remote(dir: string): Promise<string> {
+        await this.assertRepository(dir);
+        const remote = (await this.git(dir, [ "remote", "get-url", "origin" ])).toString().trim();
+        validateGitRepository(remote, this.options.allowLocalTransport);
+        return remote;
+    }
+
     /** Fetch a branch, keep working files untouched and bind decisions to exact bytes. */
     async preview(dir: string, config: StackFileConfig): Promise<GitUpdatePreview> {
         return this.exclusive(dir, async () => {
@@ -553,7 +597,7 @@ export class StackGitWorkflow {
                 } catch {
                     throw new StackGitError("gitStagedChangesPresent");
                 }
-                await this.git(dir, [ "fetch", "--no-tags", "--no-recurse-submodules", "--", remote, `refs/heads/${branch}:refs/remotes/origin/${branch}` ]);
+                await this.network(dir, [ "fetch", "--no-tags", "--no-recurse-submodules", "--", remote, `refs/heads/${branch}:refs/remotes/origin/${branch}` ], remote);
                 const targetCommit = (await this.git(dir, [ "rev-parse", `refs/remotes/origin/${branch}` ])).toString().trim();
                 try {
                     await this.git(dir, [ "merge-base", "--is-ancestor", currentCommit, targetCommit ]);

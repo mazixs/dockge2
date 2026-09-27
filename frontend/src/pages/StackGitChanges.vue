@@ -11,6 +11,7 @@
         </div>
         <div v-if="failure" class="notice failure" role="alert">
             <p>{{ failure }}</p>
+            <GitDeployKey v-if="accessDenied" :endpoint="endpoint" :source="{ stackName }" :repository="remote" />
             <button v-if="!applying" class="btn btn-normal" type="button" @click="loadPreview">{{ $t("gitUiCheckAgain") }}</button>
         </div>
         <div v-if="loading" class="notice" role="status">{{ $t("gitUiFetching") }}</div>
@@ -128,6 +129,7 @@
 import { defineComponent } from "vue";
 import { canApplyGitChoices, diffLineRows } from "../git-ui";
 import EnvFromExample from "../components/EnvFromExample.vue";
+import GitDeployKey from "../components/GitDeployKey.vue";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed } from "../../../common/util-common";
 import type { GitFileChoice, GitPreviewFile, GitSaveResult, GitUpdatePreview } from "../../../common/types/stack-git";
 import type { StackSummaryDTO, ViewerStackSummary } from "../../../common/types/stack";
@@ -145,7 +147,8 @@ type DiffLine = ReturnType<typeof diffLineRows>[number];
 const APPLY_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
 export default defineComponent({
-    components: { EnvFromExample },
+    components: { EnvFromExample,
+        GitDeployKey },
     /**
      * Hold the person on the page while the files are being applied
      * @param this The page, which the router types without its own fields
@@ -166,6 +169,8 @@ export default defineComponent({
             loading: false,
             applying: false,
             failure: "",
+            // The remote refused the server: the key it would need is offered with the refusal
+            accessDenied: false,
             /** Why the server refused the last apply; nothing was written, so it may be tried again */
             refusal: "",
             /** The last apply got no answer: it may have written the files, so it is not offered again */
@@ -185,6 +190,10 @@ export default defineComponent({
         },
         stackPath() : string {
             return `/stack/${encodeURIComponent(this.stackName)}${this.endpoint ? `/${encodeURIComponent(this.endpoint)}` : ""}`;
+        },
+        remote() : string {
+            const stack = this.currentStack;
+            return stack && "source" in stack ? stack.source?.remote ?? "" : "";
         },
         currentStack() : StackSummaryDTO | ViewerStackSummary | undefined {
             return this.$root.completeStackList[this.stackName + "_" + this.endpoint];
@@ -319,6 +328,7 @@ export default defineComponent({
             const version = ++this.requestVersion;
             this.loading = true;
             this.failure = "";
+            this.accessDenied = false;
             if (this.preview) {
                 this.$root.emitAgentRequest(this.previewEndpoint, "gitDiscardPreview", [ this.previewStackName, this.preview.id ]);
             }
@@ -341,6 +351,7 @@ export default defineComponent({
                 this.loading = false;
                 if (!res?.ok) {
                     this.failure = res?.unknown ? this.$t("gitUiPreviewTimeout") : this.$root.serverText(res?.msg, "gitUiRequestFailed");
+                    this.accessDenied = !res?.unknown && res?.msg === "gitAccessDenied";
                     return;
                 }
                 this.preview = res.preview;

@@ -72,6 +72,15 @@ export function isSafeGitRepository(repository : string) : boolean {
 }
 
 /**
+ * Whether an address reaches its repository over SSH, the transport a deploy key works for.
+ * @param repository Address as the user typed it
+ * @returns true for `user@host:path` and `ssh://`
+ */
+export function isSshRepository(repository : string) : boolean {
+    return SCP_FORM.test(repository) || repository.startsWith("ssh://");
+}
+
+/**
  * Suggest a stack name from a repository address.
  *
  * Without a suggestion the field keeps whatever was typed for the repository before it,

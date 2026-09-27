@@ -1,3 +1,4 @@
+import path from "node:path";
 import { spawn } from "./child-process";
 
 /**
@@ -15,6 +16,16 @@ import { spawn } from "./child-process";
 /** Transports git may use. `file:` is for isolated tests, never for a socket. */
 const NETWORK_PROTOCOLS = "http:https:ssh";
 const LOCAL_PROTOCOLS = `${NETWORK_PROTOCOLS}:file`;
+
+/**
+ * Host keys of GitHub, GitLab and Bitbucket, trusted next to the system's own list.
+ *
+ * With `BatchMode` an unknown host is refused, and the container has no `known_hosts`
+ * unless the owner mounts one, so without this list no SSH address would work out of the
+ * box. The keys are the ones the hosts publish; the user's `~/.ssh/known_hosts` still
+ * applies for any other host.
+ */
+const PINNED_KNOWN_HOSTS = path.join(import.meta.dirname, "ssh_known_hosts");
 
 /**
  * Settings that always apply, whatever the command.
@@ -45,6 +56,38 @@ export interface GitCommandOptions {
     timeoutMs : number;
     /** Written to the standard input of the call */
     input? : Buffer | string | undefined;
+    /** Private key to connect with instead of the server's own SSH keys */
+    sshKey? : string | undefined;
+}
+
+/**
+ * Quote one word for the shell git runs `GIT_SSH_COMMAND` through.
+ * @param value Word to pass
+ * @returns The word in single quotes
+ */
+function shellWord(value : string) : string {
+    return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * The ssh command of one call.
+ * @param sshKey Private key of the repository, when the panel created one
+ * @returns Command line for `GIT_SSH_COMMAND`
+ * @throws {Error} When a path could not be passed to ssh unchanged
+ */
+export function sshCommand(sshKey? : string) : string {
+    for (const file of [ PINNED_KNOWN_HOSTS, sshKey ?? "" ]) {
+        if (/["%\x00-\x1f]/.test(file)) {
+            throw new Error("SSH file path is not usable");
+        }
+    }
+    // ssh splits the list itself, so a path with spaces is quoted for ssh inside the shell word
+    const words = [ "ssh", "-oBatchMode=yes", "-o", shellWord(`GlobalKnownHostsFile="${PINNED_KNOWN_HOSTS}" /etc/ssh/ssh_known_hosts`) ];
+    if (sshKey) {
+        // Only this key: the server's own keys and an agent would answer for other repositories
+        words.push("-oIdentitiesOnly=yes", "-oIdentityAgent=none", "-i", shellWord(sshKey));
+    }
+    return words.join(" ");
 }
 
 /**
@@ -69,7 +112,7 @@ function gitEnvironment(options : GitCommandOptions) : NodeJS.ProcessEnv {
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_CONFIG_GLOBAL: "/dev/null",
         // Takes precedence over core.sshCommand, so the same thing is not said twice
-        GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
+        GIT_SSH_COMMAND: sshCommand(options.sshKey),
         GIT_ALLOW_PROTOCOL: options.allowLocalTransport ? LOCAL_PROTOCOLS : NETWORK_PROTOCOLS,
         // Reading a stack must not leave lock files in the user's repository
         GIT_OPTIONAL_LOCKS: "0",

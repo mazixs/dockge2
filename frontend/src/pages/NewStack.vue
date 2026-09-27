@@ -39,6 +39,8 @@
                         <p class="form-text">{{ $t("gitUiRepositoryHelp") }}</p>
                     </div>
 
+                    <GitDeployKey v-if="deployKeySource" :key="endpoint" :endpoint="endpoint" :source="deployKeySource" />
+
                     <div class="field-pair">
                         <div class="field">
                             <label for="git-branch" class="form-label">{{ $t("gitUiBranch") }}</label>
@@ -121,7 +123,8 @@ import { defineComponent } from "vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
 import EnvFromExample from "../components/EnvFromExample.vue";
-import { isSafeGitRepository, stackNameFromRepository } from "../git-ui";
+import GitDeployKey from "../components/GitDeployKey.vue";
+import { isSafeGitRepository, isSshRepository, stackNameFromRepository } from "../git-ui";
 import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
 import type { GitSaveResult } from "../../../common/types/stack-git";
 
@@ -135,7 +138,8 @@ const CLONE_REQUEST_TIMEOUT_MS = 15 * 60_000;
 export default defineComponent({
     components: { InterfaceIcon,
         CreateStackSheet,
-        EnvFromExample },
+        EnvFromExample,
+        GitDeployKey },
     /**
      * Hold the person on the page while a checkout is being created
      * @param this The page, which the router types without its own fields
@@ -175,6 +179,12 @@ export default defineComponent({
             const name = this.name.trim();
             return this.$root.canManageStacks && !this.busy && !this.uncertain && this.sourceReady
                 && /^[a-z0-9][a-z0-9_-]*$/.test(name) && name.length <= this.maxNameLength;
+        },
+        // A deploy key works over SSH only; for HTTP(S) there is nothing to offer
+        deployKeySource() {
+            const repository = this.repository.trim();
+            return this.$root.canManageStacks && isSafeGitRepository(repository) && isSshRepository(repository)
+                && this.$root.agentStatusList[this.endpoint] === "online" ? { repository } : null;
         },
         maxNameLength() {
             return MAX_STACK_NAME_LENGTH;

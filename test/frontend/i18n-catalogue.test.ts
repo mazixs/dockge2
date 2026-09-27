@@ -222,7 +222,7 @@ test("the server sends keys, not sentences, to the toast", () => {
     // key is translated all the same and the reader is shown "{max}" where a number belongs
     const catalogueEn = catalogue("en");
     const placeholders = new Set(Object.entries(catalogueEn)
-        .filter(([ , value ]) => typeof value === "string" && /\{[^}]+\}/.test(value))
+        .filter(([ , value ]) => typeof value === "string" && /\{[^}']+\}/.test(value))
         .map(([ key ]) => key));
     const unfilled : string[] = [];
 
@@ -288,4 +288,17 @@ test("a message an older server sends still finds its entry", async () => {
     }
     assert.equal(currentMessageKey("saved"), "saved");
     assert.equal(currentMessageKey("constructor"), "constructor");
+});
+
+test("every message compiles, so none fails only when it is shown", async () => {
+    const { baseCompile } = await import("@intlify/message-compiler");
+    const failures : string[] = [];
+    for (const code of [ "en", ...fileCodes() ]) {
+        const messages = catalogue(code);
+        for (const key of keysOf(messages)) {
+            const message = key.split(".").reduce<unknown>((branch, part) => (branch as Record<string, unknown>)[part], messages);
+            baseCompile(String(message), { onError: (error) => failures.push(`${code} ${key}: ${error.message}`) });
+        }
+    }
+    assert.deepEqual(failures, []);
 });
