@@ -25,6 +25,8 @@ export interface SpawnOptions extends NodeSpawnOptions {
      * to hold for everything the call created.
      */
     killProcessGroup?: boolean;
+    /** Written to the standard input, which is then closed */
+    input?: string | Buffer;
 }
 
 export interface ChildProcessResult {
@@ -87,6 +89,7 @@ export function spawn(command: string, args: readonly string[], options: SpawnOp
         killGraceMs,
         closeGraceMs,
         killProcessGroup,
+        input,
         ...childOptions
     } = options;
     // A command that starts its own children is signalled as a group, which only works
@@ -233,5 +236,11 @@ export function spawn(command: string, args: readonly string[], options: SpawnOp
         child.once("error", onError);
         child.once("close", onClose);
         child.on("exit", onExit);
+
+        if (input !== undefined) {
+            // A command that exits before reading everything breaks the pipe; its exit status says why
+            child.stdin?.on("error", () => {});
+            child.stdin?.end(input);
+        }
     });
 }

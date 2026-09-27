@@ -161,7 +161,7 @@ export const VIEWER_EVENTS = new Set([ "requestStackList", "serviceStatusList", 
 export const OPERATOR_EVENTS = new Set([
     ...VIEWER_EVENTS, "gitCloneStack", "gitListBranches", "gitPreviewUpdate", "gitDiscardPreview", "gitApplyUpdate", "deployStack", "saveStack", "deleteStack", "getStack", "startStack", "stopStack",
     "restartStack", "updateStack", "downStack", "stackUpdatePreview", "abortCompose", "getStackFiles",
-    "setStackFiles", "saveEnvFile", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
+    "setStackFiles", "saveEnvFile", "createEnvFromExample", "listSecrets", "revealSecret", "saveSecret", "deleteSecret",
     "bindSecret", "unbindSecret", "dockerStats", "startService", "stopService", "restartService", "updateService",
     "getDockerNetworkList", "stackRelations", "inspectContainer", "controlContainer", "terminalInput", "mainTerminal", "checkMainTerminal", "interactiveTerminal",
     "terminalJoin", "terminalLeave", "joinCombinedTerminal", "leaveCombinedTerminal", "terminalResize",

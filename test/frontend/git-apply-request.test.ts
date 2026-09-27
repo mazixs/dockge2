@@ -15,6 +15,7 @@ import { componentOptions } from "../helpers/sfc";
 const context : Record<string, unknown> = {
     canApplyGitChoices,
     diffLineRows,
+    EnvFromExample: {},
     ATTENTION,
     CREATED_FILE,
     CREATED_STACK,
@@ -44,6 +45,8 @@ interface ChangesContext extends Record<string, unknown> {
     applying : boolean;
     loading : boolean;
     failure : string;
+    refusal : string;
+    outcomeUnknown : boolean;
     result : unknown;
     preview : unknown;
     choices : Record<string, string>;
@@ -248,6 +251,27 @@ test("an apply that is refused says what the server said, not that the result is
     await settle();
 
     assert.equal(ctx.applying, false);
-    assert.equal(ctx.failure, "gitUiPreviewExpired");
+    assert.equal(ctx.refusal, "gitUiPreviewExpired");
+    assert.equal(ctx.failure, "");
     assert.equal(ctx.result, null);
+
+    // Nothing was written, so the same choice, or a changed one, may be applied again
+    // without reading every file from Git once more
+    ctx.apply(false);
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1]!.eventName, "gitApplyUpdate");
+    assert.equal(ctx.refusal, "");
+});
+
+test("after an apply with no answer the page offers to check again, not to apply again", async (t) => {
+    controlTime(t);
+    const { ctx, sent } = makePage();
+
+    ctx.apply(true);
+    t.mock.timers.tick(15 * 60_000);
+    await settle();
+    assert.equal(ctx.outcomeUnknown, true);
+
+    ctx.apply(true);
+    assert.equal(sent.filter((request) => request.eventName === "gitApplyUpdate").length, 1, "the files may already be written");
 });

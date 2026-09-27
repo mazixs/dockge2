@@ -43,7 +43,8 @@ npm-debug.log*
 *.tsbuildinfo
 .eslintcache
 .vite
-.claude/settings.local.json
+.claude/
+skills-lock.json
 
 
 # Private, versioned deployment state and stopped-data snapshots

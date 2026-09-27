@@ -525,6 +525,34 @@ export class DockerSocketHandler extends AgentSocketHandler {
             }
         });
 
+        agentSocket.on("createEnvFromExample", async (stackName : unknown, fileName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+                if (typeof(fileName) !== "string") {
+                    throw new ValidationError("File name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName);
+                const example = await stack.createEnvFromExample(fileName);
+
+                callbackResult({
+                    ok: true,
+                    msg: { key: "envCreatedFromExample",
+                        values: { file: fileName,
+                            example } },
+                    msgi18n: true,
+                }, callback);
+
+                runInBackground("stack list", () => server.sendStackList());
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         // Secret metadata is safe to list, the content never travels with it
         agentSocket.on("listSecrets", async (stackName : unknown, callback) => {
             try {

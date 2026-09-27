@@ -5,7 +5,7 @@ import { log } from "./log";
 import yaml from "yaml";
 import { DockgeSocket, fileExists, ValidationError } from "./util-server";
 import path from "path";
-import { emptyStackFileConfig, resolveStackFilePath, resolveStackFilePathSync, StackConfig } from "./stack-config";
+import { emptyStackFileConfig, findEnvExample, resolveStackFilePath, resolveStackFilePathSync, StackConfig } from "./stack-config";
 import { classifyStackFile } from "../common/stack-files";
 import type { SecretFileMeta, StackDTO, StackFileBaseline, StackFileConfig, StackFileInventory, StackFileReadIssue, StackSummaryDTO } from "../common/types/stack";
 import { hashStackFileContent, StackSelectionConflictError, type StackFileTarget, type StackWriteMetadata, StackWriteConflictError, writeStackFiles } from "./stack-write";
@@ -80,6 +80,31 @@ async function readStackFile(filePath : string) : Promise<{ content : string, co
         }
         return { content: "",
             code };
+    }
+}
+
+/**
+ * Read an env example as the text a new env file starts from.
+ * @param filePath Absolute path of the example inside the stack directory
+ * @param example Its name, for the error
+ * @returns The text, byte for byte
+ * @throws {ValidationError} If it is not a regular text file of at most 1 MB
+ */
+async function readEnvExample(filePath : string, example : string) : Promise<string> {
+    const handle = await fsAsync.open(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > 1024 * 1024) {
+            throw new ValidationError("envExampleNotText", { file: example });
+        }
+        const bytes = await handle.readFile();
+        const text = bytes.toString("utf-8");
+        if (bytes.includes(0) || !Buffer.from(text, "utf-8").equals(bytes)) {
+            throw new ValidationError("envExampleNotText", { file: example });
+        }
+        return text;
+    } finally {
+        await handle.close();
     }
 }
 
@@ -1405,6 +1430,51 @@ export class Stack {
         if (fileName === this.activeEnvFileName) {
             this._composeENV = content;
         }
+    }
+
+    /**
+     * Create an env file from the example the repository keeps next to it, and use it.
+     *
+     * Only on the user's request, never as a side effect of a clone: an example holds
+     * placeholder passwords and keys, and a stack started with them would only look
+     * configured. An existing file is never replaced. The new file joins the env files
+     * Compose interpolates and opens in the editor, as Compose would read `.env` itself.
+     * @param fileName Env file to create
+     * @returns Name of the example it was copied from
+     */
+    async createEnvFromExample(fileName : string) : Promise<string> {
+        if (classifyStackFile(fileName) !== "env") {
+            throw new ValidationError("stackFileNotEnv", { file: fileName });
+        }
+        const dir = this.path;
+
+        return withStackLock(dir, async () => {
+            await this.loadFileConfig();
+            const target = await resolveStackFilePath(dir, fileName);
+            if (await fileExists(target)) {
+                throw new ValidationError("envFileAlreadyExists", { file: fileName });
+            }
+            const example = await findEnvExample(dir, fileName);
+            if (!example) {
+                throw new ValidationError("envExampleNotFound", { file: fileName });
+            }
+            // The name is an accepted env file name and a fixed suffix, so it stays in the directory
+            const content = await readEnvExample(path.join(dir, example), example);
+            const adoption = await this.envAdoption(fileName, true);
+
+            await writeStackFiles(dir, [{ name: fileName,
+                content,
+                expectedHash: null,
+                mode: 0o600 }], { journalRoot: this.server.config.dataDir,
+                ...(adoption ? { metadata: adoption } : {}) });
+            if (adoption) {
+                this._fileConfig = adoption.after;
+            }
+            if (process.env.PUID && process.env.PGID) {
+                fs.chownSync(target, Number(process.env.PUID), Number(process.env.PGID));
+            }
+            return example;
+        });
     }
 
     /**

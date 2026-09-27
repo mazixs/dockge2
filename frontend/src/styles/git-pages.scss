@@ -67,6 +67,12 @@
         color: var(--state-failed);
     }
 
+    // Saved and waiting for the user to fill in the environment: not a failure
+    .notice.attention {
+        border-left-color: var(--state-attention);
+        color: var(--text-strong);
+    }
+
     // Итог действия: одна панель по центру с именем итога и одним выходом
     .result-card {
         display: flex;

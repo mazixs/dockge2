@@ -170,7 +170,8 @@ async function snapshot(dir: string): Promise<FileTree> {
                 if (current.ino !== stat.ino || !current.isFile()) {
                     throw new StackGitError("gitFilesChangedDuringCheck");
                 }
-                const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
+                // One byte more than the size, so a file that grew meanwhile is noticed
+                const buffer = Buffer.alloc(Math.min(current.size, MAX_FILE_BYTES) + 1);
                 const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
                 if (bytesRead > MAX_FILE_BYTES || current.size !== bytesRead) {
                     throw new StackGitError("gitFileSizeChangedDuringCheck");
@@ -345,12 +346,13 @@ export class StackGitWorkflow {
         return treeHash(await snapshot(dir));
     }
 
-    private async git(dir: string, args: string[], indexFile?: string): Promise<Buffer> {
+    private async git(dir: string, args: string[], indexFile?: string, input?: string, maxBuffer = MAX_BYTES): Promise<Buffer> {
         try {
             return await runGit(args, { cwd: dir,
                 allowLocalTransport: this.options.allowLocalTransport,
                 indexFile,
-                maxBuffer: MAX_BYTES,
+                input,
+                maxBuffer,
                 timeoutMs: 60_000 });
         } catch {
             throw new StackGitError("gitRemoteOperationFailed");
@@ -387,23 +389,50 @@ export class StackGitWorkflow {
         return (await this.git(dir, [ "rev-parse", "HEAD" ])).toString().trim();
     }
 
+    /**
+     * Read every file of a commit.
+     *
+     * The limits are checked on the sizes Git lists, before any content is read, and the
+     * contents come out of one `cat-file --batch`: a process per file made a repository of
+     * a few hundred files take most of a minute on a small server.
+     */
     private async tree(dir: string, commit: string): Promise<FileTree> {
-        const output = await this.git(dir, [ "ls-tree", "-rz", "--full-tree", commit ]);
-        const result: FileTree = new Map();
+        const output = await this.git(dir, [ "ls-tree", "-rlz", "--full-tree", commit ]);
+        const entries: { name: string, id: string, size: number, mode: number }[] = [];
         let bytes = 0;
         for (const entry of output.toString().split("\0").filter(Boolean)) {
-            const match = /^(\d+) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
+            const match = /^(\d+) blob ([a-f0-9]+) +(\d+)\t([\s\S]+)$/.exec(entry);
             if (!match || ![ "100644", "100755" ].includes(match[1]!)) {
                 throw new StackGitError("gitSubmodulesNotSupported");
             }
-            const name = match[3]!;
+            const name = match[4]!;
             safePath(name);
-            const content = await this.git(dir, [ "cat-file", "blob", match[2]! ]);
-            if (content.length > MAX_FILE_BYTES || (bytes += content.length) > MAX_BYTES || result.size >= MAX_FILES) {
+            const size = Number(match[3]);
+            if (size > MAX_FILE_BYTES || (bytes += size) > MAX_BYTES || entries.length >= MAX_FILES) {
                 throw new StackGitError("gitRepositoryTooLarge");
             }
-            result.set(name, { bytes: content,
+            entries.push({ name,
+                id: match[2]!,
+                size,
                 mode: match[1] === "100755" ? 0o755 : 0o644 });
+        }
+        const result: FileTree = new Map();
+        if (!entries.length) {
+            return result;
+        }
+        // Each object comes as "<id> blob <size>\n", the bytes and a newline
+        const batch = await this.git(dir, [ "cat-file", "--batch" ], undefined, entries.map((entry) => entry.id + "\n").join(""), bytes + entries.length * 128);
+        let offset = 0;
+        for (const entry of entries) {
+            const headerEnd = batch.indexOf(10, offset);
+            const header = headerEnd < 0 ? "" : batch.subarray(offset, headerEnd).toString();
+            const start = headerEnd + 1;
+            if (header !== `${entry.id} blob ${entry.size}` || batch[start + entry.size] !== 10) {
+                throw new StackGitError("gitOperationFailed");
+            }
+            result.set(entry.name, { bytes: batch.subarray(start, start + entry.size),
+                mode: entry.mode });
+            offset = start + entry.size + 1;
         }
         return result;
     }
@@ -584,8 +613,13 @@ export class StackGitWorkflow {
         }
     }
 
-    /** Validate the selected result, recheck every file and restore bytes if a write fails. */
-    async apply(dir: string, input: GitApplyInput, config: StackFileConfig): Promise<{ filesHash: string }> {
+    /**
+     * Validate the selected result, recheck every file and restore bytes if a write fails.
+     *
+     * As with a clone, an environment that is not filled in yet does not keep the chosen
+     * files off the disk: the reason is returned, and only starting has to wait for it.
+     */
+    async apply(dir: string, input: GitApplyInput, config: StackFileConfig): Promise<{ filesHash: string, pending?: StackGitError }> {
         return this.exclusive(dir, async () => {
             const preview = this.previews.get(input.previewId);
             if (!preview || preview.owner !== this.owner || preview.dir !== dir || Date.now() - preview.createdAt > PREVIEW_MS) {
@@ -601,9 +635,15 @@ export class StackGitWorkflow {
                 throw new StackGitError("gitResultTooLarge");
             }
             const stage = await fs.mkdtemp(path.join(os.tmpdir(), "dockge-git-validate-"));
+            let pending: StackGitError | undefined;
             try {
                 await writeTree(stage, result);
                 await this.options.validate(stage, config);
+            } catch (error) {
+                if (!isDeferrable(error)) {
+                    throw error;
+                }
+                pending = error;
             } finally {
                 await fs.rm(stage, { recursive: true,
                     force: true });
@@ -611,7 +651,8 @@ export class StackGitWorkflow {
             await this.assertRepository(dir);
             await this.write(dir, preview, result, changed);
             this.previews.delete(input.previewId);
-            return { filesHash: treeHash(result) };
+            return { filesHash: treeHash(result),
+                ...(pending ? { pending } : {}) };
         });
     }
 

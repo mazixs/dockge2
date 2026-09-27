@@ -108,8 +108,10 @@
         <section v-else class="result-card" role="status">
             <h2>{{ $t(result.deployed ? "gitUiCreatedDeployed" : "gitUiCreatedSaved", [ result.stackName ]) }}</h2>
             <p v-if="result.deploymentError" class="notice failure">{{ $root.serverText(result.deploymentError, "gitUiDeploymentFailedSaved") }}</p>
+            <p v-else-if="result.notStarted" class="notice attention">{{ $root.serverText(result.notStarted, "gitUiSavedDescription") }}</p>
             <p v-else>{{ $t(result.deployed ? "gitUiDeployComplete" : "gitUiSavedDescription") }}</p>
-            <router-link class="btn btn-primary" :to="stackPath(result.stackName)">{{ $t("gitUiOpenStack") }}</router-link>
+            <EnvFromExample v-if="result.envExamples?.length" :endpoint="endpoint" :stack-name="result.stackName" :examples="result.envExamples" />
+            <router-link class="btn" :class="result.envExamples?.length ? 'btn-normal' : 'btn-primary'" :to="stackPath(result.stackName)">{{ $t("gitUiOpenStack") }}</router-link>
         </section>
     </div>
 </template>
@@ -118,6 +120,7 @@
 import { defineComponent } from "vue";
 import InterfaceIcon from "../components/InterfaceIcon.vue";
 import CreateStackSheet from "../components/CreateStackSheet.vue";
+import EnvFromExample from "../components/EnvFromExample.vue";
 import { isSafeGitRepository, stackNameFromRepository } from "../git-ui";
 import { MAX_STACK_NAME_LENGTH } from "../../../common/util-common";
 import type { GitSaveResult } from "../../../common/types/stack-git";
@@ -131,7 +134,8 @@ const CLONE_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
 export default defineComponent({
     components: { InterfaceIcon,
-        CreateStackSheet },
+        CreateStackSheet,
+        EnvFromExample },
     /**
      * Hold the person on the page while a checkout is being created
      * @param this The page, which the router types without its own fields

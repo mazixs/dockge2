@@ -2746,3 +2746,37 @@ least 1 argument" on an installation that was never updated. Both image commands
 
 Not in this release: an interrupted fresh installation still cannot be repeated without removing
 `.env` and `.dockge2` by hand, see the implementation plan.
+
+### 2026-09-27: a Git stack whose env file is not in Git
+
+The owner created a stack from a public repository whose Compose file has `env_file: .env` and
+whose repository carries only `.env.example`. Compose refused the missing file, the error was not
+one the clone defers, and the panel said "Compose did not pass the check. Check the Compose file
+and the selected env files" on a screen that selects no env files.
+
+- A missing `env_file` is now the same case as a variable nothing sets: the files are published,
+  the stack is saved and not started, and the result names the file and, when the repository has
+  one, its example (`.example`, `.sample`, `.dist`, `.template`).
+- The name is taken from Compose's `env file <path> not found` and reported only when it resolves to
+  a plain relative path inside the checkout; its real path counts too. Anything else stays in the
+  panel's log, as Docker output may carry credentials.
+- The example is never copied as a side effect: examples carry placeholder passwords and keys, and
+  a stack started with them would look configured. The result offers "Create .env from
+  .env.example" instead. It refuses to replace an existing file, copies only a regular UTF-8 file of
+  at most 1 MB, writes `0600`, adds the new file to the env files Compose interpolates (as Compose
+  would read `.env` itself) and opens the stack's files.
+- Applying an update behaves as a clone: an environment that is not filled in no longer refuses the
+  chosen files. They are written, the result reports `notStarted` in the attention style instead of
+  a deployment error, and "Apply and deploy" no longer ends in a refusal that sends the user back to
+  the same comparison. A `--env-file` that is gone is recognised too (`couldn't find env file`).
+- Reading a commit takes one `git cat-file --batch` instead of a process per file; the limits are
+  checked on the sizes `ls-tree -l` lists before any content is read. A repository of a few hundred
+  files went from about 6 s to 0.8 s per comparison.
+- The generic "not accepted" message no longer mentions selected env files, and the Git guide no
+  longer says the New stack screen chooses them.
+
+A Docker integration test pins the wording of Compose's error.
+
+Not changed: an env file created later on the stack page is used by the services through
+`env_file`. With a global env file present, it joins the variable substitution only when it is
+chosen among the stack's env files, as before: `--env-file` turns off Compose's own `.env`.

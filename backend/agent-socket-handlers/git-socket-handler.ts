@@ -4,13 +4,14 @@ import { AgentSocketHandler } from "../agent-socket-handler";
 import type { DockgeServer } from "../dockge-server";
 import { callbackError, callbackResult, checkLogin, type DockgeSocket } from "../util-server";
 import { Stack } from "../stack";
-import { StackConfig, emptyStackFileConfig } from "../stack-config";
+import { StackConfig, emptyStackFileConfig, findEnvExample } from "../stack-config";
 import { StackGitError, StackGitWorkflow } from "../stack-git";
 import { spawn } from "../child-process";
 import { composeArgs } from "../compose-args";
 import type { AgentSocket } from "../../common/agent-socket";
 import type { AgentRequestContract } from "../../common/agent-events";
-import type { GitApplyInput, GitCloneInput, GitMessage, GitSaveResult } from "../../common/types/stack-git";
+import type { GitApplyInput, GitCloneInput, GitEnvExample, GitMessage, GitSaveResult } from "../../common/types/stack-git";
+import { classifyStackFile } from "../../common/stack-files";
 import type { StackFileConfig } from "../../common/types/stack";
 import { runInBackground } from "../background";
 import { log } from "../log";
@@ -29,20 +30,32 @@ const MISSING_VARIABLE = /required variable ([A-Za-z_][A-Za-z0-9_]{0,62}) is mis
 /** At most this many names are named; the rest is a list nobody reads anyway. */
 const MAX_REPORTED_VARIABLES = 12;
 
+/** A service's `env_file` that is not there. Compose names it by its absolute path. */
+const MISSING_ENV_FILE = /env file (\/[^\n]*?) not found|couldn't find env file: (\/[^\n]*)/g;
+
+/** A plain relative name inside the checkout, the only form reported to the browser. */
+const REPORTABLE_FILE = /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
+
 /**
  * Compose is complete but the environment it reads is not filled in yet.
  *
  * A repository almost never carries its own `.env` - it is in `.gitignore`, next to an
- * `.env.example`. A compose file that reads `${VAR:?}` therefore cannot pass a check
- * immediately after cloning, and that is an unfinished environment rather than a broken
- * file. The files are worth keeping: the variables are set in them.
+ * `.env.example`. A compose file that reads `${VAR:?}`, or a service with `env_file: .env`,
+ * therefore cannot pass a check immediately after cloning, and that is an unfinished
+ * environment rather than a broken file. The files are worth keeping: the variables are set
+ * in them.
  */
 export class ComposeEnvironmentError extends StackGitError {
     /** Saving may go ahead. Only starting the stack has to wait for the variables. */
     readonly deferrable = true;
 
-    constructor(readonly variables: string[]) {
-        super("gitComposeNeedsVariables");
+    /**
+     * @param variables Variables the compose file requires and nothing sets
+     * @param envFiles Files services read with `env_file` that are not there
+     * @param examples Examples the repository carries for those files
+     */
+    constructor(readonly variables: string[], readonly envFiles: string[] = [], readonly examples: GitEnvExample[] = []) {
+        super(envFiles.length ? "gitComposeNeedsEnvFile" : "gitComposeNeedsVariables", envFiles.length ? { files: envFiles.join(", ") } : undefined);
     }
 }
 
@@ -60,6 +73,70 @@ export function missingVariables(error: unknown): string[] {
         }
     }
     return [ ...names ];
+}
+
+/**
+ * Env files services read with `env_file` that the checkout does not have.
+ *
+ * Only a name inside the checkout is taken, so the path of the staging directory stays on
+ * the server.
+ * @param error Failure of `docker compose config`
+ * @param directory The checkout Compose was run in
+ * @returns Names relative to the checkout
+ */
+export async function missingEnvFiles(error: unknown, directory: string): Promise<string[]> {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr !== "string") {
+        return [];
+    }
+    // Compose may print the directory with its symlinks resolved
+    const roots = [ directory, await fs.realpath(directory).catch(() => directory) ];
+    const names = new Set<string>();
+    for (const [ , serviceFile, selectedFile ] of stderr.matchAll(MISSING_ENV_FILE)) {
+        const file = (serviceFile ?? selectedFile) as string;
+        const name = roots.map((root) => path.relative(root, file))
+            .find((relative) => relative.length <= 200 && REPORTABLE_FILE.test(relative) && !relative.split("/").some((part) => part === "." || part === ".."));
+        if (name) {
+            names.add(name);
+        }
+        if (names.size >= MAX_REPORTED_VARIABLES) {
+            break;
+        }
+    }
+    return [ ...names ];
+}
+
+/** The example the checkout carries for each missing env file that has one. */
+async function examplesOf(directory: string, files: string[]): Promise<GitEnvExample[]> {
+    const found: GitEnvExample[] = [];
+    for (const file of files) {
+        const example = await findEnvExample(directory, file);
+        if (example) {
+            found.push({ file,
+                example });
+        }
+    }
+    return found;
+}
+
+/** Examples the stack page can copy: only env files at the root of the stack qualify. */
+function copyableExamples(pending: StackGitError | undefined): GitEnvExample[] {
+    return pending instanceof ComposeEnvironmentError ? pending.examples.filter(({ file }) => classifyStackFile(file) === "env") : [];
+}
+
+/** What the result card says about a stack saved without its environment. */
+function environmentMessage(pending: ComposeEnvironmentError): GitMessage {
+    if (!pending.envFiles.length) {
+        return { key: "gitSavedNeedsVariables",
+            values: { variables: pending.variables.join(", ") } };
+    }
+    const files = pending.envFiles.join(", ");
+    return pending.examples.length
+        ? { key: "gitSavedNeedsEnvFileFromExample",
+            values: { files,
+                example: pending.examples.map(({ example }) => example).join(", ") } }
+        : { key: "gitSavedNeedsEnvFile",
+            values: { files } };
 }
 
 /**
@@ -105,9 +182,10 @@ async function validate(directory: string, config: StackFileConfig, stacksDir: s
         if (error instanceof StackGitError) {
             throw error;
         }
-        const missing = missingVariables(error);
-        if (missing.length) {
-            throw new ComposeEnvironmentError(missing);
+        const variables = missingVariables(error);
+        const envFiles = await missingEnvFiles(error, directory);
+        if (variables.length || envFiles.length) {
+            throw new ComposeEnvironmentError(variables, envFiles, await examplesOf(directory, envFiles));
         }
         log.warn("git", `The compose check refused the files: ${logSafeReason(error)}`);
         throw new StackGitError("gitComposeInvalid");
@@ -127,10 +205,10 @@ function safeError(error: unknown): Error {
     return error instanceof StackGitError ? error : new StackGitError("gitOperationFailed");
 }
 
-/** Report saving and deploying separately: a deployment failure does not undo saved files. */
-async function result(server: DockgeServer, socket: DockgeSocket, name: string, deploy: boolean, notStarted?: GitMessage): Promise<GitSaveResult> {
+/** Report saving and deploying separately: a deployment failure does not undo saved files, and files waiting for their environment are not started. */
+async function result(server: DockgeServer, socket: DockgeSocket, name: string, deploy: boolean, notStarted?: GitMessage, envExamples: GitEnvExample[] = []): Promise<GitSaveResult> {
     let deployed = false;
-    let deploymentError: GitMessage | undefined = notStarted;
+    let deploymentError: GitMessage | undefined;
     if (deploy && !notStarted) {
         try {
             const stack = await Stack.getStack(server, name);
@@ -145,7 +223,9 @@ async function result(server: DockgeServer, socket: DockgeSocket, name: string, 
     return { stackName: name,
         saved: true,
         deployed,
-        ...(deploymentError ? { deploymentError } : {}) };
+        ...(deploymentError ? { deploymentError } : {}),
+        ...(notStarted ? { notStarted } : {}),
+        ...(envExamples.length ? { envExamples } : {}) };
 }
 
 /** Git events use the same agent routing and role gates as other stack mutations. */
@@ -168,19 +248,17 @@ export class GitSocketHandler extends AgentSocketHandler {
                 try {
                     await StackConfig.set(input.name, config);
                 } catch {
-                    const saved = await result(server, socket, input.name, false, { key: "gitSelectionNotStored" });
+                    const saved = await result(server, socket, input.name, false);
                     callbackResult({ ok: true,
-                        ...saved }, callback);
+                        ...saved,
+                        deploymentError: { key: "gitSelectionNotStored" } }, callback);
                     return;
                 }
                 // The checkout is on the server either way. Starting it is what waits for
                 // the variables, and they are set in the files that were just saved.
-                const notStarted = pending instanceof ComposeEnvironmentError
-                    ? { key: "gitSavedNeedsVariables",
-                        values: { variables: pending.variables.join(", ") } }
-                    : undefined;
+                const notStarted = pending instanceof ComposeEnvironmentError ? environmentMessage(pending) : undefined;
                 callbackResult({ ok: true,
-                    ...await result(server, socket, input.name, input.deploy, notStarted) }, callback);
+                    ...await result(server, socket, input.name, input.deploy, notStarted, copyableExamples(pending)) }, callback);
             } catch (error) {
                 callbackError(safeError(error), callback);
             }
@@ -237,9 +315,10 @@ export class GitSocketHandler extends AgentSocketHandler {
                 }
                 const dir = Stack.getSafePath(server, input.stackName);
                 const { config } = await StackConfig.inventory(dir, input.stackName);
-                await getStackGitWorkflow(server).apply(dir, input, config);
+                const { pending } = await getStackGitWorkflow(server).apply(dir, input, config);
+                const notStarted = pending instanceof ComposeEnvironmentError ? environmentMessage(pending) : undefined;
                 callbackResult({ ok: true,
-                    ...await result(server, socket, input.stackName, input.deploy) }, callback);
+                    ...await result(server, socket, input.stackName, input.deploy, notStarted, copyableExamples(pending)) }, callback);
             } catch (error) {
                 callbackError(safeError(error), callback);
             }

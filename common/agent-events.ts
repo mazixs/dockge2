@@ -126,6 +126,7 @@ export interface AgentRequestContract {
         result : AgentResponse<{ config : StackFileConfig }>;
     };
     saveEnvFile : { args : [ stackName : string, fileName : string, content : string ]; result : AgentDone };
+    createEnvFromExample : { args : [ stackName : string, fileName : string ]; result : AgentDone };
     listSecrets : { args : [ stackName : string ]; result : AgentResponse<{ secretFiles : SecretFileMeta[] }> };
     revealSecret : {
         args : [ stackName : string, fileName : string, currentPassword : string ];
@@ -249,6 +250,7 @@ const REQUEST_NAMES : Record<AgentRequestName, true> = {
     getStackFiles: true,
     setStackFiles: true,
     saveEnvFile: true,
+    createEnvFromExample: true,
     listSecrets: true,
     revealSecret: true,
     saveSecret: true,

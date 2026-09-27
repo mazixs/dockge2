@@ -43,6 +43,8 @@ export interface GitCommandOptions {
     /** Largest output accepted before the call is treated as a failure */
     maxBuffer : number;
     timeoutMs : number;
+    /** Written to the standard input of the call */
+    input? : Buffer | string | undefined;
 }
 
 /**
@@ -97,6 +99,7 @@ export async function runGit(args : readonly string[], options : GitCommandOptio
         encoding: "buffer",
         maxBuffer: options.maxBuffer,
         timeoutMs: options.timeoutMs,
+        ...(options.input !== undefined ? { input: options.input } : {}),
     });
 
     return Buffer.from(result.stdout ?? "");

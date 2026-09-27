@@ -48,10 +48,20 @@ export interface GitMessage {
     values?: Record<string, string>;
 }
 
+/** An env file a service reads, and the example the repository carries for it */
+export interface GitEnvExample {
+    file: string;
+    example: string;
+}
+
 export interface GitSaveResult {
     stackName: string;
     saved: true;
     deployed: boolean;
-    /** Why the stack is not running. Absent when it started. */
+    /** Why the deployment failed. Absent when it started or was not asked for. */
     deploymentError?: GitMessage | string;
+    /** Why the saved files were not started: their environment is not filled in yet */
+    notStarted?: GitMessage;
+    /** Missing env files the stack can create from an example, on the user's request */
+    envExamples?: GitEnvExample[];
 }

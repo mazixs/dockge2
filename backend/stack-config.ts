@@ -54,6 +54,25 @@ export async function resolveStackFilePath(stackDir : string, fileName : string)
     return resolved;
 }
 
+/** What a repository keeps in Git next to the env file it leaves out */
+const ENV_EXAMPLE_SUFFIXES = [ ".example", ".sample", ".dist", ".template" ];
+
+/**
+ * The example a directory carries for an env file, such as `.env.example` for `.env`.
+ * @param dir Directory to look in
+ * @param fileName Env file, relative to the directory
+ * @returns Name of the first example that is a regular file, relative to the directory
+ */
+export async function findEnvExample(dir : string, fileName : string) : Promise<string | undefined> {
+    for (const suffix of ENV_EXAMPLE_SUFFIXES) {
+        const stat = await fsAsync.lstat(path.join(dir, fileName + suffix)).catch(() => undefined);
+        if (stat?.isFile()) {
+            return fileName + suffix;
+        }
+    }
+    return undefined;
+}
+
 /**
  * Same barrier as resolveStackFilePath(), for the synchronous read paths.
  * @param stackDir Directory of the stack

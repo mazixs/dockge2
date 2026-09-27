@@ -17,9 +17,11 @@
         <section v-if="result" class="result-card" role="status">
             <h2>{{ $t(result.deployed ? "gitUiUpdateDeployed" : "gitUiUpdateSaved") }}</h2>
             <p v-if="result.deploymentError" class="notice failure">{{ $root.serverText(result.deploymentError, "gitUiDeploymentFailedSaved") }}</p>
+            <p v-else-if="result.notStarted" class="notice attention">{{ $root.serverText(result.notStarted, "gitUiUpdateSavedDescription") }}</p>
             <p v-else>{{ $t(result.deployed ? "gitUiDeployComplete" : "gitUiUpdateSavedDescription") }}</p>
             <p v-if="hasLocalChoice">{{ $t("gitUiLocalRemains") }}</p>
-            <router-link class="btn btn-primary" :to="stackPath">{{ $t("gitUiOpenStack") }}</router-link>
+            <EnvFromExample v-if="result.envExamples?.length" :endpoint="endpoint" :stack-name="stackName" :examples="result.envExamples" />
+            <router-link class="btn" :class="result.envExamples?.length ? 'btn-normal' : 'btn-primary'" :to="stackPath">{{ $t("gitUiOpenStack") }}</router-link>
         </section>
         <template v-else-if="preview && !loading">
             <div class="change-context">
@@ -105,10 +107,11 @@
                         <p v-if="hasLocalChoice" class="local-remains">{{ $t("gitUiLocalRemains") }}</p>
                     </div>
                     <div v-if="applying" class="notice" role="status">{{ $t("gitUiApplying") }}</div>
+                    <div v-else-if="refusal" class="notice failure" role="alert">{{ refusal }}</div>
                     <div class="review-actions">
                         <button class="btn btn-normal" type="button" :disabled="applying" @click="review = false">← {{ $t("gitUiBackComparison") }}</button>
-                        <button class="btn btn-normal" type="button" :disabled="applying || !ready || Boolean(failure)" @click="apply(false)">{{ $t("saveWithoutStarting") }}</button>
-                        <button class="btn btn-primary" type="button" :disabled="applying || !ready || Boolean(failure)" @click="apply(true)">{{ $t("gitUiApplyDeploy") }}</button>
+                        <button class="btn btn-normal" type="button" :disabled="applying || !ready || outcomeUnknown" @click="apply(false)">{{ $t("saveWithoutStarting") }}</button>
+                        <button class="btn btn-primary" type="button" :disabled="applying || !ready || outcomeUnknown" @click="apply(true)">{{ $t("gitUiApplyDeploy") }}</button>
                     </div>
                 </section>
                 <aside class="review-aside">
@@ -124,6 +127,7 @@
 <script lang="ts">
 import { defineComponent } from "vue";
 import { canApplyGitChoices, diffLineRows } from "../git-ui";
+import EnvFromExample from "../components/EnvFromExample.vue";
 import { ATTENTION, CREATED_FILE, CREATED_STACK, EXITED, RUNNING, isStackFailed } from "../../../common/util-common";
 import type { GitFileChoice, GitPreviewFile, GitSaveResult, GitUpdatePreview } from "../../../common/types/stack-git";
 import type { StackSummaryDTO, ViewerStackSummary } from "../../../common/types/stack";
@@ -141,6 +145,7 @@ type DiffLine = ReturnType<typeof diffLineRows>[number];
 const APPLY_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
 export default defineComponent({
+    components: { EnvFromExample },
     /**
      * Hold the person on the page while the files are being applied
      * @param this The page, which the router types without its own fields
@@ -161,6 +166,10 @@ export default defineComponent({
             loading: false,
             applying: false,
             failure: "",
+            /** Why the server refused the last apply; nothing was written, so it may be tried again */
+            refusal: "",
+            /** The last apply got no answer: it may have written the files, so it is not offered again */
+            outcomeUnknown: false,
             review: false,
             result: null as GitSaveResult | null,
             requestVersion: 0,
@@ -221,6 +230,7 @@ export default defineComponent({
         "$root.socketIO.connected"(connected : boolean) {
             if (!connected && this.applying) {
                 this.applying = false;
+                this.outcomeUnknown = true;
                 this.failure = this.$t("gitUiResultUnknown");
             }
         },
@@ -317,6 +327,8 @@ export default defineComponent({
             this.editedContents = {};
             this.review = false;
             this.result = null;
+            this.refusal = "";
+            this.outcomeUnknown = false;
             const endpoint = this.endpoint;
             const stackName = this.stackName;
             this.$root.emitAgentRequest(endpoint, "gitPreviewUpdate", [ stackName ], { timeoutMs: 90_000 }).then((res) => {
@@ -342,10 +354,11 @@ export default defineComponent({
          * @param deploy Whether the stack is started once the files are written
          */
         apply(deploy : boolean) : void {
-            if (!this.ready || this.applying || this.failure || !this.preview) {
+            if (!this.ready || this.applying || this.outcomeUnknown || !this.preview) {
                 return;
             }
             this.applying = true;
+            this.refusal = "";
             const version = ++this.requestVersion;
             this.$root.emitAgentRequest(this.endpoint, "gitApplyUpdate", [{
                 stackName: this.stackName,
@@ -360,9 +373,15 @@ export default defineComponent({
                 this.applying = false;
 
                 if (!res?.ok) {
-                    // Подтверждения не было: файлы могли быть записаны, а стек - переподнят.
-                    // Страница не повторяет применение, а предлагает перечитать изменения
-                    this.failure = res?.unknown ? this.$t("gitUiResultUnknown") : this.$root.serverText(res?.msg, "gitUiRequestFailed");
+                    if (res?.unknown) {
+                        // Подтверждения не было: файлы могли быть записаны, а стек - переподнят.
+                        // Страница не повторяет применение, а предлагает перечитать изменения
+                        this.outcomeUnknown = true;
+                        this.failure = this.$t("gitUiResultUnknown");
+                    } else {
+                        // Refused before anything was written: the choice stays, to be changed and applied again
+                        this.refusal = this.$root.serverText(res?.msg, "gitUiRequestFailed");
+                    }
                     return;
                 }
                 this.failure = "";

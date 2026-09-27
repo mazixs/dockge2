@@ -195,6 +195,58 @@ test("apply uses per-file choices, preserves local bytes and marks them dirty ag
     assert.equal(f.validations(), 2);
 });
 
+test("an update whose environment is not filled in yet is written, and only an unreadable one is refused", async (t) => {
+    // The new commit may read a variable or an env file the server does not have yet. The
+    // chosen files are still what the user decided on, and the variables go into them
+    const f = await fixture(t);
+    await f.update();
+    class NeedsEnvironment extends StackGitError {
+        readonly deferrable = true;
+    }
+    const pendingError = new NeedsEnvironment("needs variables");
+    let failure: Error = pendingError;
+    const workflow = new StackGitWorkflow({ allowLocalTransport: true,
+        validate: async () => {
+            throw failure;
+        } });
+    failure = new StackGitError("gitComposeInvalid");
+    const refused = await workflow.preview(f.stack, config);
+    await assert.rejects(workflow.apply(f.stack, { stackName: "stack",
+        previewId: refused.id,
+        choices: choices(refused),
+        deploy: false }, config), /gitComposeInvalid/);
+    assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), compose);
+    failure = pendingError;
+    const preview = await workflow.preview(f.stack, config);
+    const result = await workflow.apply(f.stack, { stackName: "stack",
+        previewId: preview.id,
+        choices: choices(preview),
+        deploy: true }, config);
+    assert.equal(result.pending, pendingError);
+    assert.equal(await fs.readFile(path.join(f.stack, "compose.yaml"), "utf8"), updatedCompose);
+    assert.equal(git(f.stack, "rev-parse", "HEAD"), preview.targetCommit);
+});
+
+test("a commit is read in one pass, with the limits checked on the sizes Git lists", async (t) => {
+    const f = await fixture(t);
+    await fs.writeFile(path.join(f.upstream, "empty.txt"), "");
+    await fs.writeFile(path.join(f.upstream, "binary.bin"), Buffer.from([ 0, 10, 255, 10, 0 ]));
+    git(f.upstream, "add", ".");
+    git(f.upstream, "commit", "-m", "odd files");
+    const preview = await f.workflow.preview(f.stack, config);
+    const result = await f.workflow.apply(f.stack, { stackName: "stack",
+        previewId: preview.id,
+        choices: choices(preview),
+        deploy: false }, config);
+    assert.ok(result.filesHash);
+    assert.equal((await fs.readFile(path.join(f.stack, "empty.txt"))).length, 0);
+    assert.deepEqual([ ...await fs.readFile(path.join(f.stack, "binary.bin")) ], [ 0, 10, 255, 10, 0 ]);
+    await fs.writeFile(path.join(f.upstream, "large.bin"), Buffer.alloc(1024 * 1024 + 1));
+    git(f.upstream, "add", ".");
+    git(f.upstream, "commit", "-m", "too large");
+    await assert.rejects(f.workflow.preview(f.stack, config), /gitRepositoryTooLarge/);
+});
+
 test("stale files and incomplete decisions reject before writing", async (t) => {
     const f = await fixture(t);
     await f.update();

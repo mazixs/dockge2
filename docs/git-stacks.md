@@ -8,12 +8,19 @@ the server copy is, and applies an update file by file, with you choosing each r
 1. New stack -> From Git. Enter the repository address and the branch; "List branches" asks the
    repository for them.
 2. Review and launch. Name the Compose file, or leave it empty to detect `compose.yaml`,
-   `compose.yml`, `docker-compose.yaml` or `docker-compose.yml` at the repository root, and choose
-   the env files.
+   `compose.yml`, `docker-compose.yaml` or `docker-compose.yml` at the repository root.
 3. Deploy, or save without starting to adjust the environment in the stack files first. The
    repository is cloned and Compose is validated before anything starts.
 
 The address is HTTP(S), `ssh://` or `git@host:path`, with no password or token in it.
+
+A repository often leaves its env file out of Git and carries an example instead, such as
+`.env.example` next to a service with `env_file: .env`. Such a stack is saved but not started, and
+the result names the file to create and its example. "Create .env from .env.example" copies the
+example with `0600` permissions and opens the stack's files: replace the example's values with your
+own and start the stack. The same goes for a variable the Compose file requires and nothing sets.
+An update applied with "Apply and deploy" behaves the same way: the chosen files are written, and
+the stack is not started until its environment is filled in.
 
 ## Update a stack
 

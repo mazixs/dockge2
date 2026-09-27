@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { AgentSocket } from "../../common/agent-socket";
@@ -182,6 +182,64 @@ test("stack file events reject wrong types with a type error, not by accident", 
 
         // None of the refused calls touched the env file
         assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "BASE=1\n");
+    });
+});
+
+test("an env file is created from its example only when asked, and never over an existing file", async () => {
+    await withDatabase(async ({ stacksDir, dataDir }) => {
+        const cookie = await createTestAccount("example-admin@example.com");
+        const stackDir = path.join(stacksDir, "example-stack");
+        await mkdir(stackDir);
+        await writeFile(path.join(stackDir, "compose.yaml"), composeYAML);
+        await writeFile(path.join(stackDir, ".env.example"), "PASSWORD=change-me\n");
+        await writeFile(path.join(stackDir, "app.env.sample"), "MODE=demo\n");
+        await writeFile(path.join(stackDir, "outside.txt"), "not an example\n");
+        await symlink(path.join(stackDir, "outside.txt"), path.join(stackDir, "linked.env.example"));
+
+        const socket = makeAuthenticatedSocket({ cookie });
+        const server = { stacksDir,
+            config: { dataDir },
+            sendStackList: () => undefined } as unknown as DockgeServer;
+        const agentSocket = new AgentSocket();
+        new DockerSocketHandler().create(socket, server, agentSocket);
+
+        const created = await call(agentSocket, "createEnvFromExample", "example-stack", ".env");
+        assert.equal(created.ok, true, JSON.stringify(created));
+        assert.deepEqual(created.msg, { key: "envCreatedFromExample",
+            values: { file: ".env",
+                example: ".env.example" } });
+        assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "PASSWORD=change-me\n");
+        // It is about to hold real credentials
+        assert.equal((await stat(path.join(stackDir, ".env"))).mode & 0o777, 0o600);
+        // Compose interpolates the new file, and the editor opens on it
+        const files = await call(agentSocket, "getStackFiles", "example-stack");
+        const selection = files.inventory?.config as { envFileNames : string[], activeEnvFileName : string };
+        assert.deepEqual(selection.envFileNames, [ ".env" ]);
+        assert.equal(selection.activeEnvFileName, ".env");
+
+        await writeFile(path.join(stackDir, ".env"), "PASSWORD=mine\n");
+        const again = await call(agentSocket, "createEnvFromExample", "example-stack", ".env");
+        assert.equal(again.ok, false);
+        assert.match(JSON.stringify(again.msg), /envFileAlreadyExists/);
+        assert.equal(await readFile(path.join(stackDir, ".env"), "utf8"), "PASSWORD=mine\n");
+
+        const sample = await call(agentSocket, "createEnvFromExample", "example-stack", "app.env");
+        assert.equal(sample.ok, true, JSON.stringify(sample));
+        assert.equal(await readFile(path.join(stackDir, "app.env"), "utf8"), "MODE=demo\n");
+
+        for (const [ fileName, expected ] of [
+            [ "other.env", /envExampleNotFound/ ],
+            // A link is not an example: it could point anywhere on the server
+            [ "linked.env", /envExampleNotFound/ ],
+            [ "compose.yaml", /stackFileNotEnv/ ],
+            [ "../escape.env", /stackFileNotEnv/ ],
+        ] as const) {
+            const refused = await call(agentSocket, "createEnvFromExample", "example-stack", fileName);
+            assert.equal(refused.ok, false, fileName);
+            assert.match(JSON.stringify(refused.msg), expected, fileName);
+        }
+        await assert.rejects(access(path.join(stackDir, "linked.env")));
+        await assert.rejects(access(path.join(stackDir, "other.env")));
     });
 });
 
