@@ -18,6 +18,7 @@ tmp
 certs
 docker-compose.override.yml
 .claude
+.impeccable
 skills-lock.json
 
 # Local review artefacts and the leftovers of an interrupted type check

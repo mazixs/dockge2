@@ -1,8 +1,6 @@
 # Dockge2 master plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox ( - [ ] ) syntax for tracking.
-
-**Goal:** Keep in one living plan all of the owner's requirements, the agreed decisions and the
+**Goal:** Keep in one living plan all project requirements, accepted decisions and the
 stages of dockge2's development: updating the technology stack, security, automated tests, CI/CD,
 integrating useful upstream fixes and updating the Docker deployment safely.
 
@@ -18,13 +16,11 @@ Knex; better-sqlite3; Better Auth; YAML; the Node test runner; c8; Playwright; G
 (`extra/updater/`); Docker Compose; GitHub Actions.
 
 **Spec:** This file is the main journal of requirements and decisions and the only tracker. Every
-new requirement of the owner and every decision taken together is added here before the work on it
-starts.
+new project requirement and accepted decision is added here before implementation.
 
 ## How this file is kept
 
-Every new requirement of the owner or decision taken together is added to this file before it is
-implemented. Each entry records the date, the requirement or decision as worded, the reason, the
+Every new project requirement or accepted decision is recorded before implementation. Each entry records the date, the requirement or decision as worded, the reason, the
 tasks and files it touches, and its current status. A finished item is ticked only after the checks
 its task lists.
 
@@ -70,10 +66,10 @@ history of this file.
   commands are removed.
 - Do not add a new library when a built-in Node.js API or a dependency already in use solves the
   task reliably.
-- Backward compatibility with old data. On 2026-08-27 the owner lifted it: no version of the fork
-  had been released and there were no installations, so breaking schema changes were allowed, and
+- Backward compatibility with old data. On 2026-08-27 this requirement was lifted: no version
+  of the fork had been released and there were no installations, so breaking schema changes were allowed, and
   preferred when they removed a legacy path; compatibility was kept only where it came cheap. The
-  owner's reason: vulnerabilities most often move into a new version through migrations and kept
+  rationale: vulnerabilities most often move into a new version through migrations and kept
   old data. The premise no longer holds: releases 0.0.1 to 0.0.14 are published (the first on
   2026-09-19) and installations exist. Existing data is now carried forward. Schema changes are Knex
   migrations in `backend/migrations/` that run on the database of an earlier release, for example
@@ -353,7 +349,7 @@ docker compose up -d --pull always --force-recreate --wait --wait-timeout 60
 
 ### A scalable interface and the dashboard
 
-- The owner added a separate direction, not critical yet: update the interface and prioritise the
+- A separate direction, not critical yet: update the interface and prioritise the
   work by IC (`Impact × Confidence`), because the current navigation suits a small number of stacks
   but scales badly with many containers.
 - For StackList plan the grouping agent -> stack -> service -> instance, paged or compact output,
@@ -442,7 +438,7 @@ and Docker overview: open tasks").
 
 ### Brand and version
 
-- The owner's request at the time: the public name and the repository are `Dockge 2`, and new
+- The initial requirement: the public name and the repository are `Dockge 2`, and new
   released versions must not go back to major 1. The code then named the package `dockge`, version
   `1.5.0`, and the release scripts used `louislam/dockge:1`; this was to change through a separate
   compatibility map, not a global string replacement. Done on 2026-09-16: the package is `dockge2`,
@@ -472,9 +468,9 @@ open tasks" below.
 
 ### Stack backups: recipe, volumes, snapshots (backlog, 2026-09-15)
 
-The owner asked on 2026-09-15 whether containers could be backed up and tied to snapshots, so that
-a stack could be rolled back. The same message said that the task is large, needs disk space and
-control, and therefore goes to the backlog rather than into the current work.
+Stack backups and snapshots were added to the backlog on 2026-09-15 to support rollback.
+The task requires storage management, disk space and explicit controls; it is outside the current
+implementation scope.
 
 **The problem, refined.** A "copy of a container" is the wrong object: a container is disposable,
 and `docker commit` and `docker export` give a snapshot of a layer without the volumes, not
@@ -524,9 +520,9 @@ mount; this is a new capability, not an extension of an existing one.
 
 ### Interface languages: translation and RTL (backlog, 2026-09-16)
 
-The owner asked on 2026-09-16 to lead the project mainly in English and to keep a set of languages
-from the most widely spoken in the world. The set is approved and already cut down in the code; the
-rest is work on content, and it goes to the backlog.
+The decision of 2026-09-16 is to lead the project in English and support a set of widely spoken
+languages. The set is approved and already cut down in the code; the remaining content work
+is in the backlog.
 
 **Done and closed.** `languageList` was cut down to eleven languages: English, Russian, Simplified
 Chinese, Spanish, Arabic, French, Portuguese, Indonesian, Urdu, German, Japanese. 22 catalogues that
@@ -584,7 +580,7 @@ audits, closed for 0.0.14"). Of the keys listed here only `newUpdate` is left, a
 
 ### Documentation in English (backlog, 2026-09-16)
 
-The owner's decision of 2026-09-16: the project is led mainly in English, but partial Russian is
+The decision of 2026-09-16: the project is led mainly in English, but partial Russian is
 acceptable and is not a clean-up task of its own.
 
 Translated and closed on 2026-09-16: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md`,
@@ -610,8 +606,8 @@ What was left then, with its measured volume:
   take re-approving all 40 references (28 desktop, 12 phone) in one batch. Not decided.
 
 **Status:** backlog, low priority. The documentation, including `docs/design-system.md` and this
-plan, was translated on 2026-09-27; only comments in code remain in Russian. The owner said partial
-Russian is acceptable.
+plan, was translated on 2026-09-27; only comments in code remain in Russian. Partial Russian
+remains acceptable.
 
 ### Interface and Docker overview: open tasks (backlog, moved 2026-09-26)
 
@@ -659,7 +655,7 @@ minimum memory requirements until this passes.
   through the gate; only local runs and the VPS see it. The lower bound `minCompose` 2.20.0 is not
   checked at all. Proposal: a second pass of `docker.sh`, `managed.sh` and `unmanaged.sh` with the
   5.5.1 plugin pinned by sha256 in `$DOCKER_CONFIG/cli-plugins`, keeping 2.38 as the old host. The
-  cost is a longer gate. Not done until the owner decides.
+  cost is a longer gate. Requires a separate scope decision before implementation.
 
 ### Visual audit of 2026-09-27 (backlog)
 
@@ -865,10 +861,10 @@ overview: open tasks".
 
 ### 2026-08-26: upstream pull requests and one plan
 
-- The owner clarified that upstream pull requests need not be rejected: we do not own the main
+- Upstream pull requests need not be rejected: we do not own the main
   repository and can integrate useful changes into our own branch. #997 and #979 are integrated;
   #950 and #991 are adapted to the current architecture and tests.
-- Every further requirement and joint decision is kept in this file. The upstream fixes got a
+- Every further requirement and project decision is kept in this file. The upstream fixes got a
   separate plan (deleted on 2026-09-26 with the other finished plans).
 
 ### 2026-08-26: updating the Docker deployment
@@ -892,24 +888,24 @@ overview: open tasks".
 
 ### 2026-08-26: console, statuses, env and secrets, Compose from Git
 
-- The owner made `Ctrl+V`, `Ctrl+Shift+V` and paste from the right-click menu mandatory in the
-  container console: without them, debugging with AI needs a separate terminal. Decision: an
+- `Ctrl+V`, `Ctrl+Shift+V` and paste from the right-click menu are required in the container
+  console: without them, debugging with AI needs a separate terminal. Decision: an
   explicit "Paste" menu item, the `paste` event and an xterm key handler, tested in a real browser.
 - `Switch to sh` only changed a route parameter and reused the existing PTY. Decision: a separate
   shell session, the old one detached, and an allow-list of `sh` / `bash`.
-- The owner asked not to call a stack `inactive` or "dead" when only some services are missing or
+- A stack must not be called `inactive` or "dead" when only some services are missing or
   show `N/A`. Decision: aggregation by service and a separate `ATTENTION` naming the problem
   instances.
-- The owner asked for `.secret`, for named env files (`.env.product`, `.env.dev`) and for choosing
-  the main YAML. Decision: a typed file configuration, safe names inside the stack directory, and
+- Required: `.secret`, named env files (`.env.product`, `.env.dev`) and a selectable main YAML.
+  Decision: a typed file configuration, safe names inside the stack directory, and
   the CLI `--env-file`, the service `env_file` and Compose secrets kept apart.
-- The owner reported that deploying from Git breaks YAML and adds `networks: {}`. Decision: the
+- Reported defect: deploying from Git rewrites YAML and adds `networks: {}`. Decision: the
   editor stops rewriting YAML, `-f` becomes explicit, and a safe Git adapter comes later. The
   canonical output of Compose is never saved back.
 
 ### 2026-08-26: a scalable interface, the dashboard, global Docker and the brand
 
-- The owner added a P2/P3 direction: an interface that stays convenient with many agents, stacks and
+- Added a P2/P3 direction: an interface that stays convenient with many agents, stacks and
   containers, prioritised by IC. IC is `Impact × Confidence`, each 1-5; effort and security risk are
   stated separately.
 - With no agent selected, the main area shows a global dashboard: agents, stacks and containers by
@@ -927,7 +923,7 @@ overview: open tasks".
 - Containers outside the stacks directory may be shown, but inventory and control are separate
   settings. The default is managed-only control; all-readonly is turned on separately, all-control
   needs a capability and a confirmation.
-- The owner asked for the public name Dockge 2 and numbering from major 2. Decision: the display
+- Initial requirement: the public name Dockge 2 and numbering from major 2. Decision: the display
   name is `Dockge 2`, the first stable version `2.0.0`; the technical `dockge`, `DOCKGE_*` and the
   upstream image stay until there is a compatibility map and our own registry. Changed on 2026-09-19
   (see "Global Constraints"): the first publication came out as `0.0.1`, and `2.0.0` is kept for the
@@ -952,8 +948,8 @@ overview: open tasks".
   `docker compose ps --all` with Health and ExitCode.
 - A one-shot life cycle needs an explicit marking. An unmarked `exited(0)` next to a running service
   gives `ATTENTION` with a reason, not `RUNNING`. This replaces the earlier wording from upstream
-  #806 ("running + exited(0) = RUNNING"), because the owner asked not to guess which services are
-  one-shot.
+  #806 ("running + exited(0) = RUNNING"), because a one-shot service must be marked
+  explicitly.
 - The home page did not render: vue-i18n 11 removed `$tc`. It became `$t(key, n)`, checked against
   the real library.
 
@@ -978,7 +974,7 @@ overview: open tasks".
 
 ### 2026-08-26: `main` as the main branch
 
-- The owner decided that the fork's main branch is `main`, not `master`.
+- The fork's main branch is `main`, not `master`.
 - `npm run update-docker` pulls `origin/main` by default; `--branch=<name>` accepts only a safe ref
   name, so it cannot carry Git options, a path or shell syntax. Replaced later by `update-dockge.sh`
   and the Go updater (see "Current state").
@@ -1095,8 +1091,8 @@ keys duplicated on an edit; statuses diverging with `COMPOSE_PROJECT_NAME` in an
 
 ### 2026-08-27: backward compatibility dropped before 2.0.0
 
-- The owner lifted the requirement to stay compatible with old data and the old schema: there have
-  been no releases and there are no installations.
+- Compatibility with old data and the old schema was not required at that point: there had
+  been no releases and there were no installations.
 - For authentication this means the old `user` table, bcrypt hashes, the browser JWT and the
   `login` / `loginByToken` events are removed outright instead of migrated. Less code is less attack
   surface.
@@ -1159,7 +1155,7 @@ dropped before 2.0.0.
 
 ### 2026-08-27: the design system fixed
 
-- The owner chose the "list and inspector" frame and the order of work: the paste screen first, then
+- Selected the "list and inspector" frame and the order of work: the paste screen first, then
   the rest. This followed four directions, four layouts of the "Control desk" direction and two
   independent reviews: a heuristic design review scored 22/40, and browser measurements found four
   contrast failures, 38 targets smaller than 24 px and no mobile layout.
@@ -1306,8 +1302,8 @@ content: the row showed only a dot and a name.
 
 ### 2026-08-28: matching the mockup by picture
 
-The owner said it still did not look like the mockup. The mockup and the build were captured in one
-browser and compared in one picture: the difference was in character, not data.
+The interface still differed from the mockup. Both were captured in one browser and compared
+in one picture: the difference was in character, not data.
 
 - The row became one line with the state word in hidden text and the dot's tooltip, so names line up
   as in the mockup; availability in words and the attention bar kept colour from being the only
@@ -1352,7 +1348,7 @@ browser and compared in one picture: the difference was in character, not data.
 
 ### 2026-08-31: the layout rearranged so the work has room
 
-The owner found the interface uncomfortable: the list was smeared across 1600 px while the
+The layout gave the list 1600 px while the
 inspector with the actions was squeezed into 400 px. This overrides the "Frame 1" proportions: the
 mockup was drawn before the panel had anything to do.
 
@@ -1371,8 +1367,8 @@ mockup was drawn before the panel had anything to do.
 
 ### 2026-09-13: files and logs became tabs, the bottom dock removed
 
-The owner said the files led away to another page and the log popped up from below and got in the
-way. The chosen option: no bottom panel at all.
+The files led away to another page, and the log opened from below and obscured the work area.
+The chosen option: no bottom panel at all.
 
 - **Overview, Files and Logs are tabs of one stack page.** Their routes render the same
   `StackInspector.vue`, so the router reuses the instance and only the work area changes. A static
@@ -1390,7 +1386,7 @@ way. The chosen option: no bottom panel at all.
 
 ### 2026-09-14: logs and files brought to the mockup
 
-The owner showed mockup frames of the log, the files and the Git comparison; the first two were
+Reference mockups covered the log, the files and the Git comparison; the first two were
 brought to the third. The rules come from `source.css` of the frozen mockup export (removed from the
 tree later, see 2026-09-26: documentation cleanup), expressed in our tokens; the mockup is never
 imported into the application.
@@ -1407,7 +1403,7 @@ imported into the application.
 
 ### 2026-09-14: the log separated from the container terminal
 
-The owner: the log is for output and errors; a bash or sh shell is something else and belongs in its
+The log is for output and errors; a bash or sh shell is something else and belongs in its
 own tab after the log.
 
 - **Four tabs:** Overview, Files, Logs, Terminal, all on the same `StackInspector.vue`.
@@ -1424,8 +1420,8 @@ own tab after the log.
 
 ### 2026-09-14: command progress shown on the stack page
 
-The owner asked where the output of start and restart (`[+] Running 2/2`,
-`✔ Container ... Removed`, `[+] Pulling 13/13`) is shown. In Dockge 1 it is a console under the
+Start and restart output (`[+] Running 2/2`, `✔ Container ... Removed`, `[+] Pulling 13/13`)
+needs a visible location on the stack page. In Dockge 1 it is a console under the
 action buttons, and it stayed there.
 
 - **Progress sits under the stack header, above the tabs** (`StackProgress.vue`), visible from any
@@ -1442,8 +1438,8 @@ action buttons, and it stayed there.
 
 ### 2026-09-14: progress speaks in steps, the terminal waits its turn
 
-The owner: "the terminal puts people off, but the terminal is needed for the work". As in Ubuntu,
-the terminal does not appear until the person calls it or an error happens.
+Detailed terminal output is available on demand. At this stage the terminal appeared only when
+requested or when an error occurred; the later run-strip design made opening it explicit.
 
 - **Steps instead of output.** `common/compose-progress.ts` parses the stream into resources: kind
   (container, network, volume, image), name, verb, seconds. Compose redraws its block in a TTY, so
@@ -1483,15 +1479,15 @@ have no table. So the duplicated part went to the table and the rest shrank to o
   strip leaves no hole in the page column.
 - **The full output is a Bootstrap modal** with permanent markup (as `Confirm.vue`), so its terminal
   never unmounts or loses the socket; the grid is fitted on `shown.bs.modal`. It never opens by
-  itself, even on a failure: the person presses the button, as the owner asked. "Last command output"
+  itself, even on a failure: the person presses the button. "Last command output"
   in the stack's "More" menu reopens it.
 - The verbs live in `frontend/src/progress-labels.ts`, shared by the strip and the services table.
   `StateChip` has a `busy` flag; under `prefers-reduced-motion` the dot stops and the word stays.
 
 ### 2026-09-14: one panel anatomy on the Files, Logs and Terminal tabs
 
-The owner: "look at the files, the logs and the terminal ... the design seems very inconsistent".
-Measurements confirmed it: headers of 49, 35 and 33 px in three styles, two icon families, `h4`
+The Files, Logs and Terminal tabs used inconsistent designs. Measurements found headers of 49, 35
+and 33 px in three styles, two icon families, `h4`
 headings next to names in headers, a shadow on one panel only, radius 10 against 7, mixed button
 sizes, Bootstrap palette badges, a `select multiple` next to checkboxes, a red delete button in every
 row, two names for one action, a 50vh console over a quarter of an empty page.
@@ -1513,8 +1509,8 @@ row, two names for one action, a 50vh console over a quarter of an empty page.
 
 ### 2026-09-15: pass over every screen - one grid, one control, a phone without sideways scroll
 
-The owner asked to go through the whole design and make it convenient and beautiful. Every screen
-was checked in both themes at 1440 px and 375 px on the test scene.
+Every screen was checked for usability and visual consistency in both themes at 1440 px and 375 px
+on the test scene.
 
 - Global overview: one table per server with columns named once, each stack a group inside it; a
   table per stack repeated the headings and the columns did not line up.
@@ -1526,7 +1522,7 @@ was checked in both themes at 1440 px and 375 px on the test scene.
   session exists; before that the service picker in the panel body is the only offer.
 - Phone: the stack tab bar scrolls by itself instead of the page, and tab icons go below 480 px,
   because the name matters more.
-- **Env files became reachable.** The owner asked how to edit env at all: the env panel existed only
+- **Env files became reachable.** The env panel existed only
   in edit mode, so `.env` could not even be opened, and no env file could be created. Modelled as a
   hierarchical state machine of the tab (`Add` / `Manage{View, Edit{Structured, Text-only}}` plus an
   orthogonal `processing` region): a child state was creating an entity instead of changing
@@ -1539,11 +1535,11 @@ was checked in both themes at 1440 px and 375 px on the test scene.
   so a combined action would show the new name over the old text and save that text into the new
   file. While the selection is unsaved the form is closed ("Save the file selection first."): an
   unfinished transition blocks the next one.
-- **Truncation shows what it hides**, as the owner required when allowing it. `v-ellipsis-title`
+- **Truncation shows what it hides**. `v-ellipsis-title`
   sets `title` only while the text is really cut, since a tooltip repeating visible text is noise,
   and reads `innerText`, since a media query hides parts of some labels on the phone.
-- **Reference screenshots.** The owner: "keep a reference; treating every prompt as the reference is
-  bad practice". `npm run test:visual` compares 28 committed references (nine screens in both themes,
+- **Reference screenshots.** Committed references define the expected appearance.
+  `npm run test:visual` compares 28 committed references (nine screens in both themes,
   five of them also on a phone). Approval is a separate command, `npm run test:visual:approve`: a
   screenshot updated together with a change stops being a reference. The suite has its own
   configuration, apart from E2E, which needs Docker and would fail it for unrelated reasons. No
@@ -1668,9 +1664,8 @@ embedded database server would add a second storage system, a bootstrap paradox 
 database starts what it is meant to store), `pg_upgrade` between major versions, a new secret, and
 the loss of "copy the directory, move the instance". SQLite stays.
 
-The owner on backups: they must be manageable and enabled per stack, because a control node or a
-couple of containers with Telegram bots do not need them; the task needs design, system logic and
-disk space, so it goes to the backlog.
+Backups must be manageable and enabled per stack, because not every stack needs them. The task
+needs design, system logic and disk space, so it goes to the backlog.
 
 - What is copied is the recipe, the data and the image version, not the container; `docker commit`
   and `docker export` are not suitable. Recorded before implementation in "Stack backups" under
@@ -1684,8 +1679,7 @@ disk space, so it goes to the backlog.
 
 ### 2026-09-15: readiness for production tests
 
-The owner asked how ready the current state is for tests in production; it was checked by running
-things, not from memory.
+Production-test readiness was assessed through execution of the checks below.
 
 **Green.** Lint, strict types, unit tests, Docker integration and the visual suite. The production
 backend serves the built frontend itself, the database and `bootstrap-token` are created `0600`, the
@@ -1805,7 +1799,7 @@ nginx fragment is added.
 - Recovery after a process crash is not proven: Docker treats `docker kill` as a manual stop, so the
   policy does not fire, and a SIGKILL from inside does not kill PID 1 in its own namespace. Another
   way of checking is needed.
-- An install by someone who did not write the code: the real production test, left to the owner.
+- An install by someone who did not write the code: an external production test, still outstanding.
 
 **Incident.** A substring `grep` during the recovery check matched a container of an unrelated
 project on the same machine, and it was killed with the test containers; it was restarted with
@@ -1860,7 +1854,7 @@ nothing, and make the tests runnable from the repository.
 - **Confirmed.** Every job is green. A `git clone` of the public repository lands on `main`, `npm ci`
   leaves no change, and `npm run check` passes: the tests run from the repository.
 
-### 2026-09-16: the owner's spoken report on the live instance - 28 items
+### 2026-09-16: usability findings from a live instance - 28 items
 
 - **The first screen waited in silence.** Availability and stack details were read stack by stack,
   28 sequential round trips on five stacks; they run in parallel now, with errors still handled per
@@ -2152,11 +2146,11 @@ have.
 
 ### 2026-09-21: history rewritten
 
-A scan of every history object found the working-copy path in four old plans and the owner's
+A scan of every history object found the working-copy path in four old plans and a
 personal domain in seven files of `docs/design/`, long gone from HEAD. The history was rewritten
 with `git filter-repo --replace-text` in a separate mirror clone, both replaced by neutral
 placeholders; the HEAD tree, all 494 commits, their messages and authorship are unchanged. The
-author's email stayed at the owner's decision; contact details are not given in the documentation.
+author's email was retained in Git metadata; contact details are not given in the documentation.
 `main` and five tags were force-pushed after a backup; the GitHub releases stayed. Old commits stay
 reachable on GitHub by direct SHA until its garbage collection; only a request to GitHub support
 can speed that up.
@@ -2220,7 +2214,7 @@ Measured against the MCP best practices checklist (the latest specification, SDK
 
 ### 2026-09-24: the owner turns the console on, role audit
 
-- Reverses the decision "do not add a switch in the interface" (see "The panel's own container and the main console"), at the owner's request. An owner turns the console on in Settings, Security, confirming with the password; turning it off needs no password and ends the open sessions. `DOCKGE_ENABLE_CONSOLE=true` still forces it on, and the setting then cannot turn it off. "false" cannot be a lock: the frozen `docker-compose.yml` always passes it.
+- Reverses the decision "do not add a switch in the interface" (see "The panel's own container and the main console"). An owner turns the console on in Settings, Security, confirming with the password; turning it off needs no password and ends the open sessions. `DOCKGE_ENABLE_CONSOLE=true` still forces it on, and the setting then cannot turn it off. "false" cannot be a lock: the frozen `docker-compose.yml` always passes it.
 - No new privilege: an owner already reaches the host through compose (privileged services, host mounts).
 - One gate: `MainTerminal.state()` (variable or setting) and `MainTerminal.open()`, the only way to create the session. Each server decides for itself; an agent's console is turned on in the agent's own panel.
 - Role audit, by weight, with what was done the same day:
@@ -2235,14 +2229,14 @@ Measured against the MCP best practices checklist (the latest specification, SDK
 
 ### 2026-09-24: `DOCKGE_ENABLE_CONSOLE` is no longer read
 
-- Follows the entry above, at the user's request: the setting is the only switch. The variable forced the console on and hid the toggle, so an owner could not take the console back without editing `.env` and restarting.
+- Follows the entry above: the setting is the only switch. The variable forced the console on and hid the toggle, so an owner could not take the console back without editing `.env` and restarting.
 - No migration: an installation that ran with `DOCKGE_ENABLE_CONSOLE=true` comes up with the console off until an owner turns it on. The `--enableConsole` flag and the "forced" state of `checkMainTerminal` are gone; the gate is `MainTerminal.enabled()`.
 - The frozen `docker-compose.yml` still passes the variable and the updater still writes `DOCKGE_ENABLE_CONSOLE=false` into a new `.env`; both are harmless now.
 
 ### 2026-09-25: updating the panel from the web interface
 
 - Reverses "do not add a Socket.IO event that starts an update from the browser"
-  (Task 6, step 2 of the upstream fixes plan, deleted 2026-09-26) at the user's request. That rule was written for
+  (Task 6, step 2 of the upstream fixes plan, deleted 2026-09-26). That rule was written for
   `git pull` plus `docker compose`. The verified updater takes a version and installs only a release
   signed by the release workflow, and an owner already reaches the host through compose.
 - Decomposition: `docs/panel-update-statechart.md` (invariants, updater contract, observer,
@@ -2627,24 +2621,24 @@ modules load from their prebuilds either way.
 
 ### 2026-09-27: feedback on rc.4 from About
 
-The owner tried rc.4 on the review VPS and asked for four changes before the stable tag.
+Review of rc.4 identified four interface changes for the stable tag.
 
 - **One button for the check.** After **Check for updates** found a release, About showed a second
-  button, "Prepare update to X", that only started the dry run. The owner read it as a step the
-  panel could take by itself. The dry run now follows the check that found a newer release, and has
+  button, "Prepare update to X", that only started the dry run. This was an unnecessary manual
+  step. The dry run now follows the check that found a newer release, and has
   no button of its own; an expired or closed check is repeated with the same button. Opening About
   does not start a dry run: each one runs a helper container and verifies the release over the
   network, and a visit is not a request.
-- **The schema warning** says what happens in the owner's words: the version changes the data in
+- **The schema warning** explains the effect: the version changes the data in
   the database, a backup is made before the update, and a rollback restores it.
 - **Dialogs stand in the middle of the screen**, like the update overlay; the password dialog sat at
   the top. On a phone they stay at the top, so the on-screen keyboard does not cover the field.
-- **The step list of the overlay** is a segmented bar, chosen by the owner from four mockups
+- **The step list of the overlay** is a segmented bar, selected from four mockups
   (vertical timeline, stepper with a line, segmented bar, pills). Above it stand the number and name
   of the current step and the elapsed time; below it the names of the steps, which a narrow screen
   leaves to the screen reader. A rollback segment keeps the attention colour.
 
-0.0.14 goes out as the stable tag with these changes, without an rc.5: the owner's decision. The
+0.0.14 goes out as the stable tag with these changes, without a separate rc.5. The
 entry above said the stable tag would differ from rc.4 in the version only; these changes touch the
 page alone - About, the overlay, the dialog position and two strings - and none of the server, the
 updater, the release files or the migrations, which is what rc.4 and its gate were for. The stable
@@ -2654,10 +2648,9 @@ tag runs the whole release gate itself before `latest` moves off 0.0.13.
 
 A dry run on a fresh Debian host without Docker printed a single line, `Required command: docker`:
 `curl` and `sha256sum` had been checked silently, the loop stopped at the first missing command,
-and nothing said what to do. The owner asked for output that does not run together and for every
-prerequisite to be checked at the start. Of the layouts offered the owner chose sections with a
-status column (`ok`, `missing`, `failed`, `warning`) and the fix under the line, with colour in a
-terminal only.
+and nothing said what to do. The revised output checks every prerequisite at the start and
+separates the results into sections with a status column (`ok`, `missing`, `failed`, `warning`)
+and the fix under the line, with colour in a terminal only.
 
 - **The bootstrap** (`install.sh`) checks the platform and the `curl`, `sha256sum` and `docker`
   commands first and lists every unmet requirement at once, with a hint, before it downloads
@@ -2693,7 +2686,7 @@ to remove `.env` and `.dockge2` by hand. It is in the implementation plan.
 The README block downloaded the installer to `/tmp`, opened it in `less`, ran a dry run and then
 installed with `--yes`. Pasted whole, it installed right after the preview without a chance to
 stop, and on a shell without bracketed paste `less` took the rest of the paste as keystrokes. The
-owner asked for the simplest way in the README, since that is where people install from.
+README needed a single installation command that retained the confirmation step.
 
 - **The README shows** `curl -fsSL .../install.sh | sudo bash`. The updater already prints the
   plan and asks before any change, so the dry run and `--yes` left the README. Reading the script
@@ -2716,9 +2709,8 @@ already works through the pipe and asks its own question.
 
 ### 2026-09-27: the address and the setup code at the end
 
-The owner installed 0.0.14 on a fresh host with the one line and got "Update succeeded" and nothing
-about where to go next. The Done section of the unreleased updater was not enough either: it
-printed `http://SERVER:5001` and the command that shows the setup code, not the code.
+A fresh 0.0.14 installation ended with "Update succeeded" and no next step. The Done section of the
+unreleased updater was not enough either: it printed `http://SERVER:5001` and the command that shows the setup code, not the code.
 
 - **Addresses**: Done lists the IPv4 addresses of the host's interfaces, or its IPv6 ones when it
   has no IPv4, three at most, without loopback, link-local and Docker's bridges. When every one is
@@ -2736,10 +2728,10 @@ Checked on local Docker with an isolated project: the printed address opened the
 
 ### 2026-09-27: release 0.0.15
 
-The owner asked for 0.0.15 straight after the installer work, without a release candidate: it
+0.0.15 follows the installer work without a release candidate: it
 changes the installer, the updater's text and the documentation, not the panel, the migrations or
-the `--progress json` contract that the web update reads. The owner removed the 0.0.14 test
-installation with the uninstall commands, and the recovery-image command failed with "requires at
+the `--progress json` contract that the web update reads. Removing a 0.0.14 test installation
+with the documented uninstall commands exposed a recovery-image command failure with "requires at
 least 1 argument" on an installation that was never updated. Both image commands now go through
 `xargs -r`.
 
@@ -2748,8 +2740,8 @@ Not in this release: an interrupted fresh installation still cannot be repeated 
 
 ### 2026-09-27: a Git stack whose env file is not in Git
 
-The owner created a stack from a public repository whose Compose file has `env_file: .env` and
-whose repository carries only `.env.example`. Compose refused the missing file, the error was not
+Creating a stack from a repository with `env_file: .env` and only `.env.example` exposed a
+missing-environment handling defect. Compose refused the missing file, the error was not
 one the clone defers, and the panel said "Compose did not pass the check. Check the Compose file
 and the selected env files" on a screen that selects no env files.
 
@@ -2803,8 +2795,8 @@ deployment. The installer refused the existing `.env`, and neither `--update`, `
 ### 2026-09-27: deploy keys for private repositories
 
 A private repository needed an SSH key mounted into the container at install time, and the updater
-never changes the mounts of an existing installation. The owner chose keys created in the panel
-over mounting keys into an existing installation and over registry-style logins in the UI.
+never changes the mounts of an existing installation. The selected approach creates keys in the
+panel, without new mounts or registry-style logins in the UI.
 
 - The panel creates an ed25519 key per repository (`backend/git-deploy-key.ts`) on request only and
   shows the public line, its fingerprint and the host's deploy key page for GitHub, GitLab and
@@ -2825,3 +2817,14 @@ over mounting keys into an existing installation and over registry-style logins 
 
 Checked against github.com, gitlab.com and bitbucket.org with a fresh unregistered key, no
 `~/.ssh` and a key path with spaces: all three accepted the pinned host key and refused the key.
+
+### 2026-09-29: release 0.0.16 preparation
+
+The release includes repository deploy keys, explicit env-file creation from examples and recovery
+of an interrupted first installation. There are no new database migrations.
+
+- The documentation records project requirements and decisions without personal conversation
+  history. The master plan remains the only backlog; no separate audit or finished plan is added.
+- Local design reviews under `.impeccable/` are excluded from both Git and the image context.
+- The documentation privacy check recognises generic Git SSH examples on supported public hosts
+  while still rejecting personal email addresses and home paths.

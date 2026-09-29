@@ -44,6 +44,7 @@ npm-debug.log*
 .eslintcache
 .vite
 .claude/
+.impeccable/
 skills-lock.json
 
 
